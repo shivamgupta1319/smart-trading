@@ -8,6 +8,9 @@ from .swing.ema200_macd import EMA200MACDStrategy
 from .swing.bb_squeeze import BBSqueezeStrategy
 from .swing.rsi_divergence import RSIDivergenceStrategy
 from .swing.golden_cross import GoldenCrossStrategy
+from .swing.supertrend_ema import SuperTrendEMAStrategy
+from .swing.bollinger_mean_reversion import BollingerMeanReversionStrategy
+from .swing.macd_stoch_confluence import MacdStochConfluenceStrategy
 
 STRATEGY_REGISTRY = {
     "15m_ORB": ORB15mStrategy(),
@@ -20,6 +23,9 @@ STRATEGY_REGISTRY = {
     "BB_Squeeze": BBSqueezeStrategy(),
     "RSI_Divergence": RSIDivergenceStrategy(),
     "Golden_Cross": GoldenCrossStrategy(),
+    "SuperTrend_EMA": SuperTrendEMAStrategy(),
+    "Bollinger_Mean_Reversion": BollingerMeanReversionStrategy(),
+    "MACD_Stoch_Confluence": MacdStochConfluenceStrategy(),
 }
 
 STRATEGY_TIMEFRAMES = {
@@ -33,4 +39,7 @@ STRATEGY_TIMEFRAMES = {
     "BB_Squeeze": "1D",
     "RSI_Divergence": "1D",
     "Golden_Cross": "1D",
+    "SuperTrend_EMA": "1D",
+    "Bollinger_Mean_Reversion": "1D",
+    "MACD_Stoch_Confluence": "1D",
 }

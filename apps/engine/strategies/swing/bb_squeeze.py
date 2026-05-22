@@ -12,9 +12,9 @@ class BBSqueezeStrategy(BaseStrategy):
         df = df.copy()
 
         bb = ta.bbands(df['Close'], length=20, std=2)
-        df['bb_upper'] = bb['BBU_20_2.0']
-        df['bb_lower'] = bb['BBL_20_2.0']
-        df['bb_mid'] = bb['BBM_20_2.0']
+        df['bb_upper'] = bb['BBU_20_2.0_2.0']
+        df['bb_lower'] = bb['BBL_20_2.0_2.0']
+        df['bb_mid'] = bb['BBM_20_2.0_2.0']
         df['bb_bandwidth'] = (df['bb_upper'] - df['bb_lower']) / df['bb_mid']
 
         # 6-month low of bandwidth (120 trading days)

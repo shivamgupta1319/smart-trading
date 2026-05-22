@@ -17,7 +17,7 @@ class BaseStrategy(ABC):
         pass
 
     def run_backtest(self, df: pd.DataFrame) -> dict:
-        """Run the strategy and compute backtest metrics."""
+        """Run the strategy and compute backtest metrics with a running bankroll."""
         df = df.copy()
         df = self.generate_signals(df)
 
@@ -27,21 +27,31 @@ class BaseStrategy(ABC):
         sl = 0.0
         tp = 0.0
         trade_type = 0
-        capital_per_trade = 100000.0
+        
+        initial_capital = 100000.0
+        current_capital = initial_capital
+        max_position_size = 100000.0
+        
+        peak = initial_capital
+        max_dd = 0.0
 
         for i, row in df.iterrows():
+            if current_capital <= 0:
+                break # Bankrupt
+
             if not in_trade and row.get('signal', 0) != 0:
                 in_trade = True
                 entry_price = row['Close']
                 sl = row.get('stop_loss', entry_price * 0.98)
                 tp = row.get('target', entry_price * 1.04)
                 trade_type = row['signal']
+                invested_amount = min(current_capital, max_position_size)
             elif in_trade:
                 close = row['Close']
                 hit_sl = (trade_type == 1 and close <= sl) or (trade_type == -1 and close >= sl)
                 hit_tp = (trade_type == 1 and close >= tp) or (trade_type == -1 and close <= tp)
                 if hit_sl or hit_tp:
-                    shares = capital_per_trade / entry_price
+                    shares = invested_amount / entry_price
                     exit_price = tp if hit_tp else sl
                     
                     if trade_type == 1:
@@ -50,7 +60,15 @@ class BaseStrategy(ABC):
                         pnl_rs = (entry_price - exit_price) * shares
                         
                     trades.append(pnl_rs)
+                    current_capital += pnl_rs
                     in_trade = False
+
+                    # Update equity curve
+                    if current_capital > peak:
+                        peak = current_capital
+                    dd = peak - current_capital
+                    if dd > max_dd:
+                        max_dd = dd
 
         if not trades:
             return {'winRate': 0.0, 'totalTrades': 0, 'netProfit': 0.0, 'maxDrawdown': 0.0, 'roiPercentage': 0.0}
@@ -58,20 +76,8 @@ class BaseStrategy(ABC):
         wins = [t for t in trades if t > 0]
         win_rate = len(wins) / len(trades) * 100
 
-        # Equity curve for max drawdown
-        equity = capital_per_trade
-        peak = capital_per_trade
-        max_dd = 0.0
-        for t in trades:
-            equity += t
-            if equity > peak:
-                peak = equity
-            dd = peak - equity
-            if dd > max_dd:
-                max_dd = dd
-
-        net_profit = sum(trades)
-        roi_percentage = (net_profit / capital_per_trade) * 100
+        net_profit = current_capital - initial_capital
+        roi_percentage = (net_profit / initial_capital) * 100
 
         return {
             'winRate': round(win_rate, 2),

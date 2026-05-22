@@ -12,6 +12,7 @@ class RSIDivergenceStrategy(BaseStrategy):
         df = df.copy()
         df['rsi14'] = ta.rsi(df['Close'], length=14)
         df['ema50'] = ta.ema(df['Close'], length=50)
+        df['atr14'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
 
         df['signal'] = 0
         df['stop_loss'] = 0.0
@@ -23,7 +24,7 @@ class RSIDivergenceStrategy(BaseStrategy):
             curr = df.iloc[i]
             window = df.iloc[i - lookback:i]
 
-            if pd.isna(curr['rsi14']) or pd.isna(curr['ema50']):
+            if pd.isna(curr['rsi14']) or pd.isna(curr['ema50']) or pd.isna(curr['atr14']):
                 continue
 
             # Find two lows in the window
@@ -49,8 +50,9 @@ class RSIDivergenceStrategy(BaseStrategy):
             if price_lower_low and rsi_higher_low:
                 # Entry: first green candle after divergence
                 if curr['Close'] > curr['Open']:
-                    sl = price_low2
-                    target = curr['ema50'] if not pd.isna(curr['ema50']) else curr['Close'] * 1.05
+                    sl = curr['Close'] - 2 * curr['atr14']
+                    rr = curr['Close'] - sl
+                    target = curr['Close'] + 2 * rr
                     df.iloc[i, df.columns.get_loc('signal')] = 1
                     df.iloc[i, df.columns.get_loc('stop_loss')] = sl
                     df.iloc[i, df.columns.get_loc('target')] = target
