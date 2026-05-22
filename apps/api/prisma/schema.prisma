@@ -1,0 +1,83 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Stock {
+  id           Int                  @id @default(autoincrement())
+  symbol       String               @unique
+  name         String
+  isActive     Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+
+  historicalData      HistoricalData[]
+  backtestReports     BacktestReport[]
+  activeConfiguration ActiveConfiguration?
+  liveSignals         LiveSignal[]
+}
+
+model HistoricalData {
+  id        Int      @id @default(autoincrement())
+  stockId   Int
+  timestamp DateTime
+  open      Float
+  high      Float
+  low       Float
+  close     Float
+  volume    Float
+  timeframe String   // "1D", "15m", "5m"
+
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@unique([stockId, timestamp, timeframe])
+  @@index([stockId, timeframe, timestamp])
+}
+
+model BacktestReport {
+  id           Int      @id @default(autoincrement())
+  stockId      Int
+  strategyName String
+  timeframe    String
+  winRate      Float
+  totalTrades  Int
+  maxDrawdown  Float
+  expectancy   Float
+  createdAt    DateTime @default(now())
+
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@index([stockId, strategyName])
+}
+
+model ActiveConfiguration {
+  id           Int    @id @default(autoincrement())
+  stockId      Int    @unique
+  strategyName String
+  timeframe    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+}
+
+model LiveSignal {
+  id           Int      @id @default(autoincrement())
+  stockId      Int
+  strategyName String
+  signalType   String   // "BUY" | "SELL"
+  entryPrice   Float
+  stopLoss     Float
+  target       Float
+  timestamp    DateTime @default(now())
+  status       String   @default("ACTIVE") // "ACTIVE" | "CLOSED"
+
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@index([stockId, status])
+}
