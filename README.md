@@ -1,6 +1,6 @@
 # ⚡ SmartTrader — Zero-Cost Algorithmic Trading Scanner
 
-A full-stack local platform for Indian stock market (NSE) algorithmic trading. Backtests 10 strategies, assigns the best to a stock, and monitors live markets every 60 seconds to fire WebSocket alerts.
+A full-stack local platform for Indian stock market (NSE) algorithmic trading. Backtests 13 strategies, allows assigning multiple strategies to a stock, and monitors live markets every 60 seconds to fire WebSocket alerts.
 
 ## Architecture
 
@@ -17,8 +17,8 @@ apps/
 # Start everything
 docker-compose up -d
 
-# Apply database migrations
-docker exec smart-trading-api npx prisma migrate dev --schema=apps/api/prisma/schema.prisma
+# Apply database migrations (or push schema)
+docker exec smart-trading-api npx prisma db push --accept-data-loss
 
 # Start live scanner (separate terminal)
 docker exec -it smart-trading-engine python scanner/live_scanner.py
@@ -33,10 +33,10 @@ Then open http://localhost:5173
 docker-compose up postgres -d
 ```
 
-### 2. Run Prisma Migrations
+### 2. Push Prisma Schema
 ```bash
-DATABASE_URL=postgresql://trader:trader@localhost:5432/smart_trading \
-  npx prisma migrate dev --schema=apps/api/prisma/schema.prisma --name init
+DATABASE_URL=postgresql://trader:trader@localhost:5470/smart_trading \
+  npx prisma db push --accept-data-loss
 ```
 
 ### 3. Start NestJS API
@@ -63,7 +63,7 @@ cd apps/engine
 python scanner/live_scanner.py
 ```
 
-## The 10 Strategies
+## The 13 Strategies
 
 ### Intraday (5m / 15m)
 1. **15m ORB** — Opening Range Breakout
@@ -78,6 +78,9 @@ python scanner/live_scanner.py
 8. **Bollinger Band Squeeze** — Squeeze breakout
 9. **RSI Divergence** — Bullish hidden divergence
 10. **50/200 Golden Cross** — Classic trend-change signal
+11. **SuperTrend EMA** — Supertrend + EMA filter
+12. **Bollinger Mean Reversion** — Mean reversion inside bands
+13. **Price Action** — Simple support/resistance breakout
 
 ## Documentation
 
@@ -94,13 +97,13 @@ python scanner/live_scanner.py
 
 **apps/api/.env**
 ```
-DATABASE_URL=postgresql://trader:trader@localhost:5432/smart_trading
-ENGINE_URL=http://localhost:8000
+DATABASE_URL=postgresql://trader:trader@localhost:5470/smart_trading
+ENGINE_URL=http://smart-trading-engine:8000
 PORT=3000
 ```
 
 **apps/engine/.env**
 ```
-DATABASE_URL=postgresql://trader:trader@localhost:5432/smart_trading
-NESTJS_SIGNAL_URL=http://localhost:3000/api/signals/new
+DATABASE_URL=postgresql://trader:trader@localhost:5470/smart_trading
+NESTJS_SIGNAL_URL=http://smart-trading-api:3000/api/signals/new
 ```

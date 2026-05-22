@@ -49,19 +49,19 @@ Allow the user to select any NSE stock and strategy, run a backtest, see results
 │  │ VWAP ST  │   61.0%    │    142    │    ₹2,100  ★   │ │
 │  └──────────┴────────────┴───────────┴────────────────┘ │
 │                                                         │
-│  [Set VWAP+Supertrend as Active Strategy for RELIANCE] ►│
+│  [Set as Live Strategy] [Live (Click to Remove)]        │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ### User Flow
 1. User selects a stock from the dropdown (pre-populated from DB, or type to search)
 2. Clicks **Fetch History** → backend downloads 5y/60d data via yfinance and stores it
-3. Selects a strategy from the dropdown (10 options grouped: Intraday / Swing)
+3. Selects a strategy from the dropdown (13 options grouped: Intraday / Swing)
 4. Clicks **Run Backtest**
 5. Loading spinner shows during computation (~5–15 seconds)
 6. Results table populates with metrics, best strategy is starred (★)
-7. User clicks **Set as Active Strategy** → writes to `ActiveConfiguration` table
-8. Toast confirms: *"✓ RELIANCE.NS will now be monitored with VWAP+Supertrend"*
+7. User clicks **Set as Live Strategy** (can select multiple) → writes to `ActiveConfiguration` table
+8. Toast confirms: *"✓ VWAP+Supertrend is now set for Live Signals!"*
 
 ### States
 - **Empty**: Prompt to select a stock and strategy

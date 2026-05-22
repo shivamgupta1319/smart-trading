@@ -7,7 +7,7 @@
 │                      Docker Compose                         │
 │  ┌────────────┐   ┌────────────┐   ┌──────────────────┐    │
 │  │  frontend  │   │    api     │   │     engine       │    │
-│  │ React/Vite │   │  NestJS    │   │ Python/FastAPI   │    │
+│  │ React/Nginx│   │  NestJS    │   │ Python/FastAPI   │    │
 │  │  Port 5173 │   │  Port 3000 │   │   Port 8000      │    │
 │  └─────┬──────┘   └─────┬──────┘   └───────┬──────────┘    │
 │        │ WebSocket       │ HTTP Proxy        │ SQLAlchemy    │
@@ -15,7 +15,7 @@
 │                          │                                  │
 │                 ┌────────▼────────┐                         │
 │                 │   PostgreSQL    │                         │
-│                 │   Port 5432     │                         │
+│                 │   Port 5470     │                         │
 │                 └─────────────────┘                         │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -25,7 +25,7 @@
 ## Services
 
 ### React Frontend (`apps/frontend`) — Port 5173
-- React 18 + TypeScript + Vite
+- React 18 + TypeScript + Vite (served via Nginx in Docker)
 - Vanilla CSS dark terminal theme
 - Pages: Backtest Arena, Live Scanner
 
@@ -37,8 +37,8 @@
 - FastAPI, pandas-ta, yfinance, SQLAlchemy
 - Handles data fetching, backtesting, live scanning
 
-### PostgreSQL — Port 5432
-- Schema: Stock, HistoricalData, BacktestReport, ActiveConfiguration, LiveSignal
+### PostgreSQL — Port 5470
+- Schema: Stock, HistoricalData, BacktestReport, ActiveConfiguration (Many-to-One with Stock), LiveSignal
 
 ---
 
@@ -47,8 +47,8 @@
 ### Backtest Flow
 ```
 User → React → POST /api/engine/run-backtest (NestJS proxy)
-→ Python loads HistoricalData → runs strategy
-→ saves BacktestReport → returns metrics → React displays
+→ Python loads HistoricalData → runs 13 strategies
+→ saves BacktestReports → returns metrics → React displays
 ```
 
 ### Live Alert Flow

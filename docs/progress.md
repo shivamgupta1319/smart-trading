@@ -65,13 +65,19 @@
 
 - [x] Resolve PostgreSQL port mapping and initialize schema
 - [x] Start PostgreSQL: `docker compose up postgres -d`
-- [x] Run migrations: `prisma migrate dev`
-- [x] Start API + Engine + Frontend (`npx nx serve` & `docker compose up engine`)
+- [x] Run migrations: `prisma db push`
+- [x] Start API + Engine + Frontend (`docker compose up`)
 - [x] Test end-to-end data flow (Database -> Engine -> API -> Frontend)
-- [ ] Add RELIANCE stock via UI
-- [ ] Fetch history, run backtest
-- [ ] Set active strategy, start live scanner
-- [ ] Verify WebSocket alert flow end-to-end
+- [x] Fetch history, run backtest
+- [x] Set active strategy, start live scanner
+- [x] Verify WebSocket alert flow end-to-end
+
+## Phase 5 — Enhancements & Optimizations ✅
+- [x] Fix Pandas-TA column name mismatches in Bollinger Bands and Supertrend
+- [x] Optimize Dockerfile build sizes (Frontend < 100MB, API ~800MB, Engine ~700MB)
+- [x] Convert ActiveConfiguration to support multiple live strategies per stock
+- [x] Seed NSE Stocks into Database for auto-complete
+- [x] Update UI flows to remove unnecessary forms and optimize UX
 
 ## What's Running
 - **NestJS**: `npx nx serve api` (port 3000)
