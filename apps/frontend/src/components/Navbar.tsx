@@ -25,10 +25,10 @@ export function Navbar() {
 
       <div className="navbar-links">
         <NavLink
-          to="/backtest"
+          to="/dashboard"
           className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
         >
-          📊 Backtest Arena
+          📊 Dashboard
         </NavLink>
         <NavLink
           to="/scanner"
