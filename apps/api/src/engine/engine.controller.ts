@@ -16,4 +16,16 @@ export class EngineController {
     const response = await axios.post(`${this.engineUrl}/api/engine/run-backtest`, body);
     return response.data;
   }
+
+  @Post('run-all-strategies')
+  async runAllStrategies(@Body() body: { symbol: string }) {
+    const response = await axios.post(`${this.engineUrl}/api/engine/run-all-strategies`, body);
+    return response.data;
+  }
+
+  @Post('live-prices')
+  async getLivePrices(@Body() body: { symbols: string[] }) {
+    const response = await axios.post(`${this.engineUrl}/api/engine/live-prices`, body);
+    return response.data;
+  }
 }

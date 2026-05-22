@@ -5,9 +5,6 @@ export class CreateStockDto {
   @IsNotEmpty()
   symbol: string;
 
-  @IsString()
-  @IsNotEmpty()
-  name: string;
 
   @IsBoolean()
   @IsOptional()

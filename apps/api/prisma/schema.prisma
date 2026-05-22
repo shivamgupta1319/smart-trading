@@ -9,10 +9,17 @@ datasource db {
   provider = "postgresql"
 }
 
+model NseStock {
+  id           Int      @id @default(autoincrement())
+  symbol       String   @unique
+  companyName  String
+  sector       String?
+  createdAt    DateTime @default(now())
+}
+
 model Stock {
   id           Int                  @id @default(autoincrement())
   symbol       String               @unique
-  name         String
   isActive     Boolean              @default(true)
   createdAt    DateTime             @default(now())
 
@@ -46,8 +53,9 @@ model BacktestReport {
   timeframe    String
   winRate      Float
   totalTrades  Int
+  netProfit    Float
   maxDrawdown  Float
-  expectancy   Float
+  roiPercentage Float
   createdAt    DateTime @default(now())
 
   stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
