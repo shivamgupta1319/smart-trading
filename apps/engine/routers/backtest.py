@@ -51,12 +51,13 @@ def save_report(stock_id: int, strategy_name: str, timeframe: str, metrics: dict
     with engine.connect() as conn:
         conn.execute(text("""
             INSERT INTO "BacktestReport"
-              ("stockId", "strategyName", "timeframe", "winRate", "totalTrades", "maxDrawdown", "expectancy", "createdAt")
-            VALUES (:sid, :sn, :tf, :wr, :tt, :md, :ex, NOW())
+              ("stockId", "strategyName", "timeframe", "winRate", "totalTrades", "maxDrawdown", "netProfit", "roiPercentage", "createdAt")
+            VALUES (:sid, :sn, :tf, :wr, :tt, :md, :np, :roi, NOW())
         """), {
             "sid": stock_id, "sn": strategy_name, "tf": timeframe,
             "wr": float(metrics['winRate']), "tt": int(metrics['totalTrades']),
-            "md": float(metrics['maxDrawdown']), "ex": float(metrics['expectancy'])
+            "md": float(metrics['maxDrawdown']), "np": float(metrics['netProfit']),
+            "roi": float(metrics['roiPercentage'])
         })
         conn.commit()
 
@@ -87,4 +88,41 @@ def run_backtest(req: BacktestRequest):
         "strategy": req.strategy,
         "timeframe": req.timeframe,
         "metrics": metrics,
+    }
+
+
+class RunAllStrategiesRequest(BaseModel):
+    symbol: str
+
+@router.post("/run-all-strategies")
+def run_all_strategies(req: RunAllStrategiesRequest):
+    symbol = req.symbol.upper()
+    stock_id = get_stock_id(symbol)
+
+    results = []
+
+    # Iterate through all registered strategies
+    for strategy_name, strategy in STRATEGY_REGISTRY.items():
+        timeframe = getattr(strategy, 'timeframe', '1D') # fallback to 1D
+        
+        try:
+            df = load_historical(stock_id, timeframe)
+            if len(df) < 30:
+                continue
+
+            metrics = strategy.run_backtest(df)
+            save_report(stock_id, strategy_name, timeframe, metrics)
+            
+            results.append({
+                "strategy": strategy_name,
+                "timeframe": timeframe,
+                "metrics": metrics
+            })
+        except Exception as e:
+            # Skip if no history for that timeframe or other error
+            pass
+
+    return {
+        "symbol": symbol,
+        "results": results
     }

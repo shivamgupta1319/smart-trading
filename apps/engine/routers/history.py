@@ -89,3 +89,19 @@ def fetch_history(req: FetchHistoryRequest):
         time.sleep(1)  # Rate limit friendly
 
     return {"symbol": original_symbol, "results": results}
+
+class LivePriceRequest(BaseModel):
+    symbols: List[str]
+
+@router.post("/live-prices")
+def get_live_prices(req: LivePriceRequest):
+    results = {}
+    for sym in req.symbols:
+        yf_sym = sym if sym.endswith(".NS") else sym + ".NS"
+        try:
+            ticker = yf.Ticker(yf_sym)
+            # using fast_info is much quicker for live prices
+            results[sym] = round(ticker.fast_info.last_price, 2)
+        except Exception:
+            results[sym] = None
+    return results
