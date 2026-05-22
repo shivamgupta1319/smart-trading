@@ -1,0 +1,9 @@
+.nx/installation
+.nx/cache
+.nx/workspace-data
+.nx/self-healing
+vite.config.*.timestamp*
+node_modules
+dist
+.env
+venv
