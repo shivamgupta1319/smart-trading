@@ -14,10 +14,17 @@ export class ConfigsService {
   }
 
   async upsert(dto: CreateConfigDto) {
+    const stock = await this.prisma.stock.findUnique({ where: { symbol: dto.symbol } });
+    if (!stock) throw new NotFoundException(`Stock ${dto.symbol} not found`);
+
     return this.prisma.activeConfiguration.upsert({
-      where: { stockId: dto.stockId },
+      where: { stockId: stock.id },
       update: { strategyName: dto.strategyName, timeframe: dto.timeframe },
-      create: dto,
+      create: {
+        stockId: stock.id,
+        strategyName: dto.strategyName,
+        timeframe: dto.timeframe
+      },
       include: { stock: true },
     });
   }
