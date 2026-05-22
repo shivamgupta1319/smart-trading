@@ -21,12 +21,21 @@ export function StockDetail() {
   const navigate = useNavigate();
   const [results, setResults] = useState<BacktestResult[]>([]);
   const [running, setRunning] = useState(false);
+  const [activeStrategies, setActiveStrategies] = useState<string[]>([]);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
   const showMessage = (type: string, text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 4000);
   };
+
+  useEffect(() => {
+    if (symbol) {
+      axios.get(`${API}/api/configs/${symbol}`).then(res => {
+        setActiveStrategies(res.data.map((c: any) => c.strategyName));
+      }).catch(err => console.error("Failed to load active strategies:", err));
+    }
+  }, [symbol]);
 
   const runFullBacktest = async () => {
     if (!symbol) return;
@@ -49,10 +58,16 @@ export function StockDetail() {
 
   const handleSetLive = async (strategy: string, timeframe: string) => {
     try {
-      await axios.post(`${API}/api/configs`, { symbol, strategyName: strategy, timeframe });
-      showMessage('success', `${strategy} is now set for Live Signals!`);
+      const res = await axios.post(`${API}/api/configs/toggle`, { symbol, strategyName: strategy, timeframe });
+      if (res.data.status === 'added') {
+        setActiveStrategies(prev => [...prev, strategy]);
+        showMessage('success', `${strategy} is now set for Live Signals!`);
+      } else {
+        setActiveStrategies(prev => prev.filter(s => s !== strategy));
+        showMessage('success', `${strategy} is removed from Live Signals!`);
+      }
     } catch (e: any) {
-      showMessage('error', e.response?.data?.message || 'Failed to set live strategy.');
+      showMessage('error', e.response?.data?.message || 'Failed to toggle live strategy.');
     }
   };
 
@@ -152,12 +167,18 @@ export function StockDetail() {
                   </div>
                 </div>
                 <button 
-                  className="btn btn-secondary" 
+                  className={`btn ${activeStrategies.includes(r.strategy) ? 'btn-primary' : 'btn-secondary'}`} 
                   style={{ width: '100%' }}
                   onClick={() => handleSetLive(r.strategy, r.timeframe)}
                 >
-                  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                  <span>Set as Live Strategy</span>
+                  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {activeStrategies.includes(r.strategy) ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    )}
+                  </svg>
+                  <span>{activeStrategies.includes(r.strategy) ? 'Live (Click to Remove)' : 'Set as Live Strategy'}</span>
                 </button>
               </div>
             ))}

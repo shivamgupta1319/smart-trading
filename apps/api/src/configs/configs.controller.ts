@@ -11,9 +11,14 @@ export class ConfigsController {
     return this.configsService.findAll();
   }
 
-  @Post()
-  upsert(@Body() dto: CreateConfigDto) {
-    return this.configsService.upsert(dto);
+  @Get(':symbol')
+  findBySymbol(@Param('symbol') symbol: string) {
+    return this.configsService.findBySymbol(symbol);
+  }
+
+  @Post('toggle')
+  toggle(@Body() dto: CreateConfigDto) {
+    return this.configsService.toggle(dto);
   }
 
   @Delete(':id')

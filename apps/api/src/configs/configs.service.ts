@@ -13,20 +13,40 @@ export class ConfigsService {
     });
   }
 
-  async upsert(dto: CreateConfigDto) {
+  async findBySymbol(symbol: string) {
+    const stock = await this.prisma.stock.findUnique({ where: { symbol } });
+    if (!stock) throw new NotFoundException(`Stock ${symbol} not found`);
+
+    return this.prisma.activeConfiguration.findMany({
+      where: { stockId: stock.id },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async toggle(dto: CreateConfigDto) {
     const stock = await this.prisma.stock.findUnique({ where: { symbol: dto.symbol } });
     if (!stock) throw new NotFoundException(`Stock ${dto.symbol} not found`);
 
-    return this.prisma.activeConfiguration.upsert({
-      where: { stockId: stock.id },
-      update: { strategyName: dto.strategyName, timeframe: dto.timeframe },
-      create: {
-        stockId: stock.id,
-        strategyName: dto.strategyName,
-        timeframe: dto.timeframe
-      },
-      include: { stock: true },
+    const existing = await this.prisma.activeConfiguration.findUnique({
+      where: { stockId_strategyName: { stockId: stock.id, strategyName: dto.strategyName } },
     });
+
+    if (existing) {
+      await this.prisma.activeConfiguration.delete({
+        where: { stockId_strategyName: { stockId: stock.id, strategyName: dto.strategyName } },
+      });
+      return { status: 'removed', strategyName: dto.strategyName };
+    } else {
+      const added = await this.prisma.activeConfiguration.create({
+        data: {
+          stockId: stock.id,
+          strategyName: dto.strategyName,
+          timeframe: dto.timeframe
+        },
+        include: { stock: true }
+      });
+      return { status: 'added', config: added };
+    }
   }
 
   async remove(id: number) {

@@ -25,7 +25,7 @@ model Stock {
 
   historicalData      HistoricalData[]
   backtestReports     BacktestReport[]
-  activeConfiguration ActiveConfiguration?
+  activeConfigurations ActiveConfiguration[]
   liveSignals         LiveSignal[]
 }
 
@@ -65,13 +65,15 @@ model BacktestReport {
 
 model ActiveConfiguration {
   id           Int    @id @default(autoincrement())
-  stockId      Int    @unique
+  stockId      Int
   strategyName String
   timeframe    String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@unique([stockId, strategyName])
 }
 
 model LiveSignal {
