@@ -47,6 +47,15 @@ export function StockDetail() {
     }
   };
 
+  const handleSetLive = async (strategy: string, timeframe: string) => {
+    try {
+      await axios.post(`${API}/api/configs`, { symbol, strategyName: strategy, timeframe });
+      showMessage('success', `${strategy} is now set for Live Signals!`);
+    } catch (e: any) {
+      showMessage('error', e.response?.data?.message || 'Failed to set live strategy.');
+    }
+  };
+
   return (
     <div className="page animate-fade-in">
       {message && (
@@ -103,43 +112,53 @@ export function StockDetail() {
           <h2 className="page-title" style={{ fontSize: '1.5rem', marginBottom: '1.5rem' }}>Strategy Results</h2>
           <div className="grid-3">
             {results.map((r, i) => (
-              <div key={i} className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-                  <h3 className="card-title" style={{ color: 'var(--cyan)', margin: 0 }}>{r.strategy}</h3>
-                  <span className="badge badge-active">{r.timeframe}</span>
-                </div>
-                
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div className="grid-2">
-                    <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
-                      <p className="metric-label">Net Profit</p>
-                      <p className={`metric-value ${r.metrics.netProfit >= 0 ? 'positive' : 'negative'}`}>
-                        {r.metrics.netProfit >= 0 ? '+' : ''}₹{r.metrics.netProfit.toLocaleString('en-IN')}
-                      </p>
-                    </div>
-                    <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
-                      <p className="metric-label">ROI</p>
-                      <p className={`metric-value ${r.metrics.roiPercentage >= 0 ? 'positive' : 'negative'}`}>
-                        {r.metrics.roiPercentage >= 0 ? '+' : ''}{r.metrics.roiPercentage}%
-                      </p>
-                    </div>
+              <div key={i} className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                    <h3 className="card-title" style={{ color: 'var(--cyan)', margin: 0 }}>{r.strategy}</h3>
+                    <span className="badge badge-active">{r.timeframe}</span>
                   </div>
                   
-                  <div className="grid-3" style={{ paddingTop: '0.5rem' }}>
-                    <div>
-                      <p className="metric-label">Win Rate</p>
-                      <p className="metric-value" style={{ fontSize: '1.1rem' }}>{r.metrics.winRate}%</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+                    <div className="grid-2">
+                      <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
+                        <p className="metric-label">Net Profit</p>
+                        <p className={`metric-value ${r.metrics.netProfit >= 0 ? 'positive' : 'negative'}`}>
+                          {r.metrics.netProfit >= 0 ? '+' : ''}₹{r.metrics.netProfit.toLocaleString('en-IN')}
+                        </p>
+                      </div>
+                      <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
+                        <p className="metric-label">ROI</p>
+                        <p className={`metric-value ${r.metrics.roiPercentage >= 0 ? 'positive' : 'negative'}`}>
+                          {r.metrics.roiPercentage >= 0 ? '+' : ''}{r.metrics.roiPercentage}%
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="metric-label">Trades</p>
-                      <p className="metric-value" style={{ fontSize: '1.1rem' }}>{r.metrics.totalTrades}</p>
-                    </div>
-                    <div>
-                      <p className="metric-label">Max DD</p>
-                      <p className="metric-value negative" style={{ fontSize: '1.1rem' }}>-₹{r.metrics.maxDrawdown.toLocaleString('en-IN')}</p>
+                    
+                    <div className="grid-3" style={{ paddingTop: '0.5rem' }}>
+                      <div>
+                        <p className="metric-label">Win Rate</p>
+                        <p className="metric-value" style={{ fontSize: '1.1rem' }}>{r.metrics.winRate}%</p>
+                      </div>
+                      <div>
+                        <p className="metric-label">Trades</p>
+                        <p className="metric-value" style={{ fontSize: '1.1rem' }}>{r.metrics.totalTrades}</p>
+                      </div>
+                      <div>
+                        <p className="metric-label">Max DD</p>
+                        <p className="metric-value negative" style={{ fontSize: '1.1rem' }}>-₹{r.metrics.maxDrawdown.toLocaleString('en-IN')}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ width: '100%' }}
+                  onClick={() => handleSetLive(r.strategy, r.timeframe)}
+                >
+                  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                  <span>Set as Live Strategy</span>
+                </button>
               </div>
             ))}
           </div>
