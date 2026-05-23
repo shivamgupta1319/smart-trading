@@ -1,6 +1,6 @@
 # ⚡ SmartTrader — Zero-Cost Algorithmic Trading Scanner
 
-A full-stack local platform for Indian stock market (NSE) algorithmic trading. Backtests 13 strategies, allows assigning multiple strategies to a stock, and monitors live markets every 60 seconds to fire WebSocket alerts.
+A full-stack local platform for Indian stock market (NSE) algorithmic trading. Backtests 28 strategies, allows assigning multiple strategies to a stock, and monitors live markets every 60 seconds to fire WebSocket alerts.
 
 ## Architecture
 
@@ -63,24 +63,39 @@ cd apps/engine
 python scanner/live_scanner.py
 ```
 
-## The 13 Strategies
+## The 28 Strategies
 
 ### Intraday (5m / 15m)
 1. **15m ORB** — Opening Range Breakout
 2. **VWAP + Supertrend(10,3)** — Trend confirmation with VWAP filter
-3. **9/15 EMA + RSI** — EMA crossover with RSI momentum filter
-4. **MACD Zero-Line Cross** — MACD crossover below/above zero
-5. **Inside Bar Breakout** — Mother bar breakout entry
+3. **VWAP + MACD/RSI** — Confluence of trend, momentum, and volume
+4. **9/15 EMA + RSI** — EMA crossover with RSI momentum filter
+5. **MACD Zero-Line Cross** — MACD crossover below/above zero
+6. **Inside Bar Breakout** — Mother bar breakout entry
+7. **Gap and Go** — Momentum entry on sustained gap up/down
+8. **Pullback to 20 EMA** — Trend continuation on low volume pullback
+9. **CPR Breakout** — Breakout from Central Pivot Range
+10. **PDH/PDL Breakout** — Institutional levels breakout
+11. **BB Mean Reversion (Intraday)** — Fade extreme moves at standard deviations
 
 ### Swing (1D)
-6. **44 SMA Pullback** — Price > 200 SMA, pullback to 44 SMA
-7. **200 EMA + MACD** — Trend + momentum confluence
-8. **Bollinger Band Squeeze** — Squeeze breakout
-9. **RSI Divergence** — Bullish hidden divergence
-10. **50/200 Golden Cross** — Classic trend-change signal
-11. **SuperTrend EMA** — Supertrend + EMA filter
-12. **Bollinger Mean Reversion** — Mean reversion inside bands
-13. **Price Action** — Simple support/resistance breakout
+12. **Volatility Contraction Pattern (VCP)** — Low volatility consolidation breakout
+13. **Episodic Pivots** — Massive gap up and consolidation breakout
+14. **Break and Retest** — Former 60-day resistance acts as support
+15. **10/50 EMA Cross** — Momentum crossover
+16. **20-DMA Pullback** — Bread and butter trend pullback on low volume
+17. **Fibonacci Golden Zone** — 50%-61.8% retracement bounce
+18. **Multi-Timeframe Alignment** — Weekly 50-SMA filter + Daily Breakout
+19. **RSI Divergence at Major Support** — Bullish divergence at 200-day lows
+20. **Channel Oscillation** — Multi-month wide channel bounds fading
+21. **Volume Climax** — Panic selling exhaustion and reversal
+22. **44 SMA Pullback** — Price > 200 SMA, pullback to 44 SMA
+23. **200 EMA + MACD** — Trend + momentum confluence
+24. **Bollinger Band Squeeze** — Squeeze breakout
+25. **50/200 Golden Cross** — Classic trend-change signal
+26. **SuperTrend EMA** — Supertrend + EMA filter
+27. **Bollinger Mean Reversion** — Mean reversion inside bands
+28. **Price Action** — Simple support/resistance breakout
 
 ## Documentation
 

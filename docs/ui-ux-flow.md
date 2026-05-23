@@ -56,7 +56,7 @@ Allow the user to select any NSE stock and strategy, run a backtest, see results
 ### User Flow
 1. User selects a stock from the dropdown (pre-populated from DB, or type to search)
 2. Clicks **Fetch History** → backend downloads 5y/60d data via yfinance and stores it
-3. Selects a strategy from the dropdown (13 options grouped: Intraday / Swing)
+3. Selects a strategy from the dropdown (28 options grouped: Intraday / Swing)
 4. Clicks **Run Backtest**
 5. Loading spinner shows during computation (~5–15 seconds)
 6. Results table populates with metrics, best strategy is starred (★)
