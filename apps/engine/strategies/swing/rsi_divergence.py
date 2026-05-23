@@ -13,6 +13,7 @@ class RSIDivergenceStrategy(BaseStrategy):
         df['rsi14'] = ta.rsi(df['Close'], length=14)
         df['ema50'] = ta.ema(df['Close'], length=50)
         df['atr14'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+        df['Low_200'] = df['Low'].rolling(window=200).min().shift(1)
 
         df['signal'] = 0
         df['stop_loss'] = 0.0
@@ -24,7 +25,7 @@ class RSIDivergenceStrategy(BaseStrategy):
             curr = df.iloc[i]
             window = df.iloc[i - lookback:i]
 
-            if pd.isna(curr['rsi14']) or pd.isna(curr['ema50']) or pd.isna(curr['atr14']):
+            if pd.isna(curr['rsi14']) or pd.isna(curr['ema50']) or pd.isna(curr['atr14']) or pd.isna(curr['Low_200']):
                 continue
 
             # Find two lows in the window
@@ -46,8 +47,11 @@ class RSIDivergenceStrategy(BaseStrategy):
             # Bullish divergence: price lower low + RSI higher low
             price_lower_low = price_low2 < price_low1
             rsi_higher_low = rsi_low2 > rsi_low1
+            
+            # Major Support: Price is within 5% of the 200-day low
+            at_major_support = curr['Low'] <= curr['Low_200'] * 1.05
 
-            if price_lower_low and rsi_higher_low:
+            if price_lower_low and rsi_higher_low and at_major_support:
                 # Entry: first green candle after divergence
                 if curr['Close'] > curr['Open']:
                     sl = curr['Close'] - 2 * curr['atr14']
