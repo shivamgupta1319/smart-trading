@@ -3,8 +3,39 @@ import httpx
 import yfinance as yf
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from datetime import datetime
 
 router = APIRouter()
+
+def parse_news_item(item):
+    if not isinstance(item, dict):
+        return {"title": "", "publisher": "", "link": "", "providerPublishTime": 0}
+        
+    if "content" in item and isinstance(item["content"], dict):
+        c = item["content"]
+        pub_date = c.get("pubDate") or ""
+        # convert '2026-02-09T09:20:18Z' to timestamp
+        try:
+            timestamp = int(datetime.strptime(pub_date, "%Y-%m-%dT%H:%M:%SZ").timestamp())
+        except:
+            timestamp = 0
+            
+        provider = c.get("provider") or {}
+        click_through = c.get("clickThroughUrl") or {}
+            
+        return {
+            "title": c.get("title") or "",
+            "publisher": provider.get("displayName") or "",
+            "link": click_through.get("url") or "",
+            "providerPublishTime": timestamp
+        }
+    else:
+        return {
+            "title": item.get("title") or "",
+            "publisher": item.get("publisher") or "",
+            "link": item.get("link") or "",
+            "providerPublishTime": item.get("providerPublishTime") or 0
+        }
 
 class LLMClient:
     def __init__(self):
@@ -84,7 +115,8 @@ async def get_dashboard_analysis():
             prev_price = hist["Close"].iloc[0] # 1 month ago
             price_change = ((current_price - prev_price) / prev_price) * 100
 
-        news_titles = [item.get("title", "") for item in news[:5]] if news else ["No recent news available"]
+        parsed_news = [parse_news_item(n) for n in news] if news else []
+        news_titles = [n["title"] for n in parsed_news[:5] if n["title"]] or ["No recent news available"]
 
         prompt = f"""
         Analyze the current state of the Indian Stock Market (Nifty 50).
@@ -100,6 +132,59 @@ async def get_dashboard_analysis():
         
         analysis = await llm.generate(prompt)
         return {"status": "success", "analysis": analysis}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.get("/news")
+async def get_market_news():
+    try:
+        nifty = yf.Ticker("^NSEI")
+        sensex = yf.Ticker("^BSESN")
+        
+        nifty_news = nifty.news or []
+        sensex_news = sensex.news or []
+        
+        # Also fetch news for top constituents to ensure we have enough data
+        reliance = yf.Ticker("RELIANCE.NS").news or []
+        hdfc = yf.Ticker("HDFCBANK.NS").news or []
+        tcs = yf.Ticker("TCS.NS").news or []
+        
+        # Combine and deduplicate based on title, limit to top 10 recent
+        seen_titles = set()
+        all_news = []
+        raw_news_combined = nifty_news + sensex_news + reliance + hdfc + tcs
+        
+        for item in raw_news_combined:
+            parsed = parse_news_item(item)
+            title = parsed["title"]
+            if title and title not in seen_titles:
+                seen_titles.add(title)
+                all_news.append(parsed)
+                if len(all_news) >= 10:
+                    break
+
+        all_news.sort(key=lambda x: x["providerPublishTime"], reverse=True)
+        news_titles = [item["title"] for item in all_news]
+        
+        if not news_titles:
+            return {"status": "success", "analysis": "No recent news found for the Indian Stock Market.", "articles": []}
+
+        prompt = f"""
+        You are an expert Indian Stock Market Quantitative Analyst.
+        
+        Here are the latest breaking news headlines affecting the Indian Stock Market:
+        {chr(10).join(news_titles)}
+        
+        Provide a concise, 3-paragraph summary of how these news events might impact the overall market sentiment today. Format as markdown. Use bullet points if discussing specific sectors.
+        """
+        
+        analysis = await llm.generate(prompt)
+        
+        return {
+            "status": "success",
+            "analysis": analysis,
+            "articles": all_news
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -123,7 +208,8 @@ async def get_stock_analysis(symbol: str):
         pe_ratio = info.get("trailingPE", "Unknown")
         sector = info.get("sector", "Unknown")
         
-        news_titles = [item.get("title", "") for item in news[:3]] if news else ["No recent news available"]
+        parsed_news = [parse_news_item(n) for n in news] if news else []
+        news_titles = [n["title"] for n in parsed_news[:3] if n["title"]] or ["No recent news available"]
         
         prompt = f"""
         Provide a comprehensive quantitative research report for the Indian stock: {symbol} (Sector: {sector}).

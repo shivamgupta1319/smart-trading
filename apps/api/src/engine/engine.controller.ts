@@ -35,6 +35,12 @@ export class EngineController {
     return response.data;
   }
 
+  @Get('analysis/news')
+  async getMarketNews() {
+    const response = await axios.get(`${this.engineUrl}/api/engine/analysis/news`);
+    return response.data;
+  }
+
   @Get('analysis/stock/:symbol')
   async getStockAnalysis(@Param('symbol') symbol: string) {
     const response = await axios.get(`${this.engineUrl}/api/engine/analysis/stock/${symbol}`);
