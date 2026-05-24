@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from routers.history import router as history_router
 from routers.backtest import router as backtest_router
+from routers.analysis import router as analysis_router
 
 load_dotenv()
 
@@ -24,6 +25,7 @@ app.add_middleware(
 
 app.include_router(history_router, prefix="/api/engine", tags=["history"])
 app.include_router(backtest_router, prefix="/api/engine", tags=["backtest"])
+app.include_router(analysis_router, prefix="/api/engine/analysis", tags=["analysis"])
 
 
 @app.get("/health")

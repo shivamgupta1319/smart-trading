@@ -1,4 +1,4 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param } from '@nestjs/common';
 import axios from 'axios';
 
 @Controller('api/engine')
@@ -26,6 +26,18 @@ export class EngineController {
   @Post('live-prices')
   async getLivePrices(@Body() body: { symbols: string[] }) {
     const response = await axios.post(`${this.engineUrl}/api/engine/live-prices`, body);
+    return response.data;
+  }
+
+  @Get('analysis/dashboard')
+  async getDashboardAnalysis() {
+    const response = await axios.get(`${this.engineUrl}/api/engine/analysis/dashboard`);
+    return response.data;
+  }
+
+  @Get('analysis/stock/:symbol')
+  async getStockAnalysis(@Param('symbol') symbol: string) {
+    const response = await axios.get(`${this.engineUrl}/api/engine/analysis/stock/${symbol}`);
     return response.data;
   }
 }

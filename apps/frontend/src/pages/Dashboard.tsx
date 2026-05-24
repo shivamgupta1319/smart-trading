@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import ReactMarkdown from 'react-markdown';
 import { AddStockModal } from '../components/AddStockModal';
 
 const API = 'http://localhost:3000';
@@ -17,6 +18,9 @@ export function Dashboard() {
   const [livePrices, setLivePrices] = useState<Record<string, number | null>>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
+
+  const [marketAnalysis, setMarketAnalysis] = useState<string | null>(null);
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
 
   const showMessage = (type: string, text: string) => {
     setMessage({ type, text });
@@ -45,7 +49,24 @@ export function Dashboard() {
     }
   };
 
+  const fetchMarketAnalysis = async () => {
+    setLoadingAnalysis(true);
+    try {
+      const res = await axios.get(`${API}/api/engine/analysis/dashboard`);
+      if (res.data.status === 'success') {
+        setMarketAnalysis(res.data.analysis);
+      } else {
+        setMarketAnalysis(`> [!WARNING]\n> Failed to fetch market analysis: ${res.data.message}`);
+      }
+    } catch (e: any) {
+      setMarketAnalysis(`> [!WARNING]\n> Failed to fetch market analysis: ${e.message}`);
+    } finally {
+      setLoadingAnalysis(false);
+    }
+  };
+
   useEffect(() => {
+    fetchMarketAnalysis();
     fetchStocks().then(fetchLivePrices);
 
     const intervalId = setInterval(async () => {
@@ -101,6 +122,28 @@ export function Dashboard() {
           <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
           <span>Add Stock</span>
         </button>
+      </div>
+
+      <div className="card" style={{ marginBottom: '2rem', padding: '2rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+          <h2 className="card-title" style={{ margin: 0, fontSize: '1.2rem', color: 'var(--cyan)' }}>AI Market Intelligence</h2>
+          <span className="badge badge-active" style={{ fontSize: '0.7rem' }}>Nifty 50</span>
+        </div>
+        
+        {loadingAnalysis ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem 0' }}>
+            <div className="spinner"></div>
+            <p className="page-subtitle" style={{ margin: 0 }}>Analyzing Indian Stock Market sentiment...</p>
+          </div>
+        ) : (
+          <div className="markdown-body" style={{ lineHeight: '1.6', color: 'var(--text-primary)', fontSize: '0.95rem' }}>
+            {marketAnalysis ? (
+              <ReactMarkdown>{marketAnalysis}</ReactMarkdown>
+            ) : (
+              <p>No analysis data available.</p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="grid-3">

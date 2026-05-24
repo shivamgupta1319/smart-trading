@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import ReactMarkdown from 'react-markdown';
 
 const API = 'http://localhost:3000';
 
@@ -23,6 +24,10 @@ export function StockDetail() {
   const [running, setRunning] = useState(false);
   const [activeStrategies, setActiveStrategies] = useState<string[]>([]);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
+  
+  const [activeTab, setActiveTab] = useState<'backtest' | 'research'>('backtest');
+  const [researchData, setResearchData] = useState<string | null>(null);
+  const [loadingResearch, setLoadingResearch] = useState(false);
 
   const showMessage = (type: string, text: string) => {
     setMessage({ type, text });
@@ -36,6 +41,28 @@ export function StockDetail() {
       }).catch(err => console.error("Failed to load active strategies:", err));
     }
   }, [symbol]);
+
+  const fetchResearch = async () => {
+    if (!symbol || researchData) return;
+    setLoadingResearch(true);
+    try {
+      const res = await axios.get(`${API}/api/engine/analysis/stock/${symbol}`);
+      if (res.data.status === 'success') {
+        setResearchData(res.data.analysis);
+      } else {
+        setResearchData(`> [!WARNING]\n> Failed to fetch analysis: ${res.data.message}`);
+      }
+    } catch (e: any) {
+      setResearchData(`> [!WARNING]\n> Failed to fetch analysis: ${e.message}`);
+    } finally {
+      setLoadingResearch(false);
+    }
+  };
+
+  const handleTabChange = (tab: 'backtest' | 'research') => {
+    setActiveTab(tab);
+    if (tab === 'research') fetchResearch();
+  };
 
   const runFullBacktest = async () => {
     if (!symbol) return;
@@ -91,11 +118,30 @@ export function StockDetail() {
         </button>
         <div>
           <h1 className="page-title">{symbol}</h1>
-          <p className="page-subtitle">Stock Backtesting Details</p>
+          <p className="page-subtitle">Stock Details & Analysis</p>
         </div>
       </div>
 
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.5rem', padding: '3rem 2rem', textAlign: 'center' }}>
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', borderBottom: '1px solid var(--border)' }}>
+        <button 
+          className={`btn ${activeTab === 'backtest' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ borderRadius: 'var(--radius-md) var(--radius-md) 0 0', borderBottom: 'none' }}
+          onClick={() => handleTabChange('backtest')}
+        >
+          Backtesting Engine
+        </button>
+        <button 
+          className={`btn ${activeTab === 'research' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ borderRadius: 'var(--radius-md) var(--radius-md) 0 0', borderBottom: 'none' }}
+          onClick={() => handleTabChange('research')}
+        >
+          AI Research & Analysis
+        </button>
+      </div>
+
+      {activeTab === 'backtest' && (
+        <>
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.5rem', padding: '3rem 2rem', textAlign: 'center' }}>
         <div style={{ maxWidth: '600px' }}>
           <h2 className="page-title" style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Run Full Backtest</h2>
           <p className="page-subtitle" style={{ marginBottom: '1.5rem' }}>
@@ -185,6 +231,28 @@ export function StockDetail() {
           </div>
         </div>
       )}
+      </>
+      )}
+
+      {activeTab === 'research' && (
+        <div className="card animate-fade-in-up" style={{ padding: '2rem' }}>
+          {loadingResearch ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '3rem' }}>
+              <div className="spinner"></div>
+              <p className="page-subtitle">AI is analyzing fundamental, technical, and sentimental data...</p>
+            </div>
+          ) : (
+            <div className="markdown-body" style={{ lineHeight: '1.6', color: 'var(--text-primary)' }}>
+              {researchData ? (
+                <ReactMarkdown>{researchData}</ReactMarkdown>
+              ) : (
+                <p>No research data available.</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }
