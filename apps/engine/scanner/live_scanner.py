@@ -34,7 +34,7 @@ def is_market_open() -> bool:
 def get_active_configs():
     with engine.connect() as conn:
         rows = conn.execute(text("""
-            SELECT ac.id, ac."stockId", ac."strategyName", ac.timeframe, s.symbol, s.name
+            SELECT ac.id, ac."stockId", ac."strategyName", ac.timeframe, s.symbol
             FROM "ActiveConfiguration" ac
             JOIN "Stock" s ON s.id = ac."stockId"
             WHERE s."isActive" = true
