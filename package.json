@@ -52,6 +52,8 @@
     "axios": "^1.16.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "framer-motion": "^12.40.0",
+    "lucide-react": "^1.16.0",
     "pg": "^8.21.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
