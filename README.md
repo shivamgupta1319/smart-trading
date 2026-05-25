@@ -29,22 +29,26 @@ Then open http://localhost:5173
 ## Quick Start (Local Development)
 
 ### 1. Start PostgreSQL
+
 ```bash
 docker-compose up postgres -d
 ```
 
 ### 2. Push Prisma Schema
+
 ```bash
 DATABASE_URL=postgresql://trader:trader@localhost:5470/smart_trading \
   npx prisma db push --accept-data-loss
 ```
 
 ### 3. Start NestJS API
+
 ```bash
 npx nx serve api
 ```
 
 ### 4. Start Python Engine
+
 ```bash
 cd apps/engine
 python -m venv venv && source venv/bin/activate
@@ -53,19 +57,23 @@ uvicorn main:app --reload --port 8000
 ```
 
 ### 5. Start React Frontend
+
 ```bash
 npx nx serve frontend
 ```
 
 ### 6. Start Live Scanner (during market hours)
+
 ```bash
 cd apps/engine
+source venv/bin/activate
 python scanner/live_scanner.py
 ```
 
 ## The 28 Strategies
 
 ### Intraday (5m / 15m)
+
 1. **15m ORB** — Opening Range Breakout
 2. **VWAP + Supertrend(10,3)** — Trend confirmation with VWAP filter
 3. **VWAP + MACD/RSI** — Confluence of trend, momentum, and volume
@@ -79,6 +87,7 @@ python scanner/live_scanner.py
 11. **BB Mean Reversion (Intraday)** — Fade extreme moves at standard deviations
 
 ### Swing (1D)
+
 12. **Volatility Contraction Pattern (VCP)** — Low volatility consolidation breakout
 13. **Episodic Pivots** — Massive gap up and consolidation breakout
 14. **Break and Retest** — Former 60-day resistance acts as support
@@ -99,18 +108,19 @@ python scanner/live_scanner.py
 
 ## Documentation
 
-| File | Purpose |
-|---|---|
-| `docs/understanding.md` | Domain knowledge, strategy logic, NSE market context |
-| `docs/architecture.md` | System architecture, data flows, API contracts |
-| `docs/progress.md` | Build phase tracker |
-| `docs/ui-ux-flow.md` | UI screen designs and user journey maps |
-| `docs/edge-cases-and-verification.md` | Edge cases and verification checklist |
-| `gemini.md` | AI assistant context and session log |
+| File                                  | Purpose                                              |
+| ------------------------------------- | ---------------------------------------------------- |
+| `docs/understanding.md`               | Domain knowledge, strategy logic, NSE market context |
+| `docs/architecture.md`                | System architecture, data flows, API contracts       |
+| `docs/progress.md`                    | Build phase tracker                                  |
+| `docs/ui-ux-flow.md`                  | UI screen designs and user journey maps              |
+| `docs/edge-cases-and-verification.md` | Edge cases and verification checklist                |
+| `gemini.md`                           | AI assistant context and session log                 |
 
 ## Environment Variables
 
 **apps/api/.env**
+
 ```
 DATABASE_URL=postgresql://trader:trader@localhost:5470/smart_trading
 ENGINE_URL=http://smart-trading-engine:8000
@@ -118,6 +128,7 @@ PORT=3000
 ```
 
 **apps/engine/.env**
+
 ```
 DATABASE_URL=postgresql://trader:trader@localhost:5470/smart_trading
 NESTJS_SIGNAL_URL=http://smart-trading-api:3000/api/signals/new
