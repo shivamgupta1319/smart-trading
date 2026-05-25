@@ -20,4 +20,37 @@ export class NseStocksService {
       orderBy: { symbol: 'asc' }
     });
   }
+
+  async getAll() {
+    return this.prisma.nseStock.findMany({
+      select: { id: true, symbol: true, sector: true },
+      orderBy: { symbol: 'asc' }
+    });
+  }
+
+  async updateSector(symbol: string, sector: string) {
+    return this.prisma.nseStock.update({
+      where: { symbol },
+      data: { sector },
+    });
+  }
+
+  async getSectors() {
+    const records = await this.prisma.nseStock.findMany({
+      select: { sector: true },
+      distinct: ['sector'],
+      where: {
+        sector: { not: null, notIn: ['Unknown', ''] }
+      },
+      orderBy: { sector: 'asc' }
+    });
+    return records.map(r => r.sector);
+  }
+
+  async getBySector(sector: string) {
+    return this.prisma.nseStock.findMany({
+      where: { sector },
+      orderBy: { symbol: 'asc' }
+    });
+  }
 }

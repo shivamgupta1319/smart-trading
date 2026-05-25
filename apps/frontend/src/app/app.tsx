@@ -4,6 +4,8 @@ import { Dashboard } from '../pages/Dashboard';
 import { StockDetail } from '../pages/StockDetail';
 import { LiveScanner } from '../pages/LiveScanner';
 import { MarketNews } from '../pages/MarketNews';
+import { Sectors } from '../pages/Sectors';
+import { SectorDetail } from '../pages/SectorDetail';
 import '../styles/index.css';
 
 export default function App() {
@@ -16,6 +18,8 @@ export default function App() {
         <Route path="/stock/:symbol" element={<StockDetail />} />
         <Route path="/scanner" element={<LiveScanner />} />
         <Route path="/news" element={<MarketNews />} />
+        <Route path="/sectors" element={<Sectors />} />
+        <Route path="/sectors/:sectorName" element={<SectorDetail />} />
       </Routes>
     </>
   );

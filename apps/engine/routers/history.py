@@ -100,8 +100,17 @@ def get_live_prices(req: LivePriceRequest):
         yf_sym = sym if sym.endswith(".NS") else sym + ".NS"
         try:
             ticker = yf.Ticker(yf_sym)
-            # using fast_info is much quicker for live prices
-            results[sym] = round(ticker.fast_info.last_price, 2)
+            info = ticker.fast_info
+            last_price = info.last_price
+            prev_close = info.previous_close
+            change = last_price - prev_close if prev_close else 0
+            change_pct = (change / prev_close * 100) if prev_close else 0
+            
+            results[sym] = {
+                "price": round(last_price, 2),
+                "change": round(change, 2),
+                "change_pct": round(change_pct, 2)
+            }
         except Exception:
             results[sym] = None
     return results

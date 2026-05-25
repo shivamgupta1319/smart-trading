@@ -148,7 +148,8 @@ export function Dashboard() {
 
       <div className="grid-3">
         {stocks.map(stock => {
-          const price = livePrices[stock.symbol];
+          const priceData = livePrices[stock.symbol];
+          const price = priceData ? (typeof priceData === 'object' ? (priceData as any).price : priceData) : priceData;
           return (
             <div 
               key={stock.id} 
@@ -181,7 +182,7 @@ export function Dashboard() {
                   <span className="metric-value">Unavailable</span>
                 ) : (
                   <div className="metric-value highlight" style={{ fontSize: '2rem' }}>
-                    ₹{price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    ₹{Number(price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                   </div>
                 )}
               </div>

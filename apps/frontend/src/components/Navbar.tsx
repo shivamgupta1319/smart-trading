@@ -1,12 +1,5 @@
 import { NavLink } from "react-router-dom";
 
-function getISTTime() {
-  return new Date().toLocaleTimeString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    hour12: false,
-  });
-}
-
 function isMarketOpen() {
   const now = new Date();
   const ist = new Date(
@@ -47,6 +40,12 @@ export function Navbar() {
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
           📰 Market News
+        </NavLink>
+        <NavLink
+          to="/sectors"
+          className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+        >
+          🗂️ Sector Analysis
         </NavLink>
         <div className="market-status">
           <span className={`market-dot ${open ? "open" : ""}`}></span>

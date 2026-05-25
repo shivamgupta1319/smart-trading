@@ -235,3 +235,153 @@ async def get_stock_analysis(symbol: str):
         return {"status": "success", "analysis": analysis}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+import pandas_ta as ta
+
+@router.get("/sectors")
+async def get_sectors_analysis():
+    try:
+        # Major Sector Indices in India
+        sector_indices = {
+            "Nifty Bank": "^NSEBANK",
+            "Nifty IT": "^CNXIT",
+            "Nifty Auto": "^CNXAUTO",
+            "Nifty Pharma": "^CNXPHARMA",
+            "Nifty FMCG": "^CNXFMCG",
+            "Nifty Metal": "^CNXMETAL",
+            "Nifty Energy": "^CNXENERGY",
+            "Nifty Realty": "^CNXREALTY"
+        }
+        
+        sector_data = []
+        for name, ticker_str in sector_indices.items():
+            ticker = yf.Ticker(ticker_str)
+            hist = ticker.history(period="5d")
+            if not hist.empty and len(hist) >= 2:
+                current = hist["Close"].iloc[-1]
+                prev = hist["Close"].iloc[-2]
+                change_pct = ((current - prev) / prev) * 100
+                
+                status = "Neutral"
+                if change_pct > 0.5:
+                    status = "Up"
+                elif change_pct < -0.5:
+                    status = "Down"
+                
+                sector_data.append(f"- {name}: {change_pct:.2f}% ({status})")
+
+        prompt = f"""
+        You are an expert Indian Stock Market Quantitative Analyst.
+        
+        Here is the daily performance of major Indian sector indices:
+        {chr(10).join(sector_data)}
+        
+        Provide a concise 2-paragraph overall Sector Analysis. 
+        Identify which sectors are leading (Up), lagging (Down), or In Focus, and give brief reasons why based on typical market dynamics. Format as markdown.
+        """
+        
+        analysis = await llm.generate(prompt)
+        return {"status": "success", "analysis": analysis, "data": sector_data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+class SectorStockList(BaseModel):
+    sector_name: str
+    stocks: list
+
+@router.post("/sectors/analyze-list")
+async def analyze_sector_list(payload: SectorStockList):
+    try:
+        # Just use the top 5 stocks from the list to avoid massive prompts
+        top_stocks = payload.stocks[:5]
+        stock_data = []
+        for s in top_stocks:
+            yf_sym = s if s.endswith(".NS") else f"{s}.NS"
+            hist = yf.Ticker(yf_sym).history(period="5d")
+            if not hist.empty and len(hist) >= 2:
+                current = hist["Close"].iloc[-1]
+                prev = hist["Close"].iloc[-2]
+                change_pct = ((current - prev) / prev) * 100
+                stock_data.append(f"- {s}: {change_pct:.2f}%")
+
+        prompt = f"""
+        You are an expert Indian Stock Market Quantitative Analyst.
+        
+        Sector: {payload.sector_name}
+        Recent daily performance of key stocks in this sector:
+        {chr(10).join(stock_data) if stock_data else "No data available."}
+        
+        Provide a concise 2-paragraph analysis of this specific sector's current performance based on these top constituents.
+        Format as markdown.
+        """
+        analysis = await llm.generate(prompt)
+        return {"status": "success", "analysis": analysis}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@router.get("/stock/{symbol}/indicators")
+async def get_technical_indicators(symbol: str, timeframe: str = "1d"):
+    yf_symbol = symbol if symbol.endswith(".NS") else f"{symbol}.NS"
+    try:
+        # Map timeframe to yfinance interval and period
+        period_map = {"15m": "5d", "1h": "1mo", "1d": "1y", "1wk": "5y"}
+        interval_map = {"15m": "15m", "1h": "60m", "1d": "1d", "1wk": "1wk"}
+        
+        period = period_map.get(timeframe, "1y")
+        interval = interval_map.get(timeframe, "1d")
+        
+        hist = yf.Ticker(yf_symbol).history(period=period, interval=interval)
+        if hist.empty or len(hist) < 200:
+            return {"status": "error", "message": "Not enough historical data for indicators."}
+            
+        # Calculate indicators
+        hist.ta.ema(length=50, append=True)
+        hist.ta.ema(length=200, append=True)
+        hist.ta.rsi(length=14, append=True)
+        hist.ta.macd(fast=12, slow=26, signal=9, append=True)
+        hist.ta.bbands(length=20, std=2, append=True)
+        
+        last_row = hist.iloc[-1]
+        close_price = float(last_row["Close"])
+        
+        ema50 = float(last_row.get("EMA_50", 0))
+        ema200 = float(last_row.get("EMA_200", 0))
+        rsi = float(last_row.get("RSI_14", 0))
+        
+        macd_line = float(last_row.get("MACD_12_26_9", 0))
+        macd_signal = float(last_row.get("MACDs_12_26_9", 0))
+        
+        bb_upper = float(last_row.get("BBU_20_2.0", 0))
+        bb_lower = float(last_row.get("BBL_20_2.0", 0))
+        bb_mid = float(last_row.get("BBM_20_2.0", 0))
+        
+        # Signals
+        ema50_sig = "Bullish" if close_price > ema50 else "Bearish"
+        ema200_sig = "Bullish" if close_price > ema200 else "Bearish"
+        
+        if rsi > 70:
+            rsi_sig = "Bearish (Overbought)"
+        elif rsi < 30:
+            rsi_sig = "Bullish (Oversold)"
+        else:
+            rsi_sig = "Neutral"
+            
+        macd_sig = "Bullish" if macd_line > macd_signal else "Bearish"
+        
+        if close_price > bb_upper:
+            bb_sig = "Bearish (Overbought)"
+        elif close_price < bb_lower:
+            bb_sig = "Bullish (Oversold)"
+        else:
+            bb_sig = "Neutral"
+
+        indicators = [
+            {"name": "EMA (50)", "value": round(ema50, 2), "signal": ema50_sig},
+            {"name": "EMA (200)", "value": round(ema200, 2), "signal": ema200_sig},
+            {"name": "RSI (14)", "value": round(rsi, 2), "signal": rsi_sig},
+            {"name": "MACD", "value": f"{round(macd_line, 2)} / {round(macd_signal, 2)}", "signal": macd_sig},
+            {"name": "Bollinger Bands", "value": f"U: {round(bb_upper,2)} | L: {round(bb_lower,2)}", "signal": bb_sig},
+        ]
+        
+        return {"status": "success", "indicators": indicators, "current_price": round(close_price, 2)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

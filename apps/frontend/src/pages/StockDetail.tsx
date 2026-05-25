@@ -17,6 +17,17 @@ interface BacktestResult {
   };
 }
 
+interface Indicator {
+  name: string;
+  value: string | number;
+  signal: string;
+}
+
+interface IndicatorsResponse {
+  current_price: number;
+  indicators: Indicator[];
+}
+
 export function StockDetail() {
   const { symbol } = useParams<{ symbol: string }>();
   const navigate = useNavigate();
@@ -25,9 +36,13 @@ export function StockDetail() {
   const [activeStrategies, setActiveStrategies] = useState<string[]>([]);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
   
-  const [activeTab, setActiveTab] = useState<'backtest' | 'research'>('backtest');
+  const [activeTab, setActiveTab] = useState<'backtest' | 'research' | 'indicators'>('backtest');
   const [researchData, setResearchData] = useState<string | null>(null);
   const [loadingResearch, setLoadingResearch] = useState(false);
+  
+  const [indicatorTimeframe, setIndicatorTimeframe] = useState<string>('1d');
+  const [indicatorsData, setIndicatorsData] = useState<IndicatorsResponse | null>(null);
+  const [loadingIndicators, setLoadingIndicators] = useState(false);
 
   const showMessage = (type: string, text: string) => {
     setMessage({ type, text });
@@ -59,10 +74,37 @@ export function StockDetail() {
     }
   };
 
-  const handleTabChange = (tab: 'backtest' | 'research') => {
+  const handleTabChange = (tab: 'backtest' | 'research' | 'indicators') => {
     setActiveTab(tab);
     if (tab === 'research') fetchResearch();
+    if (tab === 'indicators') fetchIndicators();
   };
+
+  const fetchIndicators = async () => {
+    if (!symbol) return;
+    setLoadingIndicators(true);
+    try {
+      const res = await axios.get(`${API}/api/engine/analysis/stock/${symbol}/indicators`, {
+        params: { timeframe: indicatorTimeframe }
+      });
+      if (res.data.status === 'success') {
+        setIndicatorsData(res.data);
+      } else {
+        setIndicatorsData(null);
+        showMessage('error', `Failed to fetch indicators: ${res.data.message}`);
+      }
+    } catch (e: any) {
+      showMessage('error', `Failed to fetch indicators: ${e.message}`);
+    } finally {
+      setLoadingIndicators(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'indicators') {
+      fetchIndicators();
+    }
+  }, [indicatorTimeframe, activeTab, symbol]);
 
   const runFullBacktest = async () => {
     if (!symbol) return;
@@ -136,6 +178,13 @@ export function StockDetail() {
           onClick={() => handleTabChange('research')}
         >
           AI Research & Analysis
+        </button>
+        <button 
+          className={`btn ${activeTab === 'indicators' ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ borderRadius: 'var(--radius-md) var(--radius-md) 0 0', borderBottom: 'none' }}
+          onClick={() => handleTabChange('indicators')}
+        >
+          Technical Indicators
         </button>
       </div>
 
@@ -249,6 +298,58 @@ export function StockDetail() {
                 <p>No research data available.</p>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'indicators' && (
+        <div className="card animate-fade-in-up" style={{ padding: '2rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+            <h2 className="page-title" style={{ fontSize: '1.5rem', margin: 0 }}>Top Indicators Overview</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+               <label style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Timeframe:</label>
+               <select 
+                 className="form-input" 
+                 style={{ width: '100px', margin: 0, padding: '0.5rem' }}
+                 value={indicatorTimeframe} 
+                 onChange={e => setIndicatorTimeframe(e.target.value)}
+               >
+                 <option value="15m">15 Min</option>
+                 <option value="1h">1 Hour</option>
+                 <option value="1d">1 Day</option>
+                 <option value="1wk">1 Week</option>
+               </select>
+            </div>
+          </div>
+
+          {loadingIndicators ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', padding: '3rem' }}>
+              <div className="spinner"></div>
+              <p className="page-subtitle">Calculating {indicatorTimeframe} indicators...</p>
+            </div>
+          ) : indicatorsData ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+               <div style={{ fontSize: '1.2rem', color: 'var(--text-primary)', fontWeight: 600 }}>
+                  Current Price: <span style={{ color: 'var(--cyan)' }}>₹{indicatorsData.current_price}</span>
+               </div>
+               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
+                 {indicatorsData.indicators.map((ind, i) => (
+                   <div key={i} className="metric-card" style={{ background: 'var(--bg-input)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                     <div>
+                       <p className="metric-label" style={{ marginBottom: '0.5rem' }}>{ind.name}</p>
+                       <p className="metric-value" style={{ fontSize: '1.2rem' }}>{ind.value}</p>
+                     </div>
+                     <div>
+                       <span className={`badge ${ind.signal.includes('Bullish') ? 'badge-buy' : ind.signal.includes('Bearish') ? 'badge-sell' : 'badge-closed'}`}>
+                         {ind.signal}
+                       </span>
+                     </div>
+                   </div>
+                 ))}
+               </div>
+            </div>
+          ) : (
+            <p>No indicator data available.</p>
           )}
         </div>
       )}
