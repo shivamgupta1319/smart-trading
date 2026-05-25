@@ -25,14 +25,15 @@ export class SignalsService {
     // Avoid duplicate active signals for same stock+strategy
     const existing = await this.prisma.liveSignal.findFirst({
       where: { stockId: dto.stockId, strategyName: dto.strategyName, status: 'ACTIVE' },
+      include: { stock: true },
     });
-    if (existing) return existing; // idempotent
+    if (existing) return { signal: existing, isNew: false }; // idempotent
 
     const signal = await this.prisma.liveSignal.create({
       data: dto,
       include: { stock: true },
     });
-    return signal;
+    return { signal, isNew: true };
   }
 
   async close(id: number) {

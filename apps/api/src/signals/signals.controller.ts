@@ -23,12 +23,14 @@ export class SignalsController {
   @Post('new')
   @HttpCode(201)
   async create(@Body() dto: CreateSignalDto) {
-    const signal = await this.signalsService.create(dto);
-    // Emit WebSocket event to all connected clients
-    this.signalsGateway.emitNewAlert({
-      ...signal,
-      symbol: (signal as any).stock?.symbol,
-    });
+    const { signal, isNew } = await this.signalsService.create(dto);
+    // Emit WebSocket event to all connected clients only if the signal is new
+    if (isNew) {
+      this.signalsGateway.emitNewAlert({
+        ...signal,
+        symbol: (signal as any).stock?.symbol,
+      });
+    }
     return signal;
   }
 
