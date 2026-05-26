@@ -49,12 +49,21 @@ export function Dashboard() {
     }
   };
 
-  const fetchMarketAnalysis = async () => {
+  const fetchMarketAnalysis = async (force = false) => {
+    if (!force) {
+      const cached = localStorage.getItem('dashboard_market_analysis');
+      if (cached) {
+        setMarketAnalysis(cached);
+        return;
+      }
+    }
+
     setLoadingAnalysis(true);
     try {
       const res = await axios.get(`${API}/api/engine/analysis/dashboard`);
       if (res.data.status === 'success') {
         setMarketAnalysis(res.data.analysis);
+        localStorage.setItem('dashboard_market_analysis', res.data.analysis);
       } else {
         setMarketAnalysis(`> [!WARNING]\n> Failed to fetch market analysis: ${res.data.message}`);
       }
@@ -125,9 +134,18 @@ export function Dashboard() {
       </div>
 
       <div className="card" style={{ marginBottom: '2rem', padding: '2rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-          <h2 className="card-title" style={{ margin: 0, fontSize: '1.2rem', color: 'var(--cyan)' }}>AI Market Intelligence</h2>
-          <span className="badge badge-active" style={{ fontSize: '0.7rem' }}>Nifty 50</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <h2 className="card-title" style={{ margin: 0, fontSize: '1.2rem', color: 'var(--cyan)' }}>AI Market Intelligence</h2>
+            <span className="badge badge-active" style={{ fontSize: '0.7rem' }}>Nifty 50</span>
+          </div>
+          <button 
+            onClick={() => fetchMarketAnalysis(true)} 
+            disabled={loadingAnalysis}
+            className="btn btn-secondary btn-sm"
+          >
+            {loadingAnalysis ? 'Refreshing...' : 'Refresh Analysis'}
+          </button>
         </div>
         
         {loadingAnalysis ? (

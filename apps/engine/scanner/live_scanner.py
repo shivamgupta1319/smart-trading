@@ -22,7 +22,7 @@ NESTJS_URL = os.getenv("NESTJS_SIGNAL_URL", "http://localhost:3000/api/signals/n
 IST = pytz.timezone("Asia/Kolkata")
 MARKET_OPEN = dtime(9, 15)
 MARKET_CLOSE = dtime(15, 30)
-POLL_INTERVAL = 60  # seconds
+POLL_INTERVAL = 300  # seconds
 
 
 def is_market_open() -> bool:
@@ -45,10 +45,10 @@ def get_active_configs():
 def fetch_live_candles(symbol: str, timeframe: str) -> pd.DataFrame:
     yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
     interval_map = {"1D": "1d", "15m": "15m", "5m": "5m"}
-    period_map = {"1D": "60d", "15m": "5d", "5m": "2d"}
+    period_map = {"1D": "150d", "15m": "10d", "5m": "5d"}
 
     interval = interval_map.get(timeframe, "15m")
-    period = period_map.get(timeframe, "5d")
+    period = period_map.get(timeframe, "10d")
 
     df = yf.download(yf_symbol, period=period, interval=interval, progress=False, auto_adjust=True)
     if df.empty:
@@ -60,7 +60,7 @@ def fetch_live_candles(symbol: str, timeframe: str) -> pd.DataFrame:
     return df
 
 
-def check_and_fire_signal(config):
+def check_and_fire_signal(config, cache):
     stock_id = config[1]
     strategy_name = config[2]
     timeframe = config[3]
@@ -73,7 +73,11 @@ def check_and_fire_signal(config):
     strategy = STRATEGY_REGISTRY[strategy_name]
 
     try:
-        df = fetch_live_candles(symbol, timeframe)
+        cache_key = (symbol, timeframe)
+        if cache_key not in cache:
+            cache[cache_key] = fetch_live_candles(symbol, timeframe)
+        df = cache[cache_key]
+        
         if df.empty or len(df) < 30:
             print(f"  [INFO] {symbol}: insufficient data ({len(df)} bars)")
             return
@@ -103,6 +107,47 @@ def check_and_fire_signal(config):
         print(f"  [ERROR] {symbol}: {e}")
 
 
+def auto_close_signals(cache):
+    api_url = NESTJS_URL.replace("/signals/new", "/signals/active")
+    try:
+        r = httpx.get(api_url, timeout=10)
+        if r.status_code != 200:
+            return
+        active_signals = r.json()
+        for sig in active_signals:
+            symbol = sig.get('stock', {}).get('symbol') or sig.get('symbol')
+            if not symbol:
+                continue
+            
+            # Fetch latest price using a default 15m timeframe if not cached yet
+            cache_key = (symbol, "15m")
+            if cache_key not in cache:
+                cache[cache_key] = fetch_live_candles(symbol, "15m")
+            df = cache[cache_key]
+            
+            if df.empty:
+                continue
+            
+            latest_price = float(df.iloc[-1]['Close'])
+            sl = float(sig['stopLoss'])
+            tp = float(sig['target'])
+            is_buy = sig['signalType'] == 'BUY'
+            
+            should_close = False
+            if is_buy:
+                if latest_price <= sl or latest_price >= tp:
+                    should_close = True
+            else:
+                if latest_price >= sl or latest_price <= tp:
+                    should_close = True
+                    
+            if should_close:
+                print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{latest_price} hit bounds (SL: ₹{sl}, TP: ₹{tp})")
+                httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{sig['id']}/close", timeout=10)
+    except Exception as e:
+        print(f"  [ERROR] auto-closing signals: {e}")
+
+
 def main():
     print("🚀 Live Scanner started")
     print(f"📡 Will POST signals to: {NESTJS_URL}")
@@ -119,12 +164,18 @@ def main():
             continue
 
         configs = get_active_configs()
+        cache = {}
+        
+        # 1. Auto-close signals that hit SL/TP
+        auto_close_signals(cache)
+        
+        # 2. Check for new setups
         if not configs:
             print("  No active configurations. Add some via the UI.")
         else:
             for config in configs:
                 print(f"  Checking {config[4]} with {config[2]} ({config[3]})...")
-                check_and_fire_signal(config)
+                check_and_fire_signal(config, cache)
                 time.sleep(1)  # Brief pause between stocks
 
         print(f"  Done. Sleeping {POLL_INTERVAL}s...")

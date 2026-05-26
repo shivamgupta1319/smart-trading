@@ -13,25 +13,40 @@ export function Sectors() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [sectorsRes, analysisRes] = await Promise.all([
-          axios.get(`${API_URL}/nse-stocks/sectors/list`),
-          axios.get(`${API_URL}/engine/analysis/sectors`),
-        ]);
-
-        setSectors(sectorsRes.data);
-        if (analysisRes.data.status === "success") {
-          setAnalysis(analysisRes.data.analysis);
-        }
-      } catch (error) {
-        console.error("Error fetching sector data:", error);
-      } finally {
+  const fetchData = async (force = false) => {
+    if (!force) {
+      const cachedSectors = localStorage.getItem('sectors_data');
+      const cachedAnalysis = localStorage.getItem('sectors_analysis');
+      if (cachedSectors && cachedAnalysis) {
+        setSectors(JSON.parse(cachedSectors));
+        setAnalysis(cachedAnalysis);
         setLoading(false);
+        return;
       }
-    };
+    }
 
+    setLoading(true);
+    try {
+      const [sectorsRes, analysisRes] = await Promise.all([
+        axios.get(`${API_URL}/nse-stocks/sectors/list`),
+        axios.get(`${API_URL}/engine/analysis/sectors`),
+      ]);
+
+      setSectors(sectorsRes.data);
+      localStorage.setItem('sectors_data', JSON.stringify(sectorsRes.data));
+
+      if (analysisRes.data.status === "success") {
+        setAnalysis(analysisRes.data.analysis);
+        localStorage.setItem('sectors_analysis', analysisRes.data.analysis);
+      }
+    } catch (error) {
+      console.error("Error fetching sector data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
   }, []);
 
@@ -48,9 +63,18 @@ export function Sectors() {
 
   return (
     <div className="page animate-fade-in">
-      <div className="page-header">
-        <h1 className="page-title">Sector Analysis</h1>
-        <p className="page-subtitle">Discover market performance grouped by industry sectors.</p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <h1 className="page-title">Sector Analysis</h1>
+          <p className="page-subtitle">Discover market performance grouped by industry sectors.</p>
+        </div>
+        <button 
+          onClick={() => fetchData(true)} 
+          disabled={loading}
+          className="btn btn-secondary"
+        >
+          {loading ? 'Refreshing...' : 'Refresh Data'}
+        </button>
       </div>
 
       <div className="grid-3" style={{ gridTemplateColumns: '1fr 2fr' }}>

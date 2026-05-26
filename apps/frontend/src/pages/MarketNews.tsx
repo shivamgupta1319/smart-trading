@@ -17,33 +17,57 @@ export function MarketNews() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchNews = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await axios.get(`${API}/api/engine/analysis/news`);
-        if (res.data.status === 'success') {
-          setAnalysis(res.data.analysis);
-          setArticles(res.data.articles || []);
-        } else {
-          setError(res.data.message || 'Failed to fetch news analysis.');
-        }
-      } catch (err: any) {
-        setError(err.message || 'An error occurred while fetching news.');
-      } finally {
+  const fetchNews = async (force = false) => {
+    if (!force) {
+      const cached = localStorage.getItem('market_news_data');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        setAnalysis(parsed.analysis);
+        setArticles(parsed.articles || []);
         setLoading(false);
+        return;
       }
-    };
+    }
 
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await axios.get(`${API}/api/engine/analysis/news`);
+      if (res.data.status === 'success') {
+        setAnalysis(res.data.analysis);
+        setArticles(res.data.articles || []);
+        localStorage.setItem('market_news_data', JSON.stringify({
+          analysis: res.data.analysis,
+          articles: res.data.articles || []
+        }));
+      } else {
+        setError(res.data.message || 'Failed to fetch news analysis.');
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred while fetching news.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchNews();
   }, []);
 
   return (
     <div className="page animate-fade-in">
-      <div className="page-header">
-        <h1 className="page-title">Indian Market <span>News</span></h1>
-        <p className="page-subtitle">AI-driven analysis of breaking news affecting Nifty 50 and Sensex</p>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <h1 className="page-title">Indian Market <span>News</span></h1>
+          <p className="page-subtitle">AI-driven analysis of breaking news affecting Nifty 50 and Sensex</p>
+        </div>
+        <button 
+          onClick={() => fetchNews(true)} 
+          disabled={loading}
+          className="btn btn-secondary"
+        >
+          {loading ? 'Refreshing...' : 'Refresh News'}
+        </button>
       </div>
 
       {loading ? (
