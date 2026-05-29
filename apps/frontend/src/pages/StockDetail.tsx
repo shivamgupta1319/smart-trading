@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
+import { CandlestickChart } from '../components/CandlestickChart';
 
 const API = 'http://localhost:3000';
 
 interface BacktestResult {
   strategy: string;
   timeframe: string;
+  holdDuration?: string;
   metrics: {
     winRate: number;
     totalTrades: number;
@@ -28,6 +30,13 @@ interface IndicatorsResponse {
   indicators: Indicator[];
 }
 
+const HOLD_LABELS: Record<string, { label: string; color: string }> = {
+  INTRADAY: { label: 'Intraday', color: 'var(--cyan)' },
+  SHORT_SWING: { label: 'Short Swing', color: 'var(--yellow)' },
+  MID_SWING: { label: 'Mid Swing', color: 'var(--purple)' },
+  LONG_POSITIONAL: { label: 'Long Positional', color: '#60a5fa' },
+};
+
 export function StockDetail() {
   const { symbol } = useParams<{ symbol: string }>();
   const navigate = useNavigate();
@@ -36,7 +45,7 @@ export function StockDetail() {
   const [activeStrategies, setActiveStrategies] = useState<string[]>([]);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
   
-  const [activeTab, setActiveTab] = useState<'backtest' | 'research' | 'indicators'>('backtest');
+  const [activeTab, setActiveTab] = useState<'chart' | 'backtest' | 'research' | 'indicators'>('chart');
   const [researchData, setResearchData] = useState<string | null>(null);
   const [loadingResearch, setLoadingResearch] = useState(false);
   
@@ -74,7 +83,7 @@ export function StockDetail() {
     }
   };
 
-  const handleTabChange = (tab: 'backtest' | 'research' | 'indicators') => {
+  const handleTabChange = (tab: 'chart' | 'backtest' | 'research' | 'indicators') => {
     setActiveTab(tab);
     if (tab === 'research') fetchResearch();
     if (tab === 'indicators') fetchIndicators();
@@ -164,29 +173,27 @@ export function StockDetail() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', borderBottom: '1px solid var(--border)' }}>
-        <button 
-          className={`btn ${activeTab === 'backtest' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ borderRadius: 'var(--radius-md) var(--radius-md) 0 0', borderBottom: 'none' }}
-          onClick={() => handleTabChange('backtest')}
-        >
-          Backtesting Engine
-        </button>
-        <button 
-          className={`btn ${activeTab === 'research' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ borderRadius: 'var(--radius-md) var(--radius-md) 0 0', borderBottom: 'none' }}
-          onClick={() => handleTabChange('research')}
-        >
-          AI Research & Analysis
-        </button>
-        <button 
-          className={`btn ${activeTab === 'indicators' ? 'btn-primary' : 'btn-secondary'}`}
-          style={{ borderRadius: 'var(--radius-md) var(--radius-md) 0 0', borderBottom: 'none' }}
-          onClick={() => handleTabChange('indicators')}
-        >
-          Technical Indicators
-        </button>
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem', borderBottom: '1px solid var(--border)', paddingBottom: '0' }}>
+        {(['chart', 'backtest', 'research', 'indicators'] as const).map((tab) => (
+          <button 
+            key={tab}
+            className={`btn ${activeTab === tab ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+            style={{ borderRadius: 'var(--radius-md) var(--radius-md) 0 0', borderBottom: 'none' }}
+            onClick={() => handleTabChange(tab)}
+          >
+            {tab === 'chart' && '📈 Chart'}
+            {tab === 'backtest' && '⚡ Backtesting'}
+            {tab === 'research' && '🧠 AI Research'}
+            {tab === 'indicators' && '📊 Indicators'}
+          </button>
+        ))}
       </div>
+
+      {activeTab === 'chart' && symbol && (
+        <div className="animate-fade-in">
+          <CandlestickChart symbol={symbol} />
+        </div>
+      )}
 
       {activeTab === 'backtest' && (
         <>
@@ -221,12 +228,19 @@ export function StockDetail() {
         <div className="animate-fade-in-up" style={{ marginTop: '2rem' }}>
           <h2 className="page-title" style={{ fontSize: '1.5rem', marginBottom: '1.5rem' }}>Strategy Results</h2>
           <div className="grid-3">
-            {results.map((r, i) => (
+            {results.map((r, i) => {
+              const hold = HOLD_LABELS[r.holdDuration || ''] || { label: r.timeframe === '1D' ? 'Swing' : 'Intraday', color: 'var(--text-muted)' };
+              return (
               <div key={i} className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
                     <h3 className="card-title" style={{ color: 'var(--cyan)', margin: 0 }}>{r.strategy}</h3>
-                    <span className="badge badge-active">{r.timeframe}</span>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <span className="badge badge-active">{r.timeframe}</span>
+                      <span className="badge" style={{ background: `${hold.color}20`, color: hold.color, border: `1px solid ${hold.color}40` }}>
+                        {hold.label}
+                      </span>
+                    </div>
                   </div>
                   
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
@@ -276,7 +290,7 @@ export function StockDetail() {
                   <span>{activeStrategies.includes(r.strategy) ? 'Live (Click to Remove)' : 'Set as Live Strategy'}</span>
                 </button>
               </div>
-            ))}
+            )})}
           </div>
         </div>
       )}

@@ -36,16 +36,22 @@ export function Navbar() {
           📡 Live Scanner
         </NavLink>
         <NavLink
+          to="/portfolio"
+          className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+        >
+          💼 Portfolio
+        </NavLink>
+        <NavLink
           to="/news"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          📰 Market News
+          📰 News
         </NavLink>
         <NavLink
           to="/sectors"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          🗂️ Sector Analysis
+          🗂️ Sectors
         </NavLink>
         <div className="market-status">
           <span className={`market-dot ${open ? "open" : ""}`}></span>

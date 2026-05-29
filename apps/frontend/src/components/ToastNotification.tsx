@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import type { TradeAlert } from '../hooks/useSocket';
 
 interface ToastProps {
@@ -7,7 +7,7 @@ interface ToastProps {
 }
 
 export function Toast({ alert, onDismiss }: ToastProps) {
-  const timerRef = useRef<number>();
+  const timerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     timerRef.current = window.setTimeout(onDismiss, 8000);

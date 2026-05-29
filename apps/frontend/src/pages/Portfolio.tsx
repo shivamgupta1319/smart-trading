@@ -1,0 +1,469 @@
+import { useEffect, useState, useRef, useCallback } from 'react';
+import axios from 'axios';
+import { createChart, ColorType, type IChartApi, AreaSeries } from 'lightweight-charts';
+
+const API = 'http://localhost:3000';
+
+const HOLD_LABELS: Record<string, { label: string; color: string; icon: string }> = {
+  INTRADAY: { label: 'Intraday', color: '#22d3ee', icon: '⏱' },
+  SHORT_SWING: { label: 'Short Swing', color: '#fbbf24', icon: '📅' },
+  MID_SWING: { label: 'Mid Swing', color: '#a78bfa', icon: '📆' },
+  LONG_POSITIONAL: { label: 'Long Term', color: '#60a5fa', icon: '🗓' },
+  UNKNOWN: { label: 'Unknown', color: '#4b5563', icon: '❓' },
+};
+
+interface Trade {
+  id: number;
+  signalId: number;
+  stockId: number;
+  symbol: string;
+  strategyName: string;
+  signalType: string;
+  holdDuration: string;
+  entryPrice: number;
+  exitPrice: number | null;
+  stopLoss: number;
+  target: number;
+  quantity: number;
+  capitalUsed: number;
+  riskAmount: number;
+  pnl: number | null;
+  pnlPercent: number | null;
+  outcome: string | null;
+  entryTime: string;
+  exitTime: string | null;
+  status: string;
+  notes: string | null;
+}
+
+interface PortfolioStats {
+  totalTrades: number;
+  openTrades: number;
+  closedTrades: number;
+  totalPnl: number;
+  winRate: number;
+  wins: number;
+  losses: number;
+  avgWin: number;
+  avgLoss: number;
+  profitFactor: number;
+  bestStrategy: string;
+  strategyBreakdown: {
+    strategy: string;
+    totalPnl: number;
+    trades: number;
+    wins: number;
+    winRate: number;
+  }[];
+  equityCurve: { time: number; value: number }[];
+  holdDurationStats: Record<string, { trades: number; pnl: number }>;
+  initialCapital: number;
+  currentCapital: number;
+}
+
+export function Portfolio() {
+  const [stats, setStats] = useState<PortfolioStats | null>(null);
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<'ALL' | 'OPEN' | 'CLOSED'>('ALL');
+  const [holdFilter, setHoldFilter] = useState<string>('ALL');
+  const equityRef = useRef<HTMLDivElement>(null);
+  const chartInstanceRef = useRef<IChartApi | null>(null);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [statsRes, tradesRes] = await Promise.all([
+        axios.get(`${API}/api/trades/stats`),
+        axios.get(`${API}/api/trades`),
+      ]);
+      setStats(statsRes.data);
+      setTrades(tradesRes.data);
+    } catch (e) {
+      console.error('Failed to fetch portfolio data', e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Render equity curve chart
+  useEffect(() => {
+    if (!equityRef.current || !stats?.equityCurve?.length) return;
+
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.remove();
+      chartInstanceRef.current = null;
+    }
+
+    const chart = createChart(equityRef.current, {
+      width: equityRef.current.clientWidth,
+      height: 250,
+      layout: {
+        background: { type: ColorType.Solid, color: '#0f1629' },
+        textColor: '#94a3b8',
+        fontSize: 11,
+        fontFamily: "'Inter', sans-serif",
+      },
+      grid: {
+        vertLines: { color: 'rgba(30, 45, 71, 0.3)' },
+        horzLines: { color: 'rgba(30, 45, 71, 0.3)' },
+      },
+      rightPriceScale: { borderColor: '#1e2d47' },
+      timeScale: { borderColor: '#1e2d47' },
+    });
+    chartInstanceRef.current = chart;
+
+    const areaSeries = chart.addSeries(AreaSeries, {
+      topColor: stats.totalPnl >= 0 ? 'rgba(16, 185, 129, 0.4)' : 'rgba(248, 113, 113, 0.4)',
+      bottomColor: stats.totalPnl >= 0 ? 'rgba(16, 185, 129, 0.02)' : 'rgba(248, 113, 113, 0.02)',
+      lineColor: stats.totalPnl >= 0 ? '#10b981' : '#f87171',
+      lineWidth: 2,
+    });
+    areaSeries.setData(stats.equityCurve as any);
+    chart.timeScale().fitContent();
+
+    const handleResize = () => {
+      if (equityRef.current && chartInstanceRef.current) {
+        chartInstanceRef.current.applyOptions({ width: equityRef.current.clientWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.remove();
+        chartInstanceRef.current = null;
+      }
+    };
+  }, [stats]);
+
+  const filteredTrades = trades.filter((t) => {
+    if (filter !== 'ALL' && t.status !== filter) return false;
+    if (holdFilter !== 'ALL' && t.holdDuration !== holdFilter) return false;
+    return true;
+  });
+
+  if (loading) {
+    return (
+      <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+          <div className="spinner" style={{ width: '32px', height: '32px' }}></div>
+          <p className="page-subtitle">Loading portfolio data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page animate-fade-in">
+      <div className="page-header">
+        <h1 className="page-title">💼 <span>Portfolio</span> Tracker</h1>
+        <p className="page-subtitle">
+          Track trades from live signals • ₹1,00,000 capital • 2% risk per trade
+        </p>
+      </div>
+
+      {/* Summary cards */}
+      {stats && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+            <div className="metric-card">
+              <p className="metric-label">Current Capital</p>
+              <p className={`metric-value ${stats.currentCapital >= stats.initialCapital ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
+                ₹{stats.currentCapital.toLocaleString('en-IN')}
+              </p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Total P&L</p>
+              <p className={`metric-value ${stats.totalPnl >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
+                {stats.totalPnl >= 0 ? '+' : ''}₹{stats.totalPnl.toLocaleString('en-IN')}
+              </p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Win Rate</p>
+              <p className="metric-value highlight" style={{ fontSize: '1.3rem' }}>
+                {stats.winRate}%
+              </p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Profit Factor</p>
+              <p className={`metric-value ${stats.profitFactor >= 1 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
+                {stats.profitFactor}
+              </p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Active / Total</p>
+              <p className="metric-value" style={{ fontSize: '1.3rem' }}>
+                <span style={{ color: 'var(--cyan)' }}>{stats.openTrades}</span>
+                <span style={{ color: 'var(--text-muted)' }}> / </span>
+                {stats.totalTrades}
+              </p>
+            </div>
+          </div>
+
+          {/* Secondary stats row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+            <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
+              <p className="metric-label">W / L</p>
+              <p className="metric-value" style={{ fontSize: '1.1rem' }}>
+                <span style={{ color: 'var(--green)' }}>{stats.wins}</span>
+                <span style={{ color: 'var(--text-muted)' }}> / </span>
+                <span style={{ color: 'var(--red)' }}>{stats.losses}</span>
+              </p>
+            </div>
+            <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
+              <p className="metric-label">Avg Win</p>
+              <p className="metric-value positive" style={{ fontSize: '1.1rem' }}>+₹{stats.avgWin}</p>
+            </div>
+            <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
+              <p className="metric-label">Avg Loss</p>
+              <p className="metric-value negative" style={{ fontSize: '1.1rem' }}>-₹{stats.avgLoss}</p>
+            </div>
+            <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
+              <p className="metric-label">Best Strategy</p>
+              <p className="metric-value highlight" style={{ fontSize: '0.9rem' }}>{stats.bestStrategy}</p>
+            </div>
+          </div>
+
+          {/* Equity Curve + Hold Duration Breakdown */}
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
+            <div className="card">
+              <h3 className="card-title" style={{ marginBottom: '1rem' }}>Equity Curve</h3>
+              {stats.equityCurve.length > 0 ? (
+                <div ref={equityRef} style={{ borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}></div>
+              ) : (
+                <div className="empty-state" style={{ padding: '2rem' }}>
+                  <p className="empty-subtitle">No closed trades yet — equity curve will appear after your first trade closes.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              <h3 className="card-title" style={{ marginBottom: '1rem' }}>Hold Duration Breakdown</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {Object.entries(stats.holdDurationStats).map(([key, val]) => {
+                  const info = HOLD_LABELS[key] || HOLD_LABELS.UNKNOWN;
+                  return (
+                    <div key={key} style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '0.75rem', background: 'var(--bg-input)', borderRadius: 'var(--radius-sm)',
+                      border: `1px solid ${info.color}30`,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span>{info.icon}</span>
+                        <span style={{ color: info.color, fontWeight: 600, fontSize: '0.85rem' }}>{info.label}</span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{val.trades} trades</p>
+                        <p style={{ fontSize: '0.8rem', color: val.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>
+                          {val.pnl >= 0 ? '+' : ''}₹{val.pnl.toFixed(0)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+                {Object.keys(stats.holdDurationStats).length === 0 && (
+                  <p className="page-subtitle" style={{ textAlign: 'center', padding: '1rem' }}>No data yet</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Strategy Performance */}
+          {stats.strategyBreakdown.length > 0 && (
+            <div className="card" style={{ marginBottom: '2rem' }}>
+              <h3 className="card-title" style={{ marginBottom: '1rem' }}>Strategy Performance</h3>
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Strategy</th>
+                      <th>Trades</th>
+                      <th>Wins</th>
+                      <th>Win Rate</th>
+                      <th>Total P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.strategyBreakdown.map((s) => (
+                      <tr key={s.strategy}>
+                        <td><span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)', fontWeight: 600 }}>{s.strategy}</span></td>
+                        <td>{s.trades}</td>
+                        <td>{s.wins}</td>
+                        <td>
+                          <span style={{ color: s.winRate >= 50 ? 'var(--green)' : 'var(--red)' }}>
+                            {s.winRate}%
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ color: s.totalPnl >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                            {s.totalPnl >= 0 ? '+' : ''}₹{s.totalPnl.toLocaleString('en-IN')}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Trade History */}
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <h3 className="card-title" style={{ margin: 0 }}>Trade Journal</h3>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {(['ALL', 'OPEN', 'CLOSED'] as const).map((f) => (
+              <button
+                key={f}
+                className={`btn btn-sm ${filter === f ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setFilter(f)}
+              >
+                {f === 'ALL' ? 'All' : f === 'OPEN' ? '🟢 Open' : '⬜ Closed'}
+              </button>
+            ))}
+            <select
+              className="form-select"
+              style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', width: 'auto' }}
+              value={holdFilter}
+              onChange={(e) => setHoldFilter(e.target.value)}
+            >
+              <option value="ALL">All Durations</option>
+              <option value="INTRADAY">⏱ Intraday</option>
+              <option value="SHORT_SWING">📅 Short Swing</option>
+              <option value="MID_SWING">📆 Mid Swing</option>
+              <option value="LONG_POSITIONAL">🗓 Long Term</option>
+            </select>
+          </div>
+        </div>
+
+        {filteredTrades.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">📋</div>
+            <p className="empty-title">No trades yet</p>
+            <p className="empty-subtitle">
+              Trades will appear here when the live scanner generates signals.
+            </p>
+          </div>
+        ) : (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Type</th>
+                  <th>Symbol</th>
+                  <th>Strategy</th>
+                  <th>Duration</th>
+                  <th>Qty</th>
+                  <th>Entry ₹</th>
+                  <th>Exit ₹</th>
+                  <th>P&L</th>
+                  <th>Outcome</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTrades.map((t) => {
+                  const hold = HOLD_LABELS[t.holdDuration] || HOLD_LABELS.UNKNOWN;
+                  return (
+                    <tr key={t.id}>
+                      <td>
+                        <span className={`badge ${t.status === 'OPEN' ? 'badge-active' : 'badge-closed'}`}>
+                          {t.status}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`badge ${t.signalType === 'BUY' ? 'badge-buy' : 'badge-sell'}`}>
+                          {t.signalType}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {t.symbol}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--cyan)' }}>
+                          {t.strategyName}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="badge" style={{
+                          background: `${hold.color}20`,
+                          color: hold.color,
+                          border: `1px solid ${hold.color}40`,
+                          fontSize: '0.65rem',
+                        }}>
+                          {hold.icon} {hold.label}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="mono" style={{ fontSize: '0.85rem' }}>{t.quantity}</span>
+                      </td>
+                      <td>
+                        <span className="mono" style={{ fontSize: '0.85rem' }}>₹{t.entryPrice.toFixed(2)}</span>
+                      </td>
+                      <td>
+                        {t.exitPrice ? (
+                          <span className="mono" style={{ fontSize: '0.85rem' }}>₹{t.exitPrice.toFixed(2)}</span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>
+                        )}
+                      </td>
+                      <td>
+                        {t.pnl !== null ? (
+                          <div>
+                            <span style={{
+                              fontFamily: 'var(--font-mono)',
+                              fontWeight: 700,
+                              color: t.pnl >= 0 ? 'var(--green)' : 'var(--red)',
+                              fontSize: '0.85rem',
+                            }}>
+                              {t.pnl >= 0 ? '+' : ''}₹{t.pnl.toFixed(0)}
+                            </span>
+                            <br />
+                            <span style={{
+                              fontSize: '0.7rem',
+                              color: (t.pnlPercent || 0) >= 0 ? 'var(--green)' : 'var(--red)',
+                            }}>
+                              {(t.pnlPercent || 0) >= 0 ? '+' : ''}{(t.pnlPercent || 0).toFixed(2)}%
+                            </span>
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>
+                        )}
+                      </td>
+                      <td>
+                        {t.outcome ? (
+                          <span className={`badge ${t.outcome === 'WIN' ? 'badge-buy' : t.outcome === 'LOSS' ? 'badge-sell' : 'badge-closed'}`}>
+                            {t.outcome}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--yellow)', fontSize: '0.8rem' }}>⏳ Open</span>
+                        )}
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          {new Date(t.entryTime).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                          <br />
+                          {new Date(t.entryTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -177,6 +177,7 @@ export function LiveScanner() {
                   <th>Type</th>
                   <th>Stock</th>
                   <th>Strategy</th>
+                  <th>Hold</th>
                   <th>Entry ₹</th>
                   <th>Stop Loss ₹</th>
                   <th>Target ₹</th>
@@ -191,6 +192,13 @@ export function LiveScanner() {
                   const rr = Math.abs((s.target - s.entryPrice) / (s.entryPrice - s.stopLoss));
                   const isBuy = s.signalType === 'BUY';
                   const symbol = s.symbol || s.stock?.symbol || `#${s.stockId}`;
+                  const holdLabels: Record<string, { label: string; color: string; icon: string }> = {
+                    INTRADAY: { label: 'Intraday', color: '#22d3ee', icon: '⏱' },
+                    SHORT_SWING: { label: 'Short', color: '#fbbf24', icon: '📅' },
+                    MID_SWING: { label: 'Mid', color: '#a78bfa', icon: '📆' },
+                    LONG_POSITIONAL: { label: 'Long', color: '#60a5fa', icon: '🗓' },
+                  };
+                  const hold = holdLabels[(s as any).holdDuration] || { label: '—', color: '#4b5563', icon: '' };
                   return (
                     <tr key={s.id} className={newSignalIds.has(s.id) ? 'signal-row-new' : ''}>
                       <td>
@@ -203,6 +211,11 @@ export function LiveScanner() {
                       </td>
                       <td>
                         <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{s.strategyName}</span>
+                      </td>
+                      <td>
+                        <span className="badge" style={{ background: `${hold.color}20`, color: hold.color, border: `1px solid ${hold.color}40`, fontSize: '0.65rem' }}>
+                          {hold.icon} {hold.label}
+                        </span>
                       </td>
                       <td className="mono" style={{ color: isBuy ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
                         ₹{s.entryPrice.toFixed(2)}
