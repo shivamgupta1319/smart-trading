@@ -17,7 +17,7 @@ import { Logger } from '@nestjs/common';
 })
 export class SignalsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private readonly logger = new Logger(SignalsGateway.name);
 
@@ -38,3 +38,4 @@ export class SignalsGateway implements OnGatewayInit, OnGatewayConnection, OnGat
     this.server.emit('NEW_TRADE_ALERT', payload);
   }
 }
+

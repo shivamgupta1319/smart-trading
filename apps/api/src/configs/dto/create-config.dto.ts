@@ -3,13 +3,13 @@ import { IsString, IsNotEmpty } from "class-validator";
 export class CreateConfigDto {
   @IsString()
   @IsNotEmpty()
-  symbol: string;
+  symbol!: string;
 
   @IsString()
   @IsNotEmpty()
-  strategyName: string;
+  strategyName!: string;
 
   @IsString()
   @IsNotEmpty()
-  timeframe: string;
+  timeframe!: string;
 }

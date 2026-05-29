@@ -27,6 +27,7 @@ model Stock {
   backtestReports     BacktestReport[]
   activeConfigurations ActiveConfiguration[]
   liveSignals         LiveSignal[]
+  trades              Trade[]
 }
 
 model HistoricalData {
@@ -84,10 +85,44 @@ model LiveSignal {
   entryPrice   Float
   stopLoss     Float
   target       Float
+  holdDuration String?  // "INTRADAY" | "SHORT_SWING" | "MID_SWING" | "LONG_POSITIONAL"
   timestamp    DateTime @default(now())
   status       String   @default("ACTIVE") // "ACTIVE" | "CLOSED"
 
   stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  trade Trade?
 
   @@index([stockId, status])
+}
+
+model Trade {
+  id            Int       @id @default(autoincrement())
+  signalId      Int       @unique
+  stockId       Int
+  symbol        String
+  strategyName  String
+  signalType    String    // "BUY" | "SELL"
+  holdDuration  String    // "INTRADAY" | "SHORT_SWING" | "MID_SWING" | "LONG_POSITIONAL"
+  entryPrice    Float
+  exitPrice     Float?
+  stopLoss      Float
+  target        Float
+  quantity      Int       @default(1)
+  capitalUsed   Float     @default(0) // Amount of capital allocated to this trade
+  riskAmount    Float     @default(0) // Amount at risk (entry - SL) * quantity
+  pnl           Float?
+  pnlPercent    Float?
+  outcome       String?   // "WIN" | "LOSS" | "BREAKEVEN"
+  entryTime     DateTime
+  exitTime      DateTime?
+  status        String    @default("OPEN") // "OPEN" | "CLOSED"
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  signal        LiveSignal @relation(fields: [signalId], references: [id])
+  stock         Stock      @relation(fields: [stockId], references: [id])
+
+  @@index([stockId, status])
+  @@index([status])
+  @@index([strategyName])
 }

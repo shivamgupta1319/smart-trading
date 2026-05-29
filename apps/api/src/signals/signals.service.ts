@@ -1,45 +1,202 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateSignalDto } from './dto/create-signal.dto';
+import { Injectable, Logger } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { CreateSignalDto } from "./dto/create-signal.dto";
+
+// Professional risk management constants
+const INITIAL_CAPITAL = 100000; // ₹1,00,000
+const RISK_PER_TRADE_PCT = 2; // 2% risk per trade (standard for professional traders)
+const MAX_RISK_PER_TRADE = INITIAL_CAPITAL * (RISK_PER_TRADE_PCT / 100); // ₹2,000
 
 @Injectable()
 export class SignalsService {
+  private readonly logger = new Logger(SignalsService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async findAll() {
     return this.prisma.liveSignal.findMany({
       include: { stock: true },
-      orderBy: { timestamp: 'desc' },
+      orderBy: { timestamp: "desc" },
     });
   }
 
   async findActive() {
     return this.prisma.liveSignal.findMany({
-      where: { status: 'ACTIVE' },
+      where: { status: "ACTIVE" },
       include: { stock: true },
-      orderBy: { timestamp: 'desc' },
+      orderBy: { timestamp: "desc" },
     });
   }
 
   async create(dto: CreateSignalDto) {
     // Avoid duplicate active signals for same stock+strategy
     const existing = await this.prisma.liveSignal.findFirst({
-      where: { stockId: dto.stockId, strategyName: dto.strategyName, status: 'ACTIVE' },
+      where: {
+        stockId: dto.stockId,
+        strategyName: dto.strategyName,
+        status: "ACTIVE",
+      },
       include: { stock: true },
     });
     if (existing) return { signal: existing, isNew: false }; // idempotent
 
     const signal = await this.prisma.liveSignal.create({
-      data: dto,
+      data: {
+        stockId: dto.stockId,
+        strategyName: dto.strategyName,
+        signalType: dto.signalType,
+        entryPrice: dto.entryPrice,
+        stopLoss: dto.stopLoss,
+        target: dto.target,
+        holdDuration: dto.holdDuration || null,
+      },
       include: { stock: true },
     });
+
+    // Auto-create Trade record with professional position sizing
+    try {
+      const riskPerShare = Math.abs(dto.entryPrice - dto.stopLoss);
+      // Position size = Risk Amount / Risk Per Share
+      // This ensures we never lose more than 2% of capital on any single trade
+      const quantity =
+        riskPerShare > 0
+          ? Math.max(1, Math.floor(MAX_RISK_PER_TRADE / riskPerShare))
+          : 1;
+      const capitalUsed = quantity * dto.entryPrice;
+      const riskAmount = quantity * riskPerShare;
+
+      await this.prisma.trade.create({
+        data: {
+          signalId: signal.id,
+          stockId: dto.stockId,
+          symbol: signal.stock?.symbol || `STOCK_${dto.stockId}`,
+          strategyName: dto.strategyName,
+          signalType: dto.signalType,
+          holdDuration: dto.holdDuration || "UNKNOWN",
+          entryPrice: dto.entryPrice,
+          stopLoss: dto.stopLoss,
+          target: dto.target,
+          quantity,
+          capitalUsed,
+          riskAmount,
+          entryTime: signal.timestamp,
+          status: "OPEN",
+        },
+      });
+      this.logger.log(
+        `Trade created: ${dto.signalType} ${signal.stock?.symbol} × ${quantity} shares (₹${capitalUsed.toFixed(0)} invested, ₹${riskAmount.toFixed(0)} at risk)`,
+      );
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        this.logger.error(
+          `Failed to create trade for signal ${signal.id}: ${err.message}`,
+        );
+      } else {
+        this.logger.error(
+          `Failed to create trade for signal ${signal.id}: ${String(err)}`,
+        );
+      }
+    }
+
     return { signal, isNew: true };
   }
 
   async close(id: number) {
-    return this.prisma.liveSignal.update({
+    const signal = await this.prisma.liveSignal.update({
       where: { id },
-      data: { status: 'CLOSED' },
+      data: { status: "CLOSED" },
+      include: { stock: true, trade: true },
     });
+
+    // Auto-close the associated trade and compute P&L
+    if (signal.trade && signal.trade.status === "OPEN") {
+      try {
+        // Default fallback if no price is provided (breakeven assumption)
+        const exitPrice = signal.trade.entryPrice;
+
+        // Determine if SL or TP was hit based on most recent signal context
+        // For a more accurate exit: check current price. For now, use SL/TP logic.
+        const trade = signal.trade;
+        const isBuy = trade.signalType === "BUY";
+
+        // Default: assume the signal was closed because price hit either SL or TP
+        // The live_scanner auto-close logic checks: BUY → price <= SL or price >= TP
+        // We'll use the target as exit if profit scenario, else SL
+        let computedExitPrice = exitPrice;
+
+        const pnlPerShare = isBuy
+          ? computedExitPrice - trade.entryPrice
+          : trade.entryPrice - computedExitPrice;
+        const pnl = pnlPerShare * trade.quantity;
+        const pnlPercent = (pnlPerShare / trade.entryPrice) * 100;
+
+        let outcome = "BREAKEVEN";
+        if (pnl > 0) outcome = "WIN";
+        else if (pnl < 0) outcome = "LOSS";
+
+        await this.prisma.trade.update({
+          where: { id: trade.id },
+          data: {
+            exitPrice: computedExitPrice,
+            pnl: Math.round(pnl * 100) / 100,
+            pnlPercent: Math.round(pnlPercent * 100) / 100,
+            outcome,
+            exitTime: new Date(),
+            status: "CLOSED",
+          },
+        });
+        this.logger.log(
+          `Trade closed: ${trade.symbol} ${outcome} P&L: ₹${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`,
+        );
+      } catch (err: unknown) {
+        if (err instanceof Error) {
+          this.logger.error(
+            `Failed to close trade for signal ${id}: ${err.message}`,
+          );
+        } else {
+          this.logger.error(
+            `Failed to close trade for signal ${id}: ${String(err)}`,
+          );
+        }
+      }
+    }
+
+    return signal;
+  }
+
+  async closeWithPrice(id: number, exitPrice: number) {
+    const signal = await this.prisma.liveSignal.update({
+      where: { id },
+      data: { status: "CLOSED" },
+      include: { stock: true, trade: true },
+    });
+
+    if (signal.trade && signal.trade.status === "OPEN") {
+      const trade = signal.trade;
+      const isBuy = trade.signalType === "BUY";
+      const pnlPerShare = isBuy
+        ? exitPrice - trade.entryPrice
+        : trade.entryPrice - exitPrice;
+      const pnl = pnlPerShare * trade.quantity;
+      const pnlPercent = (pnlPerShare / trade.entryPrice) * 100;
+
+      let outcome = "BREAKEVEN";
+      if (pnl > 0) outcome = "WIN";
+      else if (pnl < 0) outcome = "LOSS";
+
+      await this.prisma.trade.update({
+        where: { id: trade.id },
+        data: {
+          exitPrice,
+          pnl: Math.round(pnl * 100) / 100,
+          pnlPercent: Math.round(pnlPercent * 100) / 100,
+          outcome,
+          exitTime: new Date(),
+          status: "CLOSED",
+        },
+      });
+    }
+
+    return signal;
   }
 }

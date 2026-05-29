@@ -66,4 +66,13 @@ export class EngineController {
     });
     return response.data;
   }
+
+  @Get('chart-data/:symbol')
+  async getChartData(@Param('symbol') symbol: string, @Query('timeframe') timeframe: string) {
+    const response = await axios.get(`${this.engineUrl}/api/engine/chart-data/${symbol}`, {
+      params: { timeframe: timeframe || '1d' },
+      timeout: 30000,
+    });
+    return response.data;
+  }
 }

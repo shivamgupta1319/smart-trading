@@ -6,6 +6,8 @@ import { ConfigsModule } from '../configs/configs.module';
 import { SignalsModule } from '../signals/signals.module';
 import { EngineModule } from '../engine/engine.module';
 import { NseStocksModule } from '../nse-stocks/nse-stocks.module';
+import { TradesModule } from '../trades/trades.module';
+import { TelegramModule } from '../telegram/telegram.module';
 
 @Module({
   imports: [
@@ -16,6 +18,8 @@ import { NseStocksModule } from '../nse-stocks/nse-stocks.module';
     SignalsModule,
     EngineModule,
     NseStocksModule,
+    TradesModule,
+    TelegramModule,
   ],
 })
 export class AppModule {}

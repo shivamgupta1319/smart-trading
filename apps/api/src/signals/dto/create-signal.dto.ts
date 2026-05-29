@@ -1,23 +1,29 @@
-import { IsString, IsNotEmpty, IsNumber, IsInt } from 'class-validator';
+import { IsString, IsNotEmpty, IsNumber, IsInt, IsOptional } from 'class-validator';
 
 export class CreateSignalDto {
   @IsInt()
-  stockId: number;
+  stockId!: number;
 
   @IsString()
   @IsNotEmpty()
-  strategyName: string;
+  strategyName!: string;
 
   @IsString()
   @IsNotEmpty()
-  signalType: string; // "BUY" | "SELL"
+  signalType!: string; // "BUY" | "SELL"
 
   @IsNumber()
-  entryPrice: number;
+  entryPrice!: number;
 
   @IsNumber()
-  stopLoss: number;
+  stopLoss!: number;
 
   @IsNumber()
-  target: number;
+  target!: number;
+
+  @IsString()
+  @IsOptional()
+  holdDuration?: string; // "INTRADAY" | "SHORT_SWING" | "MID_SWING" | "LONG_POSITIONAL"
 }
+
+
