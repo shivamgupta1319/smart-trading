@@ -16,7 +16,7 @@ load_dotenv()
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from db.client import engine
-from strategies import STRATEGY_REGISTRY
+from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
 
 NESTJS_URL = os.getenv("NESTJS_SIGNAL_URL", "http://localhost:3000/api/signals/new")
 IST = pytz.timezone("Asia/Kolkata")
@@ -97,6 +97,7 @@ def check_and_fire_signal(config, cache):
             "entryPrice": round(float(latest['Close']), 2),
             "stopLoss": round(float(latest.get('stop_loss', latest['Close'] * 0.98)), 2),
             "target": round(float(latest.get('target', latest['Close'] * 1.04)), 2),
+            "holdDuration": STRATEGY_HOLD_DURATIONS.get(strategy_name, "UNKNOWN"),
         }
 
         print(f"  🚨 SIGNAL: {signal_type} {symbol} @ ₹{payload['entryPrice']} ({strategy_name})")
@@ -141,9 +142,9 @@ def auto_close_signals(cache):
                 if latest_price >= sl or latest_price <= tp:
                     should_close = True
                     
-            if should_close:
+            if (should_close):
                 print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{latest_price} hit bounds (SL: ₹{sl}, TP: ₹{tp})")
-                httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{sig['id']}/close", timeout=10)
+                httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{sig['id']}/close", json={"exitPrice": latest_price}, timeout=10)
     except Exception as e:
         print(f"  [ERROR] auto-closing signals: {e}")
 

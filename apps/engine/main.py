@@ -35,8 +35,13 @@ def health():
 
 @app.get("/api/engine/strategies")
 def list_strategies():
-    from strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES
+    from strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES, STRATEGY_HOLD_DURATIONS
     return [
-        {"name": name, "timeframe": STRATEGY_TIMEFRAMES[name]}
+        {
+            "name": name,
+            "timeframe": STRATEGY_TIMEFRAMES[name],
+            "holdDuration": STRATEGY_HOLD_DURATIONS.get(name, "UNKNOWN"),
+        }
         for name in STRATEGY_REGISTRY.keys()
     ]
+

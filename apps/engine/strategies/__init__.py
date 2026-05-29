@@ -88,3 +88,40 @@ STRATEGY_TIMEFRAMES = {
     "Channel_Oscillation": "1D",
     "Volume_Climax": "1D",
 }
+
+# Hold duration classification for trade journal
+# INTRADAY: Exit same day by 15:15 IST
+# SHORT_SWING: 2-5 trading days
+# MID_SWING: 1-4 weeks
+# LONG_POSITIONAL: 1-6 months
+STRATEGY_HOLD_DURATIONS = {
+    "15m_ORB": "INTRADAY",
+    "VWAP_Supertrend": "INTRADAY",
+    "VWAP_MACD_RSI": "INTRADAY",
+    "EMA_RSI": "INTRADAY",
+    "MACD_Zero": "INTRADAY",
+    "Inside_Bar": "INTRADAY",
+    "Gap_And_Go": "INTRADAY",
+    "EMA20_Pullback": "INTRADAY",
+    "CPR_Breakout": "INTRADAY",
+    "PDH_PDL_Breakout": "INTRADAY",
+    "BB_Mean_Reversion_Intraday": "INTRADAY",
+    "SMA44_Pullback": "SHORT_SWING",
+    "EMA200_MACD": "SHORT_SWING",
+    "SuperTrend_EMA": "SHORT_SWING",
+    "DMA20_Pullback": "SHORT_SWING",
+    "Break_And_Retest": "SHORT_SWING",
+    "BB_Squeeze": "MID_SWING",
+    "RSI_Divergence": "MID_SWING",
+    "Bollinger_Mean_Reversion": "MID_SWING",
+    "MACD_Stoch_Confluence": "MID_SWING",
+    "VCP": "MID_SWING",
+    "Episodic_Pivot": "MID_SWING",
+    "Fibonacci_Golden_Zone": "MID_SWING",
+    "Channel_Oscillation": "MID_SWING",
+    "Volume_Climax": "MID_SWING",
+    "Golden_Cross": "LONG_POSITIONAL",
+    "EMA_10_50_Cross": "LONG_POSITIONAL",
+    "MTF_Alignment": "LONG_POSITIONAL",
+}
+
