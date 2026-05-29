@@ -1,6 +1,6 @@
 # ⚡ SmartTrader — Zero-Cost Algorithmic Trading Scanner
 
-A full-stack local platform for Indian stock market (NSE) algorithmic trading. Backtests 28 strategies, allows assigning multiple strategies to a stock, and monitors live markets every 60 seconds to fire WebSocket alerts.
+A full-stack local platform for Indian stock market (NSE) algorithmic trading. Backtests 28 strategies, provides interactive candlestick charting, automatic portfolio/risk management tracking, and monitors live markets every 60 seconds to fire WebSocket and Telegram alerts.
 
 ## Architecture
 
@@ -125,6 +125,8 @@ python scanner/live_scanner.py
 DATABASE_URL=postgresql://trader:trader@localhost:5470/smart_trading
 ENGINE_URL=http://smart-trading-engine:8000
 PORT=3000
+TELEGRAM_BOT_TOKEN="your_bot_token_here"
+TELEGRAM_CHAT_ID="your_chat_id_here"
 ```
 
 **apps/engine/.env**

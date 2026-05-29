@@ -145,6 +145,25 @@ NESTJS_SIGNAL_URL=http://localhost:3000/api/signals/new
 
 ---
 
+### 2026-05-29 — Session 2
+**Done:**
+- Integrated `lightweight-charts` v5 in React frontend for Candlestick Charts with EMA, BB, and Volume indicators.
+- Added `/api/engine/chart-data/{symbol}` in Python engine for streaming history & indicators.
+- Created `Trade` model in Prisma to track portfolio and P&L.
+- Implemented professional risk management model (2% risk of ₹1,00,000 capital) in SignalsService.
+- Added strategy hold durations (`INTRADAY`, `SHORT_SWING`, `MID_SWING`, `LONG_POSITIONAL`) metadata in Python engine.
+- Integrated Telegram alert system for Signals and Exits.
+- Fixed TypeScript Strict Property Initialization errors in API DTOs.
+- Fixed `err: any` scoping in API services.
+- Refactored `CandlestickChart.tsx` and `Portfolio.tsx` to use the correct `lightweight-charts` v5 `addSeries` API.
+- Updated documentation (README.md, docs/architecture.md, docs/progress.md).
+
+**Next:**
+- Database synchronization: `npx prisma db push --schema apps/api/prisma/schema.prisma`
+- Perform full integration tests for the Signal Generation → Trade Creation → Telegram lifecycle.
+
+---
+
 ## Known Gotchas / Watch Out For
 
 1. **yfinance rate limiting**: Add `time.sleep(1)` between batch downloads

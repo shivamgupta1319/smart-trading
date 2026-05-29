@@ -79,6 +79,15 @@
 - [x] Seed NSE Stocks into Database for auto-complete
 - [x] Update UI flows to remove unnecessary forms and optimize UX
 
+## Phase 6 — Advanced Features ✅
+- [x] Integrate `lightweight-charts` for Interactive Candlestick Charts with Indicators (EMA, BB, Volume)
+- [x] Add `/api/engine/chart-data/{symbol}` endpoint to stream chart history & indicators
+- [x] Auto-position sizing & 2% risk management model implemented in SignalsService
+- [x] Full Portfolio Tracking & Trade Journal implementation (Trades and P&L Tracking)
+- [x] Trade classification by `holdDuration` (`INTRADAY`, `SHORT_SWING`, `MID_SWING`, `LONG_POSITIONAL`)
+- [x] Global Telegram Bot Alert system integration for Signals and Exits
+- [x] Fix TypeScript compilation errors (Strict Property Init & lightweight-charts v5 migration)
+
 ## What's Running
 - **NestJS**: `npx nx serve api` (port 3000)
 - **Python Engine**: `uvicorn main:app --reload` in apps/engine (port 8000)
