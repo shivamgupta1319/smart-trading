@@ -60,7 +60,7 @@ def fetch_live_candles(symbol: str, timeframe: str) -> pd.DataFrame:
     return df
 
 
-def check_and_fire_signal(config, cache):
+def check_and_fire_signal(config, cache, last_fired_times):
     stock_id = config[1]
     strategy_name = config[2]
     timeframe = config[3]
@@ -84,9 +84,16 @@ def check_and_fire_signal(config, cache):
 
         df = strategy.generate_signals(df)
         latest = df.iloc[-1]
+        candle_time = latest.name
 
         if latest.get('signal', 0) == 0:
             print(f"  [INFO] {symbol} ({strategy_name}): No signal")
+            return
+            
+        # Prevent duplicate signals for the exact same candle
+        last_fired = last_fired_times.get(cache_key)
+        if last_fired == candle_time:
+            print(f"  [INFO] {symbol} ({strategy_name}): Signal already fired for this candle")
             return
 
         signal_type = "BUY" if latest['signal'] == 1 else "SELL"
@@ -103,6 +110,9 @@ def check_and_fire_signal(config, cache):
         print(f"  🚨 SIGNAL: {signal_type} {symbol} @ ₹{payload['entryPrice']} ({strategy_name})")
         response = httpx.post(NESTJS_URL, json=payload, timeout=10)
         print(f"  ✅ Posted to NestJS: {response.status_code}")
+        
+        # Mark this candle as fired
+        last_fired_times[cache_key] = candle_time
 
     except Exception as e:
         print(f"  [ERROR] {symbol}: {e}")
@@ -155,6 +165,8 @@ def main():
     print(f"⏰ Market hours: {MARKET_OPEN} – {MARKET_CLOSE} IST")
     print("-" * 50)
 
+    last_fired_times = {}
+
     while True:
         now = datetime.now(IST)
         print(f"\n[{now.strftime('%H:%M:%S')} IST] Scanning...")
@@ -176,7 +188,7 @@ def main():
         else:
             for config in configs:
                 print(f"  Checking {config[4]} with {config[2]} ({config[3]})...")
-                check_and_fire_signal(config, cache)
+                check_and_fire_signal(config, cache, last_fired_times)
                 time.sleep(1)  # Brief pause between stocks
 
         print(f"  Done. Sleeping {POLL_INTERVAL}s...")

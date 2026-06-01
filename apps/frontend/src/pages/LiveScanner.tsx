@@ -83,9 +83,21 @@ export function LiveScanner() {
     setToasts(prev => prev.filter(t => t.toastId !== id));
   }, []);
 
-  const closeSignal = async (id: number) => {
+  const closeSignal = async (id: number, symbol: string) => {
     try {
-      await axios.patch(`${API}/api/signals/${id}/close`);
+      let payload = {};
+      try {
+        const liveRes = await axios.post(`${API}/api/engine/live-prices`, { symbols: [symbol] });
+        const livePriceData = liveRes.data[symbol];
+        const livePrice = livePriceData ? (typeof livePriceData === 'object' ? livePriceData.price : livePriceData) : undefined;
+        if (livePrice) {
+          payload = { exitPrice: livePrice };
+        }
+      } catch (e) {
+        console.error('Failed to fetch live price for closing', e);
+      }
+      
+      await axios.patch(`${API}/api/signals/${id}/close`, payload);
       setActiveSignals(prev => prev.map(s => s.id === id ? { ...s, status: 'CLOSED' } : s));
     } catch { /* noop */ }
   };
@@ -235,7 +247,7 @@ export function LiveScanner() {
                       </td>
                       <td>
                         {s.status === 'ACTIVE' && (
-                          <button className="btn btn-danger btn-sm" onClick={() => closeSignal(s.id)}>
+                          <button className="btn btn-danger btn-sm" onClick={() => closeSignal(s.id, symbol)}>
                             Close
                           </button>
                         )}

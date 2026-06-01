@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smart-trading-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: trader
+      POSTGRES_DB: smart_trading
+    ports:
+      - "5470:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trader -d smart_trading"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: ${DOCKER_USERNAME:-yourusername}/smart-trading-api:latest
+    container_name: smart-trading-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://trader:trader@postgres:5432/smart_trading
+      ENGINE_URL: http://engine:8000
+      PORT: 3000
+      TELEGRAM_BOT_TOKEN: 8906932627:AAHXOczytpBcIlO23GeYE1iXSvEQ917T-Zc
+      TELEGRAM_CHAT_ID: 7511805281
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  engine:
+    image: ${DOCKER_USERNAME:-yourusername}/smart-trading-engine:latest
+    container_name: smart-trading-engine
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://trader:trader@postgres:5432/smart_trading
+      NESTJS_SIGNAL_URL: http://api:3000/api/signals/new
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    image: ${DOCKER_USERNAME:-yourusername}/smart-trading-frontend:latest
+    container_name: smart-trading-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+  scanner:
+    image: ${DOCKER_USERNAME:-yourusername}/smart-trading-engine:latest
+    container_name: smart-trading-scanner
+    restart: unless-stopped
+    command: python scanner/live_scanner.py
+    environment:
+      DATABASE_URL: postgresql://trader:trader@postgres:5432/smart_trading
+      NESTJS_SIGNAL_URL: http://api:3000/api/signals/new
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+volumes:
+  postgres_data:

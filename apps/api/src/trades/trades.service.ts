@@ -172,4 +172,19 @@ export class TradesService {
       },
     });
   }
+
+  async remove(id: number) {
+    const trade = await this.prisma.trade.findUnique({ where: { id } });
+    if (!trade) return null;
+    
+    await this.prisma.trade.delete({ where: { id } });
+    
+    try {
+      await this.prisma.liveSignal.delete({ where: { id: trade.signalId } });
+    } catch (e) {
+      // ignore
+    }
+    
+    return trade;
+  }
 }

@@ -83,6 +83,38 @@ export function Portfolio() {
     }
   };
 
+  const closeTrade = async (signalId: number, symbol: string) => {
+    try {
+      let payload = {};
+      try {
+        const liveRes = await axios.post(`${API}/api/engine/live-prices`, { symbols: [symbol] });
+        const livePriceData = liveRes.data[symbol];
+        const livePrice = livePriceData ? (typeof livePriceData === 'object' ? livePriceData.price : livePriceData) : undefined;
+        if (livePrice) {
+          payload = { exitPrice: livePrice };
+        }
+      } catch (e) {
+        console.error('Failed to fetch live price for closing', e);
+      }
+      
+      await axios.patch(`${API}/api/signals/${signalId}/close`, payload);
+      // Refresh portfolio after closing
+      fetchData();
+    } catch (e) {
+      console.error('Failed to close trade', e);
+    }
+  };
+
+  const removeTrade = async (tradeId: number) => {
+    if (!window.confirm('Are you sure you want to completely delete this trade from your journal?')) return;
+    try {
+      await axios.delete(`${API}/api/trades/${tradeId}`);
+      fetchData();
+    } catch (e) {
+      console.error('Failed to remove trade', e);
+    }
+  };
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -388,6 +420,7 @@ export function Portfolio() {
                   <th>P&L</th>
                   <th>Outcome</th>
                   <th>Time</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -499,20 +532,43 @@ export function Portfolio() {
                         })()}
                       </td>
                       <td>
-                        {t.outcome ? (
-                          <span className={`badge ${t.outcome === 'WIN' ? 'badge-buy' : t.outcome === 'LOSS' ? 'badge-sell' : 'badge-closed'}`}>
-                            {t.outcome}
-                          </span>
-                        ) : (
-                          <span style={{ color: 'var(--yellow)', fontSize: '0.8rem' }}>⏳ Open</span>
-                        )}
+                        <span className={`badge ${t.outcome === 'WIN' ? 'badge-buy' : t.outcome === 'LOSS' ? 'badge-sell' : t.status === 'OPEN' ? 'badge-active' : ''}`}>
+                          {t.outcome || (t.status === 'OPEN' ? '⏳ Open' : 'BREAKEVEN')}
+                        </span>
+                      </td>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                        {new Date(t.entryTime).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }).toLowerCase()}
+                        <br/>
+                        <span style={{ fontSize: '0.65rem' }}>
+                          {new Date(t.entryTime).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                        </span>
                       </td>
                       <td>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                          {new Date(t.entryTime).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                          <br />
-                          {new Date(t.entryTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          {t.status === 'OPEN' && (
+                            <button 
+                              className="btn btn-danger btn-sm" 
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
+                              onClick={() => closeTrade(t.signalId, t.symbol)}
+                            >
+                              Close
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-sm"
+                            style={{ 
+                              padding: '0.25rem 0.5rem', 
+                              fontSize: '0.7rem', 
+                              background: 'transparent',
+                              border: '1px solid var(--border-light)',
+                              color: 'var(--text-muted)'
+                            }}
+                            onClick={() => removeTrade(t.id)}
+                            title="Remove Trade"
+                          >
+                            🗑
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

@@ -6,6 +6,7 @@ import {
   Query,
   Body,
   ParseIntPipe,
+  Delete,
 } from '@nestjs/common';
 import { TradesService } from './trades.service';
 
@@ -52,5 +53,10 @@ export class TradesController {
     @Body('exitPrice') exitPrice: number,
   ) {
     return this.tradesService.manualClose(id, exitPrice);
+  }
+
+  @Delete(':id')
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.tradesService.remove(id);
   }
 }
