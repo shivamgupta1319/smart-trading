@@ -67,8 +67,21 @@ export function Portfolio() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'ALL' | 'OPEN' | 'CLOSED'>('ALL');
   const [holdFilter, setHoldFilter] = useState<string>('ALL');
+  const [livePrices, setLivePrices] = useState<Record<string, number | null>>({});
   const equityRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<IChartApi | null>(null);
+
+  const fetchLivePrices = async (tradeList: Trade[]) => {
+    const openTrades = tradeList.filter(t => t.status === 'OPEN');
+    if (openTrades.length === 0) return;
+    try {
+      const symbols = Array.from(new Set(openTrades.map(t => t.symbol)));
+      const r = await axios.post(`${API}/api/engine/live-prices`, { symbols });
+      setLivePrices(r.data);
+    } catch (e) {
+      console.error('Failed to fetch live prices', e);
+    }
+  };
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -79,6 +92,7 @@ export function Portfolio() {
       ]);
       setStats(statsRes.data);
       setTrades(tradesRes.data);
+      fetchLivePrices(tradesRes.data);
     } catch (e) {
       console.error('Failed to fetch portfolio data', e);
     } finally {
@@ -89,6 +103,13 @@ export function Portfolio() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      fetchLivePrices(trades);
+    }, 10000);
+    return () => clearInterval(intervalId);
+  }, [trades]);
 
   // Render equity curve chart
   useEffect(() => {
@@ -411,34 +432,71 @@ export function Portfolio() {
                         <span className="mono" style={{ fontSize: '0.85rem' }}>₹{t.entryPrice.toFixed(2)}</span>
                       </td>
                       <td>
-                        {t.exitPrice ? (
-                          <span className="mono" style={{ fontSize: '0.85rem' }}>₹{t.exitPrice.toFixed(2)}</span>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>
-                        )}
+                        {(() => {
+                          let exitPriceToDisplay = t.exitPrice;
+                          let isLivePrice = false;
+                          if (t.status === 'OPEN') {
+                             const priceData = livePrices[t.symbol];
+                             const livePrice = priceData ? (typeof priceData === 'object' ? (priceData as any).price : priceData) : null;
+                             if (livePrice) {
+                               exitPriceToDisplay = livePrice;
+                               isLivePrice = true;
+                             }
+                          }
+                          
+                          return exitPriceToDisplay ? (
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <span className="mono" style={{ fontSize: '0.85rem' }}>₹{exitPriceToDisplay.toFixed(2)}</span>
+                              {isLivePrice && <span style={{ fontSize: '0.65rem', color: 'var(--cyan)' }}>Live</span>}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>
+                          );
+                        })()}
                       </td>
                       <td>
-                        {t.pnl !== null ? (
-                          <div>
-                            <span style={{
-                              fontFamily: 'var(--font-mono)',
-                              fontWeight: 700,
-                              color: t.pnl >= 0 ? 'var(--green)' : 'var(--red)',
-                              fontSize: '0.85rem',
-                            }}>
-                              {t.pnl >= 0 ? '+' : ''}₹{t.pnl.toFixed(0)}
-                            </span>
-                            <br />
-                            <span style={{
-                              fontSize: '0.7rem',
-                              color: (t.pnlPercent || 0) >= 0 ? 'var(--green)' : 'var(--red)',
-                            }}>
-                              {(t.pnlPercent || 0) >= 0 ? '+' : ''}{(t.pnlPercent || 0).toFixed(2)}%
-                            </span>
-                          </div>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>
-                        )}
+                        {(() => {
+                          let pnlToDisplay = t.pnl;
+                          let pnlPercentToDisplay = t.pnlPercent;
+                          let isLivePnl = false;
+                          
+                          if (t.status === 'OPEN') {
+                             const priceData = livePrices[t.symbol];
+                             const livePrice = priceData ? (typeof priceData === 'object' ? (priceData as any).price : priceData) : null;
+                             if (livePrice) {
+                               pnlToDisplay = t.signalType === 'BUY' 
+                                 ? (livePrice - t.entryPrice) * t.quantity 
+                                 : (t.entryPrice - livePrice) * t.quantity;
+                               pnlPercentToDisplay = t.signalType === 'BUY'
+                                 ? ((livePrice - t.entryPrice) / t.entryPrice) * 100
+                                 : ((t.entryPrice - livePrice) / t.entryPrice) * 100;
+                               isLivePnl = true;
+                             }
+                          }
+
+                          return pnlToDisplay !== null ? (
+                            <div>
+                              <span style={{
+                                fontFamily: 'var(--font-mono)',
+                                fontWeight: 700,
+                                color: pnlToDisplay >= 0 ? 'var(--green)' : 'var(--red)',
+                                fontSize: '0.85rem',
+                              }}>
+                                {pnlToDisplay >= 0 ? '+' : ''}₹{pnlToDisplay.toFixed(0)}
+                              </span>
+                              <br />
+                              <span style={{
+                                fontSize: '0.7rem',
+                                color: (pnlPercentToDisplay || 0) >= 0 ? 'var(--green)' : 'var(--red)',
+                              }}>
+                                {(pnlPercentToDisplay || 0) >= 0 ? '+' : ''}{(pnlPercentToDisplay || 0).toFixed(2)}%
+                              </span>
+                              {isLivePnl && <span style={{ fontSize: '0.65rem', color: 'var(--cyan)' }}>Live</span>}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>—</span>
+                          );
+                        })()}
                       </td>
                       <td>
                         {t.outcome ? (
