@@ -54,16 +54,16 @@ export class TelegramService {
       'Unknown';
 
     const message = [
-      `${emoji} *${signal.signalType} SIGNAL*`,
+      `${emoji} <b>${signal.signalType} SIGNAL</b>`,
       ``,
-      `📈 *Stock:* ${signal.symbol || 'Unknown'}`,
-      `🎯 *Strategy:* ${signal.strategyName}`,
+      `📈 <b>Stock:</b> ${signal.symbol || 'Unknown'}`,
+      `🎯 <b>Strategy:</b> ${signal.strategyName}`,
       `${holdLabel}`,
       ``,
-      `💰 *Entry:* ₹${signal.entryPrice.toFixed(2)}`,
-      `🛑 *Stop Loss:* ₹${signal.stopLoss.toFixed(2)}`,
-      `✅ *Target:* ₹${signal.target.toFixed(2)}`,
-      `📊 *Risk:Reward:* 1:${rr}`,
+      `💰 <b>Entry:</b> ₹${signal.entryPrice.toFixed(2)}`,
+      `🛑 <b>Stop Loss:</b> ₹${signal.stopLoss.toFixed(2)}`,
+      `✅ <b>Target:</b> ₹${signal.target.toFixed(2)}`,
+      `📊 <b>Risk:Reward:</b> 1:${rr}`,
       ``,
       `⏰ ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
     ].join('\n');
@@ -74,16 +74,18 @@ export class TelegramService {
         {
           chat_id: this.chatId,
           text: message,
-          parse_mode: 'Markdown',
+          parse_mode: 'HTML',
           disable_web_page_preview: true,
         },
-        { timeout: 10000 },
+        { timeout: 10000, family: 4 },
       );
       this.logger.log(
         `Telegram alert sent: ${signal.signalType} ${signal.symbol}`,
       );
-    } catch (err: unknown) {
-      if (err instanceof Error) {
+    } catch (err: any) {
+      if (err.response && err.response.data) {
+        this.logger.error(`Failed to send Telegram alert: ${JSON.stringify(err.response.data)}`);
+      } else if (err instanceof Error) {
         this.logger.error(`Failed to send Telegram alert: ${err.message}`);
       } else {
         this.logger.error(`Failed to send Telegram alert: ${String(err)}`);
@@ -108,14 +110,14 @@ export class TelegramService {
     const pnlEmoji = trade.pnl >= 0 ? '📈' : '📉';
 
     const message = [
-      `${emoji} *TRADE CLOSED — ${trade.outcome}*`,
+      `${emoji} <b>TRADE CLOSED — ${trade.outcome}</b>`,
       ``,
-      `📈 *Stock:* ${trade.symbol}`,
-      `🎯 *Strategy:* ${trade.strategyName}`,
+      `📈 <b>Stock:</b> ${trade.symbol}`,
+      `🎯 <b>Strategy:</b> ${trade.strategyName}`,
       ``,
-      `💰 *Entry:* ₹${trade.entryPrice.toFixed(2)}`,
-      `💰 *Exit:* ₹${trade.exitPrice.toFixed(2)}`,
-      `${pnlEmoji} *P&L:* ₹${trade.pnl.toFixed(2)} (${trade.pnlPercent.toFixed(2)}%)`,
+      `💰 <b>Entry:</b> ₹${trade.entryPrice.toFixed(2)}`,
+      `💰 <b>Exit:</b> ₹${trade.exitPrice.toFixed(2)}`,
+      `${pnlEmoji} <b>P&L:</b> ₹${trade.pnl.toFixed(2)} (${trade.pnlPercent.toFixed(2)}%)`,
       ``,
       `⏰ ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
     ].join('\n');
@@ -126,13 +128,15 @@ export class TelegramService {
         {
           chat_id: this.chatId,
           text: message,
-          parse_mode: 'Markdown',
+          parse_mode: 'HTML',
           disable_web_page_preview: true,
         },
-        { timeout: 10000 },
+        { timeout: 10000, family: 4 },
       );
-    } catch (err: unknown) {
-      if (err instanceof Error) {
+    } catch (err: any) {
+      if (err.response && err.response.data) {
+        this.logger.error(`Failed to send Telegram close alert: ${JSON.stringify(err.response.data)}`);
+      } else if (err instanceof Error) {
         this.logger.error(`Failed to send Telegram close alert: ${err.message}`);
       } else {
         this.logger.error(`Failed to send Telegram close alert: ${String(err)}`);

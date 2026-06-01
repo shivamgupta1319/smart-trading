@@ -22,7 +22,7 @@ NESTJS_URL = os.getenv("NESTJS_SIGNAL_URL", "http://localhost:3000/api/signals/n
 IST = pytz.timezone("Asia/Kolkata")
 MARKET_OPEN = dtime(9, 15)
 MARKET_CLOSE = dtime(15, 30)
-POLL_INTERVAL = 300  # seconds
+POLL_INTERVAL = 100  # seconds
 
 
 def is_market_open() -> bool:
