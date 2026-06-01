@@ -120,6 +120,9 @@ def check_and_fire_signal(config, cache, last_fired_times):
 
 def auto_close_signals(cache):
     api_url = NESTJS_URL.replace("/signals/new", "/signals/active")
+    now_time = datetime.now(IST).time()
+    is_square_off_time = now_time >= dtime(15, 15)
+
     try:
         r = httpx.get(api_url, timeout=10)
         if r.status_code != 200:
@@ -145,6 +148,8 @@ def auto_close_signals(cache):
             is_buy = sig['signalType'] == 'BUY'
             
             should_close = False
+            close_reason = f"hit bounds (SL: ₹{sl}, TP: ₹{tp})"
+
             if is_buy:
                 if latest_price <= sl or latest_price >= tp:
                     should_close = True
@@ -152,8 +157,12 @@ def auto_close_signals(cache):
                 if latest_price >= sl or latest_price <= tp:
                     should_close = True
                     
+            if sig.get('holdDuration') == 'INTRADAY' and is_square_off_time:
+                should_close = True
+                close_reason = "INTRADAY auto square-off (>= 15:15 IST)"
+                    
             if (should_close):
-                print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{latest_price} hit bounds (SL: ₹{sl}, TP: ₹{tp})")
+                print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{latest_price} {close_reason}")
                 httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{sig['id']}/close", json={"exitPrice": latest_price}, timeout=10)
     except Exception as e:
         print(f"  [ERROR] auto-closing signals: {e}")
