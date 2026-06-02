@@ -91,14 +91,20 @@ export class TradesService {
       strategyBreakdown.length > 0 ? strategyBreakdown[0].strategy : 'N/A';
 
     // Equity curve: cumulative P&L over time
+    const sortedTrades = [...closedTrades].sort(
+      (a, b) => new Date(a.exitTime || a.entryTime).getTime() - new Date(b.exitTime || b.entryTime).getTime()
+    );
     let cumPnl = 0;
-    const equityCurve = closedTrades.map((t) => {
+    const equityCurveMap = new Map<number, number>();
+    for (const t of sortedTrades) {
       cumPnl += t.pnl || 0;
-      return {
-        time: Math.floor(new Date(t.exitTime || t.entryTime).getTime() / 1000),
-        value: Math.round(cumPnl * 100) / 100,
-      };
-    });
+      const tTime = Math.floor(new Date(t.exitTime || t.entryTime).getTime() / 1000);
+      equityCurveMap.set(tTime, cumPnl);
+    }
+    const equityCurve = Array.from(equityCurveMap.entries()).map(([time, value]) => ({
+      time,
+      value: Math.round(value * 100) / 100,
+    }));
 
     // Hold duration breakdown
     const holdDurationStats: Record<string, { trades: number; pnl: number }> =
