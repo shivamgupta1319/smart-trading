@@ -96,6 +96,13 @@ def check_and_fire_signal(config, cache, last_fired_times):
             print(f"  [INFO] {symbol} ({strategy_name}): Signal already fired for this candle")
             return
 
+        hold_duration = STRATEGY_HOLD_DURATIONS.get(strategy_name, "UNKNOWN")
+        
+        now = datetime.now()
+        if hold_duration == "INTRADAY" and now.hour >= 15:
+            print(f"  [INFO] {symbol} ({strategy_name}): Skipped INTRADAY signal after 3:00 PM")
+            return
+
         signal_type = "BUY" if latest['signal'] == 1 else "SELL"
         payload = {
             "stockId": stock_id,

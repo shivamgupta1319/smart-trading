@@ -25,4 +25,9 @@ export class StocksController {
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.stocksService.remove(id);
   }
+
+  @Post(':id/toggle-active')
+  toggleActive(@Param('id', ParseIntPipe) id: number) {
+    return this.stocksService.toggleActive(id);
+  }
 }
