@@ -118,6 +118,15 @@ def check_and_fire_signal(config, cache, last_fired_times):
         print(f"  [ERROR] {symbol}: {e}")
 
 
+def get_live_price(symbol: str) -> float:
+    yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
+    try:
+        ticker = yf.Ticker(yf_symbol)
+        return ticker.fast_info.last_price
+    except Exception as e:
+        print(f"  [ERROR] fetching live price for {symbol}: {e}")
+        return None
+
 def auto_close_signals(cache):
     api_url = NESTJS_URL.replace("/signals/new", "/signals/active")
     now_time = datetime.now(IST).time()
@@ -133,37 +142,45 @@ def auto_close_signals(cache):
             if not symbol:
                 continue
             
-            # Fetch latest price using a default 15m timeframe if not cached yet
-            cache_key = (symbol, "15m")
-            if cache_key not in cache:
-                cache[cache_key] = fetch_live_candles(symbol, "15m")
-            df = cache[cache_key]
-            
-            if df.empty:
+            latest_price = get_live_price(symbol)
+            if not latest_price:
                 continue
             
-            latest_price = float(df.iloc[-1]['Close'])
             sl = float(sig['stopLoss'])
             tp = float(sig['target'])
             is_buy = sig['signalType'] == 'BUY'
             
             should_close = False
-            close_reason = f"hit bounds (SL: ₹{sl}, TP: ₹{tp})"
+            exit_price = latest_price
+            close_reason = ""
 
             if is_buy:
-                if latest_price <= sl or latest_price >= tp:
+                if latest_price <= sl:
                     should_close = True
+                    exit_price = sl
+                    close_reason = f"hit Stop Loss (₹{sl})"
+                elif latest_price >= tp:
+                    should_close = True
+                    exit_price = tp
+                    close_reason = f"hit Target (₹{tp})"
             else:
-                if latest_price >= sl or latest_price <= tp:
+                if latest_price >= sl:
                     should_close = True
+                    exit_price = sl
+                    close_reason = f"hit Stop Loss (₹{sl})"
+                elif latest_price <= tp:
+                    should_close = True
+                    exit_price = tp
+                    close_reason = f"hit Target (₹{tp})"
                     
-            if sig.get('holdDuration') == 'INTRADAY' and is_square_off_time:
+            if not should_close and sig.get('holdDuration') == 'INTRADAY' and is_square_off_time:
                 should_close = True
+                exit_price = latest_price
                 close_reason = "INTRADAY auto square-off (>= 15:15 IST)"
                     
             if (should_close):
-                print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{latest_price} {close_reason}")
-                httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{sig['id']}/close", json={"exitPrice": latest_price}, timeout=10)
+                print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{exit_price} {close_reason}")
+                httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{sig['id']}/close", json={"exitPrice": exit_price}, timeout=10)
     except Exception as e:
         print(f"  [ERROR] auto-closing signals: {e}")
 
