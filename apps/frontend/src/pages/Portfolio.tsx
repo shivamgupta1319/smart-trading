@@ -416,6 +416,8 @@ export function Portfolio() {
                   <th>Duration</th>
                   <th>Qty</th>
                   <th>Entry ₹</th>
+                  <th>Target ₹</th>
+                  <th>Stop Loss ₹</th>
                   <th>Exit ₹</th>
                   <th>P&L</th>
                   <th>Outcome</th>
@@ -463,6 +465,12 @@ export function Portfolio() {
                       </td>
                       <td>
                         <span className="mono" style={{ fontSize: '0.85rem' }}>₹{t.entryPrice.toFixed(2)}</span>
+                      </td>
+                      <td>
+                        <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--green)' }}>₹{t.target.toFixed(2)}</span>
+                      </td>
+                      <td>
+                        <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--red)' }}>₹{t.stopLoss.toFixed(2)}</span>
                       </td>
                       <td>
                         {(() => {
