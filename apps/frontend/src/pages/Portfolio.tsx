@@ -76,6 +76,7 @@ export function Portfolio() {
   const [filter, setFilter] = useState<'ALL' | 'OPEN' | 'CLOSED'>('ALL');
   const [holdFilter, setHoldFilter] = useState<string>('ALL');
   const [livePrices, setLivePrices] = useState<Record<string, number | null>>({});
+  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'ANALYSIS'>('PORTFOLIO');
   const equityRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<IChartApi | null>(null);
 
@@ -200,7 +201,7 @@ export function Portfolio() {
         chartInstanceRef.current = null;
       }
     };
-  }, [stats]);
+  }, [stats, activeTab]);
 
   const filteredTrades = trades.filter((t) => {
     if (filter !== 'ALL' && t.status !== filter) return false;
@@ -228,8 +229,46 @@ export function Portfolio() {
         </p>
       </div>
 
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', borderBottom: '1px solid var(--border-light)' }}>
+        <button
+          className={`tab-btn ${activeTab === 'PORTFOLIO' ? 'active' : ''}`}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: activeTab === 'PORTFOLIO' ? 'var(--cyan)' : 'var(--text-muted)',
+            padding: '0.75rem 1rem',
+            fontSize: '1rem',
+            fontWeight: activeTab === 'PORTFOLIO' ? 600 : 400,
+            borderBottom: activeTab === 'PORTFOLIO' ? '2px solid var(--cyan)' : '2px solid transparent',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => setActiveTab('PORTFOLIO')}
+        >
+          Actual Portfolio
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'ANALYSIS' ? 'active' : ''}`}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: activeTab === 'ANALYSIS' ? 'var(--cyan)' : 'var(--text-muted)',
+            padding: '0.75rem 1rem',
+            fontSize: '1rem',
+            fontWeight: activeTab === 'ANALYSIS' ? 600 : 400,
+            borderBottom: activeTab === 'ANALYSIS' ? '2px solid var(--cyan)' : '2px solid transparent',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => setActiveTab('ANALYSIS')}
+        >
+          Strategy Performance Analysis
+        </button>
+      </div>
+
       {/* Summary cards */}
-      {stats && (
+      {stats && activeTab === 'PORTFOLIO' && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
             <div className="metric-card">
@@ -289,7 +328,11 @@ export function Portfolio() {
               <p className="metric-value highlight" style={{ fontSize: '0.9rem' }}>{stats.bestStrategy}</p>
             </div>
           </div>
+        </>
+      )}
 
+      {stats && activeTab === 'ANALYSIS' && (
+        <>
           {/* Equity Curve + Hold Duration Breakdown */}
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
             <div className="card">
@@ -417,7 +460,8 @@ export function Portfolio() {
       )}
 
       {/* Trade History */}
-      <div className="card">
+      {activeTab === 'PORTFOLIO' && (
+        <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
           <h3 className="card-title" style={{ margin: 0 }}>Trade Journal</h3>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -635,6 +679,7 @@ export function Portfolio() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
