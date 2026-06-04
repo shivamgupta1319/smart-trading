@@ -55,6 +55,14 @@ interface PortfolioStats {
     wins: number;
     winRate: number;
   }[];
+  stockWiseStrategyBreakdown: {
+    symbol: string;
+    strategy: string;
+    totalPnl: number;
+    trades: number;
+    wins: number;
+    winRate: number;
+  }[];
   equityCurve: { time: number; value: number }[];
   holdDurationStats: Record<string, { trades: number; pnl: number }>;
   initialCapital: number;
@@ -344,6 +352,47 @@ export function Portfolio() {
                   <tbody>
                     {stats.strategyBreakdown.map((s) => (
                       <tr key={s.strategy}>
+                        <td><span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)', fontWeight: 600 }}>{s.strategy}</span></td>
+                        <td>{s.trades}</td>
+                        <td>{s.wins}</td>
+                        <td>
+                          <span style={{ color: s.winRate >= 50 ? 'var(--green)' : 'var(--red)' }}>
+                            {s.winRate}%
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ color: s.totalPnl >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                            {s.totalPnl >= 0 ? '+' : ''}₹{s.totalPnl.toLocaleString('en-IN')}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Stock-wise Strategy Performance */}
+          {stats.stockWiseStrategyBreakdown && stats.stockWiseStrategyBreakdown.length > 0 && (
+            <div className="card" style={{ marginBottom: '2rem' }}>
+              <h3 className="card-title" style={{ marginBottom: '1rem' }}>Stock-wise Strategy Performance</h3>
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Strategy</th>
+                      <th>Trades</th>
+                      <th>Wins</th>
+                      <th>Win Rate</th>
+                      <th>Total P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.stockWiseStrategyBreakdown.map((s) => (
+                      <tr key={`${s.symbol}-${s.strategy}`}>
+                        <td><span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-primary)' }}>{s.symbol}</span></td>
                         <td><span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)', fontWeight: 600 }}>{s.strategy}</span></td>
                         <td>{s.trades}</td>
                         <td>{s.wins}</td>

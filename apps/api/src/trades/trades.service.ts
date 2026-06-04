@@ -118,6 +118,32 @@ export class TradesService {
       holdDurationStats[hd].pnl += t.pnl || 0;
     }
 
+    // Stock-wise Strategy Breakdown
+    const stockWiseStrategyBreakdown: any[] = [];
+    const stockStrategyMap = new Map<string, { pnl: number; trades: number; wins: number }>();
+    
+    for (const t of closedTrades) {
+      const key = JSON.stringify({ symbol: t.symbol, strategy: t.strategyName });
+      const stats = stockStrategyMap.get(key) || { pnl: 0, trades: 0, wins: 0 };
+      stats.pnl += t.pnl || 0;
+      stats.trades++;
+      if (t.outcome === 'WIN') stats.wins++;
+      stockStrategyMap.set(key, stats);
+    }
+    
+    for (const [key, data] of stockStrategyMap.entries()) {
+      const parsed = JSON.parse(key);
+      stockWiseStrategyBreakdown.push({
+        symbol: parsed.symbol,
+        strategy: parsed.strategy,
+        totalPnl: Math.round(data.pnl * 100) / 100,
+        trades: data.trades,
+        wins: data.wins,
+        winRate: data.trades > 0 ? Math.round((data.wins / data.trades) * 100 * 100) / 100 : 0,
+      });
+    }
+    stockWiseStrategyBreakdown.sort((a, b) => b.totalPnl - a.totalPnl);
+
     return {
       totalTrades: allTrades.length,
       openTrades: openTrades.length,
@@ -131,6 +157,7 @@ export class TradesService {
       profitFactor: Math.round(profitFactor * 100) / 100,
       bestStrategy,
       strategyBreakdown,
+      stockWiseStrategyBreakdown,
       equityCurve,
       holdDurationStats,
       initialCapital: 100000,
