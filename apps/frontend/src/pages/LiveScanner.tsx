@@ -13,7 +13,14 @@ interface Config {
   stock: { symbol: string; name: string };
 }
 
-interface Signal extends TradeAlert { stock?: { symbol: string }; }
+interface Signal extends TradeAlert {
+  stock?: { symbol: string };
+  trade?: {
+    trailingState?: string;
+    originalStopLoss?: number;
+    peakPrice?: number;
+  };
+}
 
 // Audio chime using Web Audio API
 function playChime() {
@@ -194,8 +201,8 @@ export function LiveScanner() {
                   <th>Stop Loss ₹</th>
                   <th>Target ₹</th>
                   <th>R:R</th>
+                  <th>Protection</th>
                   <th>Time</th>
-                  <th>Status</th>
                   <th></th>
                 </tr>
               </thead>
@@ -211,6 +218,20 @@ export function LiveScanner() {
                     LONG_POSITIONAL: { label: 'Long', color: '#60a5fa', icon: '🗓' },
                   };
                   const hold = holdLabels[(s as any).holdDuration] || { label: '—', color: '#4b5563', icon: '' };
+                  
+                  // Trailing state from trade data
+                  const trailingState = s.trade?.trailingState || 'INITIAL';
+                  const originalSL = s.trade?.originalStopLoss;
+                  const slChanged = originalSL != null && Math.abs(originalSL - s.stopLoss) > 0.01;
+                  
+                  const trailingBadges: Record<string, { label: string; color: string; icon: string; bg: string }> = {
+                    INITIAL: { label: 'Active', color: '#64748b', icon: '⏳', bg: '#64748b15' },
+                    BREAKEVEN: { label: 'Breakeven', color: '#22c55e', icon: '🔒', bg: '#22c55e15' },
+                    PROFIT_LOCK: { label: 'Profit Locked', color: '#f59e0b', icon: '💰', bg: '#f59e0b15' },
+                    REVERSAL_EXIT: { label: 'Reversal Exit', color: '#ef4444', icon: '⚠️', bg: '#ef444415' },
+                  };
+                  const trailInfo = trailingBadges[trailingState] || trailingBadges.INITIAL;
+                  
                   return (
                     <tr key={s.id} className={newSignalIds.has(s.id) ? 'signal-row-new' : ''}>
                       <td>
@@ -232,18 +253,40 @@ export function LiveScanner() {
                       <td className="mono" style={{ color: isBuy ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
                         ₹{s.entryPrice.toFixed(2)}
                       </td>
-                      <td className="mono" style={{ color: 'var(--red)' }}>₹{s.stopLoss.toFixed(2)}</td>
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                          <span className="mono" style={{ color: slChanged ? 'var(--green)' : 'var(--red)', fontWeight: 600, fontSize: '0.85rem' }}>
+                            ₹{s.stopLoss.toFixed(2)}
+                          </span>
+                          {slChanged && originalSL != null && (
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                              ₹{originalSL.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="mono" style={{ color: 'var(--green)' }}>₹{s.target.toFixed(2)}</td>
                       <td className="mono" style={{ color: rr >= 2 ? 'var(--green)' : 'var(--yellow)' }}>
                         1:{rr.toFixed(1)}
                       </td>
+                      <td>
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          padding: '0.2rem 0.5rem',
+                          borderRadius: '4px',
+                          fontSize: '0.7rem',
+                          fontWeight: 600,
+                          background: trailInfo.bg,
+                          color: trailInfo.color,
+                          border: `1px solid ${trailInfo.color}30`,
+                        }}>
+                          {trailInfo.icon} {trailInfo.label}
+                        </span>
+                      </td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
                         {new Date(s.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}
-                      </td>
-                      <td>
-                        <span className={`badge ${s.status === 'ACTIVE' ? 'badge-active' : 'badge-closed'}`}>
-                          {s.status}
-                        </span>
                       </td>
                       <td>
                         {s.status === 'ACTIVE' && (

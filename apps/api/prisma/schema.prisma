@@ -117,6 +117,9 @@ model Trade {
   exitTime      DateTime?
   status        String    @default("OPEN") // "OPEN" | "CLOSED"
   notes         String?
+  originalStopLoss Float? // Original SL before any trailing adjustments
+  trailingState String    @default("INITIAL") // "INITIAL" | "BREAKEVEN" | "PROFIT_LOCK" | "REVERSAL_EXIT"
+  peakPrice     Float?    // Best favorable price reached during the trade
   createdAt     DateTime  @default(now())
 
   signal        LiveSignal @relation(fields: [signalId], references: [id], onDelete: Cascade)

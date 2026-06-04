@@ -143,4 +143,77 @@ export class TelegramService {
       }
     }
   }
+
+  async sendTrailingAlert(data: {
+    symbol: string;
+    event: 'BREAKEVEN' | 'PROFIT_LOCK';
+    newStopLoss: number;
+  }) {
+    if (!this.enabled) return;
+
+    const emoji = data.event === 'BREAKEVEN' ? '🔒' : '💰';
+    const label =
+      data.event === 'BREAKEVEN'
+        ? 'SL moved to BREAKEVEN'
+        : 'Profit LOCKED';
+
+    const message = [
+      `${emoji} <b>TRAILING SL — ${label}</b>`,
+      ``,
+      `📈 <b>Stock:</b> ${data.symbol}`,
+      `🛑 <b>New SL:</b> ₹${data.newStopLoss.toFixed(2)}`,
+      ``,
+      `⏰ ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+    ].join('\n');
+
+    try {
+      await axios.post(
+        `https://api.telegram.org/bot${this.botToken}/sendMessage`,
+        {
+          chat_id: this.chatId,
+          text: message,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        },
+        { timeout: 10000, family: 4 },
+      );
+      this.logger.log(`Telegram trailing alert sent: ${data.symbol} ${data.event}`);
+    } catch (err: any) {
+      this.logger.error(`Failed to send trailing alert: ${err?.message || err}`);
+    }
+  }
+
+  async sendReversalAlert(data: {
+    symbol: string;
+    exitPrice: number;
+    reason: string;
+  }) {
+    if (!this.enabled) return;
+
+    const message = [
+      `⚠️ <b>REVERSAL DETECTED — Profit Booked</b>`,
+      ``,
+      `📈 <b>Stock:</b> ${data.symbol}`,
+      `💰 <b>Exit Price:</b> ₹${data.exitPrice.toFixed(2)}`,
+      `📊 <b>Reason:</b> ${data.reason}`,
+      ``,
+      `⏰ ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+    ].join('\n');
+
+    try {
+      await axios.post(
+        `https://api.telegram.org/bot${this.botToken}/sendMessage`,
+        {
+          chat_id: this.chatId,
+          text: message,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        },
+        { timeout: 10000, family: 4 },
+      );
+      this.logger.log(`Telegram reversal alert sent: ${data.symbol}`);
+    } catch (err: any) {
+      this.logger.error(`Failed to send reversal alert: ${err?.message || err}`);
+    }
+  }
 }

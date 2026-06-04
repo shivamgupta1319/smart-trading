@@ -55,4 +55,40 @@ export class SignalsController {
     }
     return this.signalsService.close(id);
   }
+
+  @Patch(':id/update-sl')
+  async updateStopLoss(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { newStopLoss: number; trailingState: string; peakPrice?: number },
+  ) {
+    const result = await this.signalsService.updateStopLoss(
+      id,
+      body.newStopLoss,
+      body.trailingState,
+      body.peakPrice,
+    );
+
+    // Send Telegram notification for trailing SL events
+    if (result) {
+      const signal = await this.signalsService.findAll();
+      const sig = signal.find((s) => s.id === id);
+      const symbol = sig?.stock?.symbol || 'Unknown';
+
+      if (body.trailingState === 'BREAKEVEN') {
+        this.telegramService.sendTrailingAlert({
+          symbol,
+          event: 'BREAKEVEN',
+          newStopLoss: body.newStopLoss,
+        });
+      } else if (body.trailingState === 'PROFIT_LOCK') {
+        this.telegramService.sendTrailingAlert({
+          symbol,
+          event: 'PROFIT_LOCK',
+          newStopLoss: body.newStopLoss,
+        });
+      }
+    }
+
+    return result;
+  }
 }

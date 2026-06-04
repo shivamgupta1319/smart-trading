@@ -34,6 +34,9 @@ interface Trade {
   exitTime: string | null;
   status: string;
   notes: string | null;
+  originalStopLoss: number | null;
+  trailingState: string;
+  peakPrice: number | null;
 }
 
 interface PortfolioStats {
@@ -306,7 +309,7 @@ export function Portfolio() {
           </div>
 
           {/* Secondary stats row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
             <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
               <p className="metric-label">W / L</p>
               <p className="metric-value" style={{ fontSize: '1.1rem' }}>
@@ -326,6 +329,24 @@ export function Portfolio() {
             <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
               <p className="metric-label">Best Strategy</p>
               <p className="metric-value highlight" style={{ fontSize: '0.9rem' }}>{stats.bestStrategy}</p>
+            </div>
+            <div className="metric-card" style={{ background: 'var(--bg-input)', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+              <p className="metric-label">🔒 Saved by Trailing</p>
+              <p className="metric-value" style={{ fontSize: '1.1rem' }}>
+                {(() => {
+                  const saved = trades.filter(t => 
+                    t.status === 'CLOSED' && 
+                    t.trailingState && 
+                    t.trailingState !== 'INITIAL' &&
+                    (t.outcome === 'WIN' || t.outcome === 'BREAKEVEN')
+                  ).length;
+                  return (
+                    <span style={{ color: saved > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
+                      {saved} trade{saved !== 1 ? 's' : ''}
+                    </span>
+                  );
+                })()}
+              </p>
             </div>
           </div>
         </>
@@ -633,9 +654,28 @@ export function Portfolio() {
                         })()}
                       </td>
                       <td>
-                        <span className={`badge ${t.outcome === 'WIN' ? 'badge-buy' : t.outcome === 'LOSS' ? 'badge-sell' : t.status === 'OPEN' ? 'badge-active' : ''}`}>
-                          {t.outcome || (t.status === 'OPEN' ? '⏳ Open' : 'BREAKEVEN')}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                          <span className={`badge ${t.outcome === 'WIN' ? 'badge-buy' : t.outcome === 'LOSS' ? 'badge-sell' : t.status === 'OPEN' ? 'badge-active' : ''}`}>
+                            {t.outcome || (t.status === 'OPEN' ? '⏳ Open' : 'BREAKEVEN')}
+                          </span>
+                          {t.status === 'CLOSED' && t.trailingState && t.trailingState !== 'INITIAL' && (
+                            <span style={{
+                              fontSize: '0.6rem',
+                              padding: '0.1rem 0.35rem',
+                              borderRadius: '3px',
+                              fontWeight: 600,
+                              ...(t.trailingState === 'BREAKEVEN' ? { color: '#22c55e', background: '#22c55e15' } :
+                                 t.trailingState === 'PROFIT_LOCK' ? { color: '#f59e0b', background: '#f59e0b15' } :
+                                 t.trailingState === 'REVERSAL_EXIT' ? { color: '#ef4444', background: '#ef444415' } :
+                                 { color: '#64748b', background: '#64748b15' })
+                            }}>
+                              {t.trailingState === 'BREAKEVEN' ? '🔒 BE Exit' :
+                               t.trailingState === 'PROFIT_LOCK' ? '💰 Lock Exit' :
+                               t.trailingState === 'REVERSAL_EXIT' ? '⚠️ Reversal' :
+                               t.trailingState}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
                         {new Date(t.entryTime).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }).toLowerCase()}

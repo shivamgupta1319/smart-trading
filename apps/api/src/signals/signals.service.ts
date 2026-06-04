@@ -23,7 +23,7 @@ export class SignalsService {
   async findActive() {
     return this.prisma.liveSignal.findMany({
       where: { status: "ACTIVE" },
-      include: { stock: true },
+      include: { stock: true, trade: true },
       orderBy: { timestamp: "desc" },
     });
   }
@@ -81,6 +81,9 @@ export class SignalsService {
           riskAmount,
           entryTime: signal.timestamp,
           status: "OPEN",
+          originalStopLoss: dto.stopLoss,
+          trailingState: "INITIAL",
+          peakPrice: dto.entryPrice,
         },
       });
       this.logger.log(
@@ -198,5 +201,50 @@ export class SignalsService {
     }
 
     return signal;
+  }
+
+  async updateStopLoss(
+    id: number,
+    newStopLoss: number,
+    trailingState: string,
+    peakPrice?: number,
+  ) {
+    const signal = await this.prisma.liveSignal.findUnique({
+      where: { id },
+      include: { trade: true },
+    });
+
+    if (!signal || signal.status !== 'ACTIVE') {
+      this.logger.warn(`Cannot update SL for signal ${id}: not active`);
+      return null;
+    }
+
+    // Update signal's stop loss
+    await this.prisma.liveSignal.update({
+      where: { id },
+      data: { stopLoss: newStopLoss },
+    });
+
+    // Update associated trade's stop loss, trailing state, and peak price
+    if (signal.trade && signal.trade.status === 'OPEN') {
+      const updateData: Record<string, unknown> = {
+        stopLoss: newStopLoss,
+        trailingState,
+      };
+      if (peakPrice !== undefined) {
+        updateData.peakPrice = peakPrice;
+      }
+
+      await this.prisma.trade.update({
+        where: { id: signal.trade.id },
+        data: updateData,
+      });
+    }
+
+    this.logger.log(
+      `Trailing SL updated: Signal #${id} → SL ₹${newStopLoss.toFixed(2)} (${trailingState})`,
+    );
+
+    return { id, newStopLoss, trailingState, peakPrice };
   }
 }
