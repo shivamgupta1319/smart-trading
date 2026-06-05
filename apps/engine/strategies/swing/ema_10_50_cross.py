@@ -1,5 +1,6 @@
 import pandas as pd
 import pandas_ta as ta
+import numpy as np
 from strategies.base import BaseStrategy
 
 class EMA1050CrossStrategy(BaseStrategy):
@@ -14,7 +15,11 @@ class EMA1050CrossStrategy(BaseStrategy):
     timeframe = "1D"
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
         if df.empty or len(df) < 50:
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
             return df
 
         df['EMA_10'] = ta.ema(df['Close'], length=10)
@@ -24,34 +29,24 @@ class EMA1050CrossStrategy(BaseStrategy):
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        for i in range(1, len(df)):
-            ema_10 = df['EMA_10'].iloc[i]
-            ema_50 = df['EMA_50'].iloc[i]
-            prev_ema_10 = df['EMA_10'].iloc[i-1]
-            prev_ema_50 = df['EMA_50'].iloc[i-1]
-            
-            if pd.isna(ema_50) or pd.isna(prev_ema_50):
-                continue
-                
-            close = df['Close'].iloc[i]
-            low = df['Low'].iloc[i]
-            high = df['High'].iloc[i]
+        prev_ema_10 = df['EMA_10'].shift(1)
+        prev_ema_50 = df['EMA_50'].shift(1)
 
-            # Bullish Crossover
-            if prev_ema_10 <= prev_ema_50 and ema_10 > ema_50:
-                df.at[df.index[i], 'signal'] = 1
-                # Stop loss below recent swing low (approximate with recent low)
-                recent_low = df['Low'].iloc[max(0, i-5):i+1].min()
-                sl = min(recent_low, close * 0.95)
-                df.at[df.index[i], 'stop_loss'] = sl
-                df.at[df.index[i], 'target'] = close + (close - sl) * 2
+        bullish_cond = (prev_ema_10 <= prev_ema_50) & (df['EMA_10'] > df['EMA_50'])
+        bearish_cond = (prev_ema_10 >= prev_ema_50) & (df['EMA_10'] < df['EMA_50'])
 
-            # Bearish Crossover
-            elif prev_ema_10 >= prev_ema_50 and ema_10 < ema_50:
-                df.at[df.index[i], 'signal'] = -1
-                recent_high = df['High'].iloc[max(0, i-5):i+1].max()
-                sl = max(recent_high, close * 1.05)
-                df.at[df.index[i], 'stop_loss'] = sl
-                df.at[df.index[i], 'target'] = close - (sl - close) * 2
+        recent_low = df['Low'].rolling(window=6, min_periods=1).min()
+        recent_high = df['High'].rolling(window=6, min_periods=1).max()
+
+        sl_bull = np.minimum(recent_low, df['Close'] * 0.95)
+        sl_bear = np.maximum(recent_high, df['Close'] * 1.05)
+
+        df.loc[bullish_cond, 'signal'] = 1
+        df.loc[bullish_cond, 'stop_loss'] = sl_bull[bullish_cond]
+        df.loc[bullish_cond, 'target'] = df['Close'][bullish_cond] + (df['Close'][bullish_cond] - sl_bull[bullish_cond]) * 2
+
+        df.loc[bearish_cond, 'signal'] = -1
+        df.loc[bearish_cond, 'stop_loss'] = sl_bear[bearish_cond]
+        df.loc[bearish_cond, 'target'] = df['Close'][bearish_cond] - (sl_bear[bearish_cond] - df['Close'][bearish_cond]) * 2
 
         return df

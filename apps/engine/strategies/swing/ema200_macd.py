@@ -1,10 +1,10 @@
-"""Strategy 7: 200 EMA + MACD Golden Trend (Swing)"""
 import pandas as pd
 import pandas_ta as ta
 from strategies.base import BaseStrategy
 
 
 class EMA200MACDStrategy(BaseStrategy):
+    """Strategy 7: 200 EMA + MACD Golden Trend (Swing)"""
     name = "EMA200_MACD"
     timeframe = "1D"
 
@@ -14,32 +14,32 @@ class EMA200MACDStrategy(BaseStrategy):
         df['atr14'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
 
         macd = ta.macd(df['Close'], fast=12, slow=26, signal=9)
-        df['macd'] = macd['MACD_12_26_9']
-        df['macd_sig'] = macd['MACDs_12_26_9']
+        if macd is not None and not macd.empty:
+            df['macd'] = macd['MACD_12_26_9']
+            df['macd_sig'] = macd['MACDs_12_26_9']
+        else:
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
+            return df
 
         df['signal'] = 0
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        for i in range(1, len(df)):
-            curr = df.iloc[i]
-            prev = df.iloc[i - 1]
+        prev_macd = df['macd'].shift(1)
+        prev_macd_sig = df['macd_sig'].shift(1)
 
-            if any(pd.isna([curr['ema200'], curr['macd'], curr['macd_sig'], curr['atr14']])):
-                continue
+        cross_up = (prev_macd <= prev_macd_sig) & (df['macd'] > df['macd_sig'])
+        above_ema200 = df['Close'] > df['ema200']
 
-            # Filter: price above 200 EMA
-            if curr['Close'] <= curr['ema200']:
-                continue
+        bullish_cond = cross_up & above_ema200
 
-            # Entry: MACD bullish crossover
-            cross_up = prev['macd'] <= prev['macd_sig'] and curr['macd'] > curr['macd_sig']
-            if cross_up:
-                swing_low = df.iloc[max(0, i-5):i]['Low'].min()
-                sl = swing_low - curr['atr14']
-                rr = curr['Close'] - sl
-                df.iloc[i, df.columns.get_loc('signal')] = 1
-                df.iloc[i, df.columns.get_loc('stop_loss')] = sl
-                df.iloc[i, df.columns.get_loc('target')] = curr['Close'] + 2 * rr
+        swing_low = df['Low'].rolling(window=6, min_periods=1).min()
+        sl = swing_low - df['atr14']
+
+        df.loc[bullish_cond, 'signal'] = 1
+        df.loc[bullish_cond, 'stop_loss'] = sl[bullish_cond]
+        df.loc[bullish_cond, 'target'] = df['Close'][bullish_cond] + 2 * (df['Close'][bullish_cond] - sl[bullish_cond])
 
         return df
