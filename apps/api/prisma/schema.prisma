@@ -118,8 +118,10 @@ model Trade {
   status        String    @default("OPEN") // "OPEN" | "CLOSED"
   notes         String?
   originalStopLoss Float? // Original SL before any trailing adjustments
-  trailingState String    @default("INITIAL") // "INITIAL" | "BREAKEVEN" | "PROFIT_LOCK" | "REVERSAL_EXIT"
+  trailingState String    @default("INITIAL") // "INITIAL" | "PHASE1" | "PHASE2" | "PHASE3" | "REVERSAL_EXIT"
   peakPrice     Float?    // Best favorable price reached during the trade
+  realizedPnl   Float     @default(0) // PnL accumulated from partial exits
+  remainingQty  Int       @default(1) // Remaining quantity after partials
   createdAt     DateTime  @default(now())
 
   signal        LiveSignal @relation(fields: [signalId], references: [id], onDelete: Cascade)

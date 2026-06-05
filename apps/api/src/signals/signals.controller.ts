@@ -91,4 +91,34 @@ export class SignalsController {
 
     return result;
   }
+
+  @Patch(':id/partial-close')
+  async partialClose(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { percent: number; exitPrice: number; reason: string },
+  ) {
+    const result = await this.signalsService.partialClose(
+      id,
+      body.percent,
+      body.exitPrice,
+      body.reason,
+    );
+
+    if (result) {
+      const signal = await this.signalsService.findAll();
+      const sig = signal.find((s) => s.id === id);
+      const symbol = sig?.stock?.symbol || 'Unknown';
+      
+      this.telegramService.sendPartialCloseAlert({
+        symbol,
+        percent: body.percent,
+        exitPrice: body.exitPrice,
+        reason: body.reason,
+        lotPnl: result.lotPnl,
+        remainingQty: result.newRemainingQty,
+      });
+    }
+
+    return result;
+  }
 }

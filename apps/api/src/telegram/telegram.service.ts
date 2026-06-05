@@ -216,4 +216,46 @@ export class TelegramService {
       this.logger.error(`Failed to send reversal alert: ${err?.message || err}`);
     }
   }
+
+  async sendPartialCloseAlert(data: {
+    symbol: string;
+    percent: number;
+    exitPrice: number;
+    reason: string;
+    lotPnl: number;
+    remainingQty: number;
+  }) {
+    if (!this.enabled) return;
+
+    const emoji = data.lotPnl >= 0 ? '🤑' : '💸';
+    const percentStr = Math.round(data.percent * 100);
+
+    const message = [
+      `${emoji} <b>PARTIAL CLOSE (${percentStr}%)</b>`,
+      ``,
+      `📈 <b>Stock:</b> ${data.symbol}`,
+      `💰 <b>Exit Price:</b> ₹${data.exitPrice.toFixed(2)}`,
+      `💵 <b>Lot P&L:</b> ₹${data.lotPnl.toFixed(2)}`,
+      `📦 <b>Remaining Qty:</b> ${data.remainingQty}`,
+      `📊 <b>Reason:</b> ${data.reason}`,
+      ``,
+      `⏰ ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+    ].join('\n');
+
+    try {
+      await axios.post(
+        `https://api.telegram.org/bot${this.botToken}/sendMessage`,
+        {
+          chat_id: this.chatId,
+          text: message,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        },
+        { timeout: 10000, family: 4 },
+      );
+      this.logger.log(`Telegram partial close alert sent: ${data.symbol}`);
+    } catch (err: any) {
+      this.logger.error(`Failed to send partial close alert: ${err?.message || err}`);
+    }
+  }
 }

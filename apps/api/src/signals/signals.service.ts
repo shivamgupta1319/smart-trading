@@ -84,6 +84,7 @@ export class SignalsService {
           originalStopLoss: dto.stopLoss,
           trailingState: "INITIAL",
           peakPrice: dto.entryPrice,
+          remainingQty: quantity,
         },
       });
       this.logger.log(
@@ -167,6 +168,56 @@ export class SignalsService {
     return signal;
   }
 
+  async partialClose(id: number, percentToClose: number, exitPrice: number, reason: string) {
+    const signal = await this.prisma.liveSignal.findUnique({
+      where: { id },
+      include: { trade: true, stock: true },
+    });
+
+    if (!signal || !signal.trade || signal.trade.status !== "OPEN") {
+      this.logger.warn(`Cannot partial close signal ${id}: trade not found or already closed`);
+      return null;
+    }
+
+    const trade = signal.trade;
+    // Calculate how many shares to close based on the ORIGINAL quantity
+    const sharesToClose = Math.max(1, Math.floor(trade.quantity * percentToClose));
+    
+    // Safety check: ensure we don't close more than remaining
+    const actualSharesToClose = Math.min(sharesToClose, trade.remainingQty);
+    
+    if (actualSharesToClose <= 0) {
+      return null;
+    }
+
+    const isBuy = trade.signalType === "BUY";
+    const pnlPerShare = isBuy
+      ? exitPrice - trade.entryPrice
+      : trade.entryPrice - exitPrice;
+    
+    const lotPnl = pnlPerShare * actualSharesToClose;
+    
+    const newRemainingQty = trade.remainingQty - actualSharesToClose;
+    const newRealizedPnl = trade.realizedPnl + lotPnl;
+    
+    await this.prisma.trade.update({
+      where: { id: trade.id },
+      data: {
+        remainingQty: newRemainingQty,
+        realizedPnl: Math.round(newRealizedPnl * 100) / 100,
+        notes: trade.notes 
+          ? `${trade.notes} | ${reason}: Closed ${actualSharesToClose} @ ₹${exitPrice} (P&L: ₹${lotPnl.toFixed(2)})`
+          : `${reason}: Closed ${actualSharesToClose} @ ₹${exitPrice} (P&L: ₹${lotPnl.toFixed(2)})`
+      }
+    });
+
+    this.logger.log(
+      `Partial Close: ${trade.signalType} ${signal.stock?.symbol} - Closed ${actualSharesToClose} shares @ ₹${exitPrice}. Lot P&L: ₹${lotPnl.toFixed(2)}. Remaining: ${newRemainingQty}`
+    );
+
+    return { id, actualSharesToClose, lotPnl, newRemainingQty, newRealizedPnl };
+  }
+
   async closeWithPrice(id: number, exitPrice: number) {
     const signal = await this.prisma.liveSignal.update({
       where: { id },
@@ -180,19 +231,25 @@ export class SignalsService {
       const pnlPerShare = isBuy
         ? exitPrice - trade.entryPrice
         : trade.entryPrice - exitPrice;
-      const pnl = pnlPerShare * trade.quantity;
-      const pnlPercent = (pnlPerShare / trade.entryPrice) * 100;
+        
+      // Final lot P&L based ONLY on remaining quantity
+      const finalLotPnl = pnlPerShare * trade.remainingQty;
+      
+      // Total Trade P&L = Realized from partials + Final Lot P&L
+      const totalPnl = trade.realizedPnl + finalLotPnl;
+      const pnlPercent = (totalPnl / trade.capitalUsed) * 100;
 
       let outcome = "BREAKEVEN";
-      if (pnl > 0) outcome = "WIN";
-      else if (pnl < 0) outcome = "LOSS";
+      if (totalPnl > 0) outcome = "WIN";
+      else if (totalPnl < 0) outcome = "LOSS";
 
       await this.prisma.trade.update({
         where: { id: trade.id },
         data: {
           exitPrice,
-          pnl: Math.round(pnl * 100) / 100,
+          pnl: Math.round(totalPnl * 100) / 100,
           pnlPercent: Math.round(pnlPercent * 100) / 100,
+          remainingQty: 0,
           outcome,
           exitTime: new Date(),
           status: "CLOSED",

@@ -28,6 +28,7 @@ interface Trade {
   capitalUsed: number;
   riskAmount: number;
   pnl: number | null;
+  realizedPnl: number | null;
   pnlPercent: number | null;
   outcome: string | null;
   entryTime: string;
@@ -36,6 +37,7 @@ interface Trade {
   notes: string | null;
   originalStopLoss: number | null;
   trailingState: string;
+  remainingQty: number | null;
   peakPrice: number | null;
 }
 
@@ -575,7 +577,9 @@ export function Portfolio() {
                         </span>
                       </td>
                       <td>
-                        <span className="mono" style={{ fontSize: '0.85rem' }}>{t.quantity}</span>
+                        <span className="mono" style={{ fontSize: '0.85rem' }}>
+                          {t.remainingQty !== null && t.remainingQty < t.quantity ? `${t.remainingQty}/${t.quantity}` : t.quantity}
+                        </span>
                       </td>
                       <td>
                         <span className="mono" style={{ fontSize: '0.85rem' }}>₹{t.entryPrice.toFixed(2)}</span>
@@ -619,12 +623,14 @@ export function Portfolio() {
                              const priceData = livePrices[t.symbol];
                              const livePrice = priceData ? (typeof priceData === 'object' ? (priceData as any).price : priceData) : null;
                              if (livePrice) {
-                               pnlToDisplay = t.signalType === 'BUY' 
-                                 ? (livePrice - t.entryPrice) * t.quantity 
-                                 : (t.entryPrice - livePrice) * t.quantity;
-                               pnlPercentToDisplay = t.signalType === 'BUY'
-                                 ? ((livePrice - t.entryPrice) / t.entryPrice) * 100
-                                 : ((t.entryPrice - livePrice) / t.entryPrice) * 100;
+                               const remQty = t.remainingQty !== null ? t.remainingQty : t.quantity;
+                               const realized = t.realizedPnl || 0;
+                               const unrealized = t.signalType === 'BUY' 
+                                 ? (livePrice - t.entryPrice) * remQty 
+                                 : (t.entryPrice - livePrice) * remQty;
+                               
+                               pnlToDisplay = unrealized + realized;
+                               pnlPercentToDisplay = (pnlToDisplay / (t.quantity * t.entryPrice)) * 100;
                                isLivePnl = true;
                              }
                           }
