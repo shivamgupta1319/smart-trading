@@ -336,12 +336,16 @@ export function Portfolio() {
               <p className="metric-label">🔒 Saved by Trailing</p>
               <p className="metric-value" style={{ fontSize: '1.1rem' }}>
                 {(() => {
-                  const saved = trades.filter(t => 
-                    t.status === 'CLOSED' && 
-                    t.trailingState && 
-                    t.trailingState !== 'INITIAL' &&
-                    (t.outcome === 'WIN' || t.outcome === 'BREAKEVEN')
-                  ).length;
+                  const saved = trades.filter(t => {
+                    if (t.status !== 'CLOSED' || !t.trailingState || t.trailingState === 'INITIAL') return false;
+                    if (t.outcome !== 'WIN' && t.outcome !== 'BREAKEVEN') return false;
+                    
+                    if (t.exitPrice !== null && t.target !== null) {
+                      const hitTarget = t.signalType === 'BUY' ? t.exitPrice >= t.target : t.exitPrice <= t.target;
+                      if (hitTarget) return false;
+                    }
+                    return true;
+                  }).length;
                   return (
                     <span style={{ color: saved > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
                       {saved} trade{saved !== 1 ? 's' : ''}
