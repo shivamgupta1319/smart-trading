@@ -88,6 +88,15 @@
 - [x] Global Telegram Bot Alert system integration for Signals and Exits
 - [x] Fix TypeScript compilation errors (Strict Property Init & lightweight-charts v5 migration)
 
+## Phase 7 — Stabilization & Risk Framework ✅
+- [x] 3-Phase Partial Exit Framework Integration (Breakeven -> 35% at 50% -> 40% at 75%)
+- [x] Quantity restrictions on partial exits (Minimum 3 shares required)
+- [x] Layer 3 Reversal Detection Engine (Pin bar, Engulfing, Volume, RSI divergence after 80% progress)
+- [x] Market Time-Gate Enforcement (9:30 AM Setup Block, 3:00 PM Intraday Block, 3:15 PM Square-off)
+- [x] Zombie Trade Prevention (Cascading partial close to full close on 0 remaining shares)
+- [x] Exact P&L Calculation Fixes (incorporating `realizedPnl` and `remainingQty`)
+- [x] Telegram Notifications for all lifecycles (Trailing SL, Partial Close, Reversal, Trade Closed)
+
 ## What's Running
 - **NestJS**: `npx nx serve api` (port 3000)
 - **Python Engine**: `uvicorn main:app --reload` in apps/engine (port 8000)

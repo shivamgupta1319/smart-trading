@@ -59,7 +59,29 @@ To run the manual live scanner script (if the background loop isn't active by de
 docker exec -it smart-trading-engine python -m apps.engine.scanner.live_scanner
 ```
 
-4. During live market hours (09:15 to 15:30 IST), if the strategy conditions are met, the Engine will post a signal to the NestJS API, which broadcasts it via WebSockets to the React frontend. You will see a toast notification or an entry appear on the Live Scanner screen!
+### 🕒 Strict Scanner Operating Hours
+The live scanner enforces real-world market hours to protect your capital:
+- **Before 9:30 AM IST:** The scanner tracks prices but will **not** generate new signals (to avoid opening 15-minute fake moves).
+- **After 3:00 PM IST:** No new INTRADAY setups will be generated.
+- **At 3:15 PM IST:** All remaining open INTRADAY positions are forcefully squared off at the market price, and the scanner stops evaluating *all* strategies.
+
+---
+
+## Step 5: Telegram Alerts & Portfolio Accuracy
+Once the scanner is running and active, the system handles the complete trade lifecycle automatically.
+
+### Telegram Notifications
+Ensure `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set in the API `.env` file. The system will send real-time alerts for:
+- 🟢 **New Signals:** Generated when entry conditions are met.
+- 🔒 **Trailing SL Updates:** When a trade reaches Phase 1 or 2, locking in breakeven or profit.
+- 🤑 **Partial Closes:** When hitting 50% or 75% progress (if trade quantity >= 3).
+- ⚠️ **Reversals:** If a pattern indicates a reversal after 80% progress.
+- ✅/❌ **Trade Closed:** When the trade fully closes (SL, TP, or Intraday Auto-Square-Off), detailing final exit price and complete P&L.
+
+### Portfolio Accuracy
+The **Portfolio** tab tracks all active and closed trades. 
+- P&L is calculated with exact mathematical precision, incorporating realized profits from partial exits and updating the `remainingQty` live. 
+- If a Stop Loss or Take Profit is hit, the portfolio logs the exact SL/TP limit price to simulate a limit order and prevent false slippage reporting.
 
 ---
 

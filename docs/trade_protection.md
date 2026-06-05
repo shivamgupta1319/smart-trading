@@ -38,49 +38,45 @@
 
 # Rules hardwired into your system
 
-## Rule 1 — 50% progress → SL to breakeven immediately
+## Rule 1 — 50% progress → SL to breakeven + Partial Exit
 
-This is non-negotiable.
-
-The moment price crosses the 50% point, your system should auto-trigger a SL move to entry price. You stop caring about reversals — worst case is you exit at zero P&L.
-
----
-
-## Rule 2 — Book partial at 50–60% (not at target)
-
-Exit 30–40% of position here.
-
-You lock in real profit. Even if price reverses completely after this, you're profitable. The psychological anchor shifts — you're now playing with house money.
+The moment price crosses the 50% point (Phase 2), the system auto-triggers a SL move to the entry price. 
+- **Partial Exit**: It automatically books 35% of the position.
+- **Quantity Check**: Partial exits are skipped if the original quantity is less than 3 shares.
 
 ---
 
-## Rule 3 — Trail SL from 75% onwards below candle lows
+## Rule 2 — 75% progress → Aggressive Trailing + Partial Exit
 
-On a 5-min chart, trail your SL below each successive candle low as price approaches target.
-
-If price takes out the last candle low, you exit — with most profit protected.
-
----
-
-## Rule 4 — Never move SL further away from entry once in trade
-
-Only allowed movement is toward entry (breakeven) or toward profit (trailing).
-
-Widening SL mid-trade = giving back risk you already accepted. Your backtesting has an SL — honour it.
+When price reaches 75% of the target (Phase 3):
+- **Trailing SL**: The SL is moved to the lowest low (for BUY) or highest high (for SELL) of the last 3 candles.
+- **Partial Exit**: It automatically books another 40% of the position.
+- **Quantity Check**: Skipped if original quantity is less than 3 shares.
 
 ---
 
-## Rule 5 — Add "near-target reversal" as a backtesting signal
+## Rule 3 — 80% progress → Reversal Detection (Layer 3)
 
-Since your system generates signals, log every trade that reversed from 50%+ progress.
+If the trade reaches 80% progress, the system actively monitors for reversal patterns to prevent giving back profits. It forces a **Full Close** if it detects:
+1. **Engulfing Patterns** against the trade direction.
+2. **Pin Bars** (long wicks indicating rejection).
+3. **RSI Divergence** (price makes a new high/low, but RSI fails to follow).
+4. **Volume Exhaustion** (price spikes on low volume near the target).
 
-Questions to track:
+---
 
-- What was volume doing?
-- Was there a big wick candle?
-- Was there a resistance level nearby?
+## Rule 4 — Market Time Gates
 
-This becomes a filter.
+To avoid fake moves and after-hours slippage, the scanner enforces strict time boundaries:
+- **Morning Block**: No setups are evaluated before **9:30 AM IST**.
+- **Afternoon Intraday Block**: No new INTRADAY setups are generated after **3:00 PM IST**.
+- **Global Block & Square-Off**: No signals are processed after **3:15 PM IST**. Any open INTRADAY positions are forcefully closed at market price at 3:15 PM.
+
+---
+
+## Rule 5 — Zombie Trade Prevention
+
+When partial exits occur, the system safely tracks `remainingQty` and `realizedPnl`. If a partial exit consumes the final remaining shares of a trade, it automatically delegates to a **Full Trade Close**. This ensures P&L math is exact and trades don't remain stuck in an "OPEN" state with 0 shares.
 
 ---
 
@@ -136,9 +132,10 @@ Track the index direction — if market starts reversing near your target time, 
 
 ## After (3-phase)
 
-- Entry → 50% → Breakeven SL + book 35%
-- → 75% → Trail SL + book 35%
-- → 100% → Exit final 30%
+- Entry → 50% → Breakeven SL + book 35% (if qty >= 3)
+- → 75% → Trail SL + book 40% (if qty >= 3)
+- → 80%+ → Reversal Detection (Full Exit if detected)
+- → 100% → Exit final 25%
 - Even on reversal from 75%: profitable
 - Loss only possible in phase 1
 

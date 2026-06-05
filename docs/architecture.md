@@ -54,9 +54,10 @@ User → React → POST /api/engine/run-backtest (NestJS proxy)
 
 ### Live Alert Flow
 ```
-live_scanner.py (every 60s, 09:15–15:30 IST)
-→ fetch yfinance candles → run strategy
-→ signal detected → POST /api/signals/new (NestJS)
+live_scanner.py (every 60s, 09:30–15:15 IST)
+→ 1. Evaluate Trailing SL, Partial Exits (35%, 40%), & Reversals (80%+)
+→ 2. fetch yfinance candles → run strategy (if > 09:30 AM)
+→ 3. signal detected → POST /api/signals/new (NestJS)
 → save LiveSignal → Create Trade (Risk Mgmt 2%) 
 → emit NEW_TRADE_ALERT (Socket.io) + Send Telegram Message
 → React: toast + audio + table update + Portfolio sync
