@@ -126,3 +126,48 @@ def run_all_strategies(req: RunAllStrategiesRequest):
         "symbol": symbol,
         "results": results
     }
+
+
+class RunStrategyAllStocksRequest(BaseModel):
+    strategy: str
+    timeframe: str | None = None
+
+@router.post("/run-strategy-all-stocks")
+def run_strategy_all_stocks(req: RunStrategyAllStocksRequest):
+    if req.strategy not in STRATEGY_REGISTRY:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown strategy '{req.strategy}'. Available: {list(STRATEGY_REGISTRY.keys())}"
+        )
+
+    strategy = STRATEGY_REGISTRY[req.strategy]
+    timeframe = req.timeframe or getattr(strategy, 'timeframe', '1D')
+
+    with engine.connect() as conn:
+        stocks = conn.execute(text('SELECT id, symbol FROM "Stock"')).fetchall()
+
+    results = []
+    for stock_id, symbol in stocks:
+        try:
+            df = load_historical(stock_id, timeframe)
+            if len(df) < 30:
+                continue
+
+            metrics = strategy.run_backtest(df)
+            save_report(stock_id, req.strategy, timeframe, metrics)
+            
+            results.append({
+                "symbol": symbol,
+                "metrics": metrics
+            })
+        except Exception:
+            pass
+
+    # Sort results by roiPercentage descending
+    results.sort(key=lambda x: x['metrics']['roiPercentage'], reverse=True)
+
+    return {
+        "strategy": req.strategy,
+        "timeframe": timeframe,
+        "results": results
+    }
