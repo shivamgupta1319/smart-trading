@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -20,14 +20,40 @@ export function BacktestingStrategy() {
   const navigate = useNavigate();
   const [results, setResults] = useState<BacktestStockResult[]>([]);
   const [running, setRunning] = useState(false);
-  const [message, setMessage] = useState<{ type: string; text: string } | null>(
-    null,
-  );
+  const [activeConfigs, setActiveConfigs] = useState<{ symbol: string; strategyName: string }[]>([]);
+  const [strategyTimeframe, setStrategyTimeframe] = useState<string>("1D");
+  const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
   const showMessage = (type: string, text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 4000);
   };
+
+  const fetchActiveConfigs = async () => {
+    try {
+      const res = await axios.get(`${API}/api/configs`);
+      setActiveConfigs(res.data.map((c: any) => ({ symbol: c.stock.symbol, strategyName: c.strategyName })));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchStrategyDetails = async () => {
+    try {
+      const res = await axios.get(`${API}/api/engine/strategies`);
+      const strat = res.data.find((s: any) => s.name === strategyName);
+      if (strat) {
+        setStrategyTimeframe(strat.timeframe);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    fetchActiveConfigs();
+    fetchStrategyDetails();
+  }, [strategyName]);
 
   const runAllStocks = async () => {
     if (!strategyName) return;
@@ -47,6 +73,25 @@ export function BacktestingStrategy() {
     } finally {
       setRunning(false);
     }
+  };
+
+  const handleSetLive = async (symbol: string) => {
+    try {
+      const res = await axios.post(`${API}/api/configs/toggle`, { symbol, strategyName, timeframe: strategyTimeframe });
+      if (res.data.status === 'added') {
+        setActiveConfigs(prev => [...prev, { symbol, strategyName: strategyName! }]);
+        showMessage('success', `${strategyName} is now set for Live Signals on ${symbol}!`);
+      } else {
+        setActiveConfigs(prev => prev.filter(c => !(c.symbol === symbol && c.strategyName === strategyName)));
+        showMessage('success', `${strategyName} is removed from Live Signals on ${symbol}!`);
+      }
+    } catch (e: any) {
+      showMessage('error', e.response?.data?.message || 'Failed to toggle live strategy.');
+    }
+  };
+
+  const isLive = (symbol: string) => {
+    return activeConfigs.some(c => c.symbol === symbol && c.strategyName === strategyName);
   };
 
   return (
@@ -231,12 +276,20 @@ export function BacktestingStrategy() {
                       -₹{r.metrics.maxDrawdown.toLocaleString("en-IN")}
                     </td>
                     <td>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => navigate(`/stock/${r.symbol}`)}
-                      >
-                        View Stock
-                      </button>
+                      <div style={{ display: "flex", gap: "0.5rem" }}>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => navigate(`/stock/${r.symbol}`)}
+                        >
+                          View Stock
+                        </button>
+                        <button
+                          className={`btn btn-sm ${isLive(r.symbol) ? "btn-primary" : "btn-secondary"}`}
+                          onClick={() => handleSetLive(r.symbol)}
+                        >
+                          {isLive(r.symbol) ? "Live (Remove)" : "Set Live"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
