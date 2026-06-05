@@ -483,6 +483,8 @@ def main():
         # 2. Check for new setups
         if now.time() < dtime(9, 30):
             print("  Skipping new setups before 9:30 AM IST (avoiding fake opening moves).")
+        elif now.time() >= dtime(15, 15):
+            print("  Skipping new setups after 3:15 PM IST (market closing soon).")
         elif not configs:
             print("  No active configurations. Add some via the UI.")
         else:

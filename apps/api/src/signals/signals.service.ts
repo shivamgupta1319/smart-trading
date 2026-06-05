@@ -131,26 +131,32 @@ export class SignalsService {
         const pnlPerShare = isBuy
           ? computedExitPrice - trade.entryPrice
           : trade.entryPrice - computedExitPrice;
-        const pnl = pnlPerShare * trade.quantity;
-        const pnlPercent = (pnlPerShare / trade.entryPrice) * 100;
+          
+        // Final lot P&L based ONLY on remaining quantity
+        const finalLotPnl = pnlPerShare * trade.remainingQty;
+        
+        // Total Trade P&L = Realized from partials + Final Lot P&L
+        const totalPnl = trade.realizedPnl + finalLotPnl;
+        const pnlPercent = (totalPnl / trade.capitalUsed) * 100;
 
         let outcome = "BREAKEVEN";
-        if (pnl > 0) outcome = "WIN";
-        else if (pnl < 0) outcome = "LOSS";
+        if (totalPnl > 0) outcome = "WIN";
+        else if (totalPnl < 0) outcome = "LOSS";
 
         await this.prisma.trade.update({
           where: { id: trade.id },
           data: {
             exitPrice: computedExitPrice,
-            pnl: Math.round(pnl * 100) / 100,
+            pnl: Math.round(totalPnl * 100) / 100,
             pnlPercent: Math.round(pnlPercent * 100) / 100,
+            remainingQty: 0,
             outcome,
             exitTime: new Date(),
             status: "CLOSED",
           },
         });
         this.logger.log(
-          `Trade closed: ${trade.symbol} ${outcome} P&L: ₹${pnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`,
+          `Trade closed: ${trade.symbol} ${outcome} P&L: ₹${totalPnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`,
         );
       } catch (err: unknown) {
         if (err instanceof Error) {
@@ -165,7 +171,10 @@ export class SignalsService {
       }
     }
 
-    return signal;
+    return this.prisma.liveSignal.findUnique({
+      where: { id },
+      include: { stock: true, trade: true },
+    });
   }
 
   async partialClose(id: number, percentToClose: number, exitPrice: number, reason: string) {
@@ -188,6 +197,26 @@ export class SignalsService {
     
     if (actualSharesToClose <= 0) {
       return null;
+    }
+
+    if (actualSharesToClose === trade.remainingQty) {
+      // It's a full close of the remaining shares!
+      // Add the reason to notes first
+      await this.prisma.trade.update({
+        where: { id: trade.id },
+        data: {
+          notes: trade.notes 
+            ? `${trade.notes} | ${reason}: Closing final ${actualSharesToClose} @ ₹${exitPrice}`
+            : `${reason}: Closing final ${actualSharesToClose} @ ₹${exitPrice}`
+        }
+      });
+      
+      // Then fully close
+      await this.closeWithPrice(id, exitPrice);
+      this.logger.log(
+        `Partial Close triggered FULL close: ${trade.signalType} ${signal.stock?.symbol} - Closed final ${actualSharesToClose} shares @ ₹${exitPrice}.`
+      );
+      return signal;
     }
 
     const isBuy = trade.signalType === "BUY";
@@ -257,7 +286,10 @@ export class SignalsService {
       });
     }
 
-    return signal;
+    return this.prisma.liveSignal.findUnique({
+      where: { id },
+      include: { stock: true, trade: true },
+    });
   }
 
   async updateStopLoss(
