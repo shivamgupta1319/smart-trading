@@ -1,18 +1,31 @@
+# ============================================================================
+#  ISOLATED v2 stack (project: smart-trading-v2).
+#  Runs in parallel with the live `smart-trading` stack — different project
+#  name, container names, host ports, and volume, so nothing collides.
+#
+#  Secrets are read from the gitignored root `.env` (see .env.example).
+#  Start:  docker compose up -d            (compose reads .env automatically)
+#  The `scanner` service is in the `live` profile and does NOT start by default
+#  (avoids double Telegram alerts / duplicate trades against the cloned DB).
+#  Start it explicitly with:  docker compose --profile live up -d scanner
+# ============================================================================
+name: smart-trading-v2
+
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: smart-trading-db
+    container_name: smart-trading-v2-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: trader
-      POSTGRES_PASSWORD: trader
-      POSTGRES_DB: smart_trading
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5470:5432"
+      - "${DB_PORT:-5471}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trader -d smart_trading"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,16 +34,20 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    container_name: smart-trading-api
+    container_name: smart-trading-v2-api
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3001}:3000"
     environment:
-      DATABASE_URL: postgresql://trader:trader@postgres:5432/smart_trading
+      DATABASE_URL: ${DATABASE_URL}
       ENGINE_URL: http://engine:8000
       PORT: 3000
-      TELEGRAM_BOT_TOKEN: 8906932627:AAHXOczytpBcIlO23GeYE1iXSvEQ917T-Zc
-      TELEGRAM_CHAT_ID: 7511805281
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-true}
+      API_KEY: ${API_KEY}
+      APP_PIN: ${APP_PIN:-}
+      CORS_ORIGINS: "http://localhost:${FRONTEND_PORT:-5174}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,13 +56,25 @@ services:
     build:
       context: apps/engine
       dockerfile: Dockerfile
-    container_name: smart-trading-engine
+    container_name: smart-trading-v2-engine
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${ENGINE_PORT:-8001}:8000"
     environment:
-      DATABASE_URL: postgresql://trader:trader@postgres:5432/smart_trading
+      DATABASE_URL: ${DATABASE_URL}
       NESTJS_SIGNAL_URL: http://api:3000/api/signals/new
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      API_KEY: ${API_KEY}
+      CORS_ORIGINS: "http://localhost:${FRONTEND_PORT:-5174}"
+      BROKER: ${BROKER:-dhan}
+      DATA_SOURCE: ${DATA_SOURCE:-auto}
+      DHAN_ACCESS_TOKEN: ${DHAN_ACCESS_TOKEN:-}
+      DHAN_CLIENT_ID: ${DHAN_CLIENT_ID:-}
+      UPSTOX_API_KEY: ${UPSTOX_API_KEY:-}
+      UPSTOX_API_SECRET: ${UPSTOX_API_SECRET:-}
+      UPSTOX_REDIRECT_URI: ${UPSTOX_REDIRECT_URI:-}
+      UPSTOX_ACCESS_TOKEN: ${UPSTOX_ACCESS_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,23 +85,35 @@ services:
     build:
       context: .
       dockerfile: apps/frontend/Dockerfile
-    container_name: smart-trading-frontend
+      args:
+        VITE_API_URL: "http://localhost:${API_PORT:-3001}"
+        # API key is NOT baked in — the browser gets it after entering the app PIN.
+    container_name: smart-trading-v2-frontend
     restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-5174}:5173"
     depends_on:
       - api
 
+  # Live scanner — opt-in only (profile: live). Posts signals + Telegram alerts.
   scanner:
     build:
       context: apps/engine
       dockerfile: Dockerfile
-    container_name: smart-trading-scanner
+    container_name: smart-trading-v2-scanner
     restart: unless-stopped
+    profiles: ["live"]
     command: python scanner/live_scanner.py
     environment:
-      DATABASE_URL: postgresql://trader:trader@postgres:5432/smart_trading
+      DATABASE_URL: ${DATABASE_URL}
       NESTJS_SIGNAL_URL: http://api:3000/api/signals/new
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      API_KEY: ${API_KEY}
+      BROKER: ${BROKER:-dhan}
+      DATA_SOURCE: ${DATA_SOURCE:-auto}
+      DHAN_ACCESS_TOKEN: ${DHAN_ACCESS_TOKEN:-}
+      DHAN_CLIENT_ID: ${DHAN_CLIENT_ID:-}
+      UPSTOX_ACCESS_TOKEN: ${UPSTOX_ACCESS_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
