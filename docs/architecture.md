@@ -89,3 +89,34 @@ smart-trading/
 ├── nx.json
 └── gemini.md
 ```
+
+---
+
+## v2 Architecture Updates (branch `roadmap-v2`)
+
+**Security layer.** Every HTTP request and socket handshake now passes an opt-in
+`API_KEY` (NestJS `ApiKeyGuard` + global throttle; FastAPI `require_api_key` +
+LLM rate-limit). The key is threaded across all hops: frontend → API → engine,
+and scanner → API. CORS and all secrets are env-driven from a single root `.env`.
+
+**Data integrity.** Ledger money columns are Postgres `NUMERIC(18,4)` (Prisma
+`Decimal`); a global interceptor coerces Decimal → number in responses so the
+API contract stays numeric. Signal+Trade writes and closes are transactional; a
+partial-unique index prevents duplicate active signals.
+
+**Backtest engine.** `strategies/base.py` simulates realistic fills (intrabar
+High/Low, next-bar entry, pessimistic straddle), Indian transaction costs +
+slippage (`backtest_config.py`), and risk-based sizing. `simulate()` exposes
+per-trade P&L, powering the new analytics.
+
+**New analytics + real-time.**
+```
+GET   /api/trades/risk                 # exposure / heat / sector concentration
+POST  /api/engine/run-walk-forward     # out-of-sample rolling folds
+POST  /api/engine/run-monte-carlo      # bootstrapped ROI/drawdown distribution
+WS    TRADE_UPDATE                      # CLOSED / PARTIAL / SL_UPDATED
+```
+
+**Isolated dev stack.** A parallel `smart-trading-v2` compose (ports 5471/3001/
+8001/5174, own volume, cloned DB) runs alongside the live stack untouched. See
+[v2-environment.md](v2-environment.md) and [roadmap-implementation.md](roadmap-implementation.md).
