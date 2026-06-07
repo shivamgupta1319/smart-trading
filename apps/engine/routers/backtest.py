@@ -163,11 +163,23 @@ def run_strategy_all_stocks(req: RunStrategyAllStocksRequest):
         except Exception:
             pass
 
-    # Sort results by roiPercentage descending
-    results.sort(key=lambda x: x['metrics']['roiPercentage'], reverse=True)
+    # NOTE: We deliberately do NOT rank by raw ROI — that cherry-picks the single
+    # best in-sample performer and invites overfitting. Sort by profit factor
+    # (a risk-adjusted measure) and surface a disclaimer so the UI can warn that
+    # in-sample ranking does not predict out-of-sample performance. Use the
+    # walk-forward endpoint for an honest estimate.
+    results.sort(
+        key=lambda x: (x['metrics'].get('profitFactor', 0), x['metrics'].get('expectancy', 0)),
+        reverse=True,
+    )
 
     return {
         "strategy": req.strategy,
         "timeframe": timeframe,
-        "results": results
+        "results": results,
+        "disclaimer": (
+            "Ranked by in-sample profit factor (net of costs & slippage). "
+            "In-sample ranking is NOT a predictor of future returns — validate "
+            "with walk-forward / out-of-sample testing before trusting a name."
+        ),
     }
