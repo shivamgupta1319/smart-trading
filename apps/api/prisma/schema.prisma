@@ -7,6 +7,9 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // No `url` here on purpose: the connection is supplied at runtime by the
+  // @prisma/adapter-pg driver adapter (see PrismaService). Adding a url breaks
+  // `prisma generate` at image-build time (no DATABASE_URL in the build env).
 }
 
 model NseStock {
@@ -82,9 +85,9 @@ model LiveSignal {
   stockId      Int
   strategyName String
   signalType   String   // "BUY" | "SELL"
-  entryPrice   Float
-  stopLoss     Float
-  target       Float
+  entryPrice   Decimal  @db.Decimal(18, 4)
+  stopLoss     Decimal  @db.Decimal(18, 4)
+  target       Decimal  @db.Decimal(18, 4)
   holdDuration String?  // "INTRADAY" | "SHORT_SWING" | "MID_SWING" | "LONG_POSITIONAL"
   timestamp    DateTime @default(now())
   status       String   @default("ACTIVE") // "ACTIVE" | "CLOSED"
@@ -93,6 +96,9 @@ model LiveSignal {
   trade Trade?
 
   @@index([stockId, status])
+  // NOTE: a PARTIAL unique index `(stockId, strategyName) WHERE status='ACTIVE'`
+  // is also enforced at the DB level (see migrations) to prevent duplicate
+  // active signals. Prisma can't express partial uniques, so it lives in SQL.
 }
 
 model Trade {
@@ -103,24 +109,24 @@ model Trade {
   strategyName  String
   signalType    String    // "BUY" | "SELL"
   holdDuration  String    // "INTRADAY" | "SHORT_SWING" | "MID_SWING" | "LONG_POSITIONAL"
-  entryPrice    Float
-  exitPrice     Float?
-  stopLoss      Float
-  target        Float
+  entryPrice    Decimal   @db.Decimal(18, 4)
+  exitPrice     Decimal?  @db.Decimal(18, 4)
+  stopLoss      Decimal   @db.Decimal(18, 4)
+  target        Decimal   @db.Decimal(18, 4)
   quantity      Int       @default(1)
-  capitalUsed   Float     @default(0) // Amount of capital allocated to this trade
-  riskAmount    Float     @default(0) // Amount at risk (entry - SL) * quantity
-  pnl           Float?
-  pnlPercent    Float?
+  capitalUsed   Decimal   @default(0) @db.Decimal(18, 4) // Capital allocated to this trade
+  riskAmount    Decimal   @default(0) @db.Decimal(18, 4) // Amount at risk (entry - SL) * quantity
+  pnl           Decimal?  @db.Decimal(18, 4)
+  pnlPercent    Float?    // a ratio, not money — kept as Float
   outcome       String?   // "WIN" | "LOSS" | "BREAKEVEN"
   entryTime     DateTime
   exitTime      DateTime?
   status        String    @default("OPEN") // "OPEN" | "CLOSED"
   notes         String?
-  originalStopLoss Float? // Original SL before any trailing adjustments
+  originalStopLoss Decimal? @db.Decimal(18, 4) // Original SL before any trailing adjustments
   trailingState String    @default("INITIAL") // "INITIAL" | "PHASE1" | "PHASE2" | "PHASE3" | "REVERSAL_EXIT"
-  peakPrice     Float?    // Best favorable price reached during the trade
-  realizedPnl   Float     @default(0) // PnL accumulated from partial exits
+  peakPrice     Decimal?  @db.Decimal(18, 4)   // Best favorable price reached during the trade
+  realizedPnl   Decimal   @default(0) @db.Decimal(18, 4) // PnL accumulated from partial exits
   remainingQty  Int       @default(1) // Remaining quantity after partials
   createdAt     DateTime  @default(now())
 

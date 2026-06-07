@@ -34,6 +34,11 @@ export class TradesController {
     return this.tradesService.getPortfolioStats();
   }
 
+  @Get('risk')
+  getRisk() {
+    return this.tradesService.getRiskMetrics();
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.tradesService.findOne(id);

@@ -19,10 +19,16 @@ export class TelegramService {
   constructor(private configService: ConfigService) {
     this.botToken = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     this.chatId = this.configService.get<string>('TELEGRAM_CHAT_ID');
-    this.enabled = !!(this.botToken && this.chatId);
+    // Allow an explicit kill-switch (e.g. the cloned v2 stack) so two API
+    // instances don't both fire alerts to the same chat.
+    const flag = this.configService.get<string>('TELEGRAM_ENABLED');
+    const notDisabled = String(flag ?? 'true').toLowerCase() !== 'false';
+    this.enabled = !!(this.botToken && this.chatId) && notDisabled;
 
     if (this.enabled) {
       this.logger.log('Telegram notifications ENABLED');
+    } else if (!notDisabled) {
+      this.logger.warn('Telegram notifications DISABLED via TELEGRAM_ENABLED=false');
     } else {
       this.logger.warn(
         'Telegram notifications DISABLED — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env',
@@ -43,10 +49,11 @@ export class TelegramService {
 
     const isBuy = signal.signalType === 'BUY';
     const emoji = isBuy ? '🟢' : '🔴';
-    const rr = Math.abs(
-      (signal.target - signal.entryPrice) /
-        (signal.entryPrice - signal.stopLoss),
-    ).toFixed(1);
+    const riskPerShare = signal.entryPrice - signal.stopLoss;
+    const rr =
+      riskPerShare !== 0
+        ? Math.abs((signal.target - signal.entryPrice) / riskPerShare).toFixed(1)
+        : 'N/A';
 
     const holdLabel =
       HOLD_DURATION_LABELS[signal.holdDuration || ''] ||
