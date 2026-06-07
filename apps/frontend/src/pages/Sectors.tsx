@@ -4,8 +4,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import ReactMarkdown from "react-markdown";
 import { Brain, PieChart, TrendingUp, AlertTriangle } from "lucide-react";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
+import { API_URL } from "../config";
 
 export function Sectors() {
   const [sectors, setSectors] = useState<string[]>([]);

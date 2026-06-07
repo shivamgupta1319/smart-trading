@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
-
-const API = "http://localhost:3000";
+import { API } from "../config";
 
 interface BacktestStockResult {
   symbol: string;
@@ -12,7 +11,30 @@ interface BacktestStockResult {
     maxDrawdown: number;
     netProfit: number;
     roiPercentage: number;
+    grossProfit?: number;
+    totalCosts?: number;
+    profitFactor?: number;
   };
+}
+
+interface WalkForward {
+  folds: { fold: number; trades: number; roiPercentage: number; winRate: number }[];
+  aggregate: {
+    foldsWithTrades: number;
+    pctProfitableFolds: number;
+    meanOosRoi: number;
+    stdOosRoi: number;
+    consistent: boolean;
+  };
+  disclaimer: string;
+}
+interface MonteCarlo {
+  tradesSampled: number;
+  iterations: number;
+  roi: { p5: number; p50: number; p95: number; mean: number };
+  maxDrawdownPct: { p5: number; p50: number; p95: number; worst: number };
+  probabilityOfProfit: number;
+  disclaimer: string;
 }
 
 export function BacktestingStrategy() {
@@ -23,6 +45,13 @@ export function BacktestingStrategy() {
   const [activeConfigs, setActiveConfigs] = useState<{ symbol: string; strategyName: string }[]>([]);
   const [strategyTimeframe, setStrategyTimeframe] = useState<string>("1D");
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
+
+  // Out-of-sample validation modal state
+  const [validateSymbol, setValidateSymbol] = useState<string | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [wf, setWf] = useState<WalkForward | null>(null);
+  const [mc, setMc] = useState<MonteCarlo | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const showMessage = (type: string, text: string) => {
     setMessage({ type, text });
@@ -92,6 +121,28 @@ export function BacktestingStrategy() {
 
   const isLive = (symbol: string) => {
     return activeConfigs.some(c => c.symbol === symbol && c.strategyName === strategyName);
+  };
+
+  const runValidation = async (symbol: string) => {
+    if (!strategyName) return;
+    setValidateSymbol(symbol);
+    setValidating(true);
+    setWf(null);
+    setMc(null);
+    setValidationError(null);
+    const body = { symbol, strategy: strategyName, timeframe: strategyTimeframe };
+    try {
+      const [wfRes, mcRes] = await Promise.all([
+        axios.post(`${API}/api/engine/run-walk-forward`, { ...body, folds: 5 }),
+        axios.post(`${API}/api/engine/run-monte-carlo`, { ...body, iterations: 2000 }),
+      ]);
+      setWf(wfRes.data);
+      setMc(mcRes.data);
+    } catch (e: any) {
+      setValidationError(e.response?.data?.detail || e.response?.data?.message || "Validation failed (need enough trades/bars).");
+    } finally {
+      setValidating(false);
+    }
   };
 
   return (
@@ -279,6 +330,13 @@ export function BacktestingStrategy() {
                       <div style={{ display: "flex", gap: "0.5rem" }}>
                         <button
                           className="btn btn-secondary btn-sm"
+                          onClick={() => runValidation(r.symbol)}
+                          title="Out-of-sample walk-forward + Monte-Carlo validation"
+                        >
+                          🔬 Validate
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-sm"
                           onClick={() => navigate(`/stock/${r.symbol}`)}
                         >
                           View Stock
@@ -298,6 +356,105 @@ export function BacktestingStrategy() {
           </div>
         </div>
       )}
+
+      {validateSymbol && (
+        <div
+          onClick={() => setValidateSymbol(null)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000,
+            display: "flex", alignItems: "flex-start", justifyContent: "center",
+            padding: "3rem 1rem", overflowY: "auto",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="card animate-fade-in-up"
+            style={{ width: "100%", maxWidth: "720px", padding: "1.75rem" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h2 className="card-title" style={{ margin: 0 }}>
+                🔬 Out-of-sample validation — <span style={{ color: "var(--cyan)" }}>{validateSymbol}</span>
+              </h2>
+              <button className="btn btn-secondary btn-sm" onClick={() => setValidateSymbol(null)}>✕</button>
+            </div>
+
+            {validating ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", padding: "3rem" }}>
+                <div className="spinner"></div>
+                <p className="page-subtitle">Running rolling folds + 2,000 Monte-Carlo paths…</p>
+              </div>
+            ) : validationError ? (
+              <div style={{ color: "var(--red)", padding: "1rem" }}>⚠️ {validationError}</div>
+            ) : (
+              <>
+                {/* Walk-forward */}
+                {wf && (
+                  <div style={{ marginBottom: "1.5rem" }}>
+                    <h3 style={{ marginBottom: "0.75rem" }}>
+                      Walk-forward{" "}
+                      <span className={`badge ${wf.aggregate.consistent ? "badge-active" : ""}`} style={!wf.aggregate.consistent ? { background: "var(--red-glow)", color: "var(--red)" } : {}}>
+                        {wf.aggregate.consistent ? "CONSISTENT" : "INCONSISTENT"}
+                      </span>
+                    </h3>
+                    <div className="grid-2" style={{ gap: "0.4rem 2rem", marginBottom: "0.75rem" }}>
+                      <Stat label="Profitable folds" value={`${wf.aggregate.pctProfitableFolds}%`} good={wf.aggregate.pctProfitableFolds >= 60} />
+                      <Stat label="Mean OOS ROI" value={`${wf.aggregate.meanOosRoi}% ± ${wf.aggregate.stdOosRoi}`} good={wf.aggregate.meanOosRoi > 0} />
+                    </div>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead><tr><th>Fold</th><th style={{ textAlign: "right" }}>Trades</th><th style={{ textAlign: "right" }}>ROI</th><th style={{ textAlign: "right" }}>Win%</th></tr></thead>
+                        <tbody>
+                          {wf.folds.map((f) => (
+                            <tr key={f.fold}>
+                              <td>#{f.fold}</td>
+                              <td style={{ textAlign: "right" }}>{f.trades}</td>
+                              <td style={{ textAlign: "right" }} className={f.roiPercentage >= 0 ? "positive" : "negative"}>{f.roiPercentage}%</td>
+                              <td style={{ textAlign: "right" }}>{f.winRate}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Monte-Carlo */}
+                {mc && (
+                  <div style={{ marginBottom: "1rem" }}>
+                    <h3 style={{ marginBottom: "0.75rem" }}>
+                      Monte-Carlo{" "}
+                      <span className="page-subtitle" style={{ fontSize: "0.8rem" }}>({mc.iterations.toLocaleString()} paths · {mc.tradesSampled} trades)</span>
+                    </h3>
+                    <div className="grid-2" style={{ gap: "0.4rem 2rem" }}>
+                      <Stat label="Probability of profit" value={`${mc.probabilityOfProfit}%`} good={mc.probabilityOfProfit >= 50} />
+                      <Stat label="Median ROI (p50)" value={`${mc.roi.p50}%`} good={mc.roi.p50 > 0} />
+                      <Stat label="Bad-case ROI (p5)" value={`${mc.roi.p5}%`} good={mc.roi.p5 > 0} />
+                      <Stat label="Best-case ROI (p95)" value={`${mc.roi.p95}%`} good={mc.roi.p95 > 0} />
+                      <Stat label="Median max drawdown" value={`${mc.maxDrawdownPct.p50}%`} good={false} />
+                      <Stat label="Worst drawdown" value={`${mc.maxDrawdownPct.worst}%`} good={false} />
+                    </div>
+                  </div>
+                )}
+
+                {wf && (
+                  <p className="page-subtitle" style={{ fontSize: "0.8rem", lineHeight: 1.5, marginBottom: 0 }}>
+                    ℹ️ {wf.disclaimer}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value, good }: { label: string; value: string; good: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "0.35rem 0", borderBottom: "1px solid var(--border)" }}>
+      <span style={{ color: "var(--text-secondary)" }}>{label}</span>
+      <span className={good ? "positive" : "negative"} style={{ fontWeight: 600 }}>{value}</span>
     </div>
   );
 }

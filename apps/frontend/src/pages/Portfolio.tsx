@@ -1,8 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { createChart, ColorType, type IChartApi, AreaSeries } from 'lightweight-charts';
-
-const API = 'http://localhost:3000';
+import { API } from '../config';
 
 const HOLD_LABELS: Record<string, { label: string; color: string; icon: string }> = {
   INTRADAY: { label: 'Intraday', color: '#22d3ee', icon: '⏱' },
@@ -81,7 +80,19 @@ export function Portfolio() {
   const [filter, setFilter] = useState<'ALL' | 'OPEN' | 'CLOSED'>('ALL');
   const [holdFilter, setHoldFilter] = useState<string>('ALL');
   const [livePrices, setLivePrices] = useState<Record<string, number | null>>({});
-  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'ANALYSIS'>('PORTFOLIO');
+  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'ANALYSIS' | 'RISK'>('PORTFOLIO');
+  const [risk, setRisk] = useState<any | null>(null);
+  const [riskLoading, setRiskLoading] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'RISK') return;
+    setRiskLoading(true);
+    axios
+      .get(`${API}/api/trades/risk`)
+      .then((r) => setRisk(r.data))
+      .catch(() => setRisk(null))
+      .finally(() => setRiskLoading(false));
+  }, [activeTab]);
   const equityRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<IChartApi | null>(null);
 
@@ -270,7 +281,119 @@ export function Portfolio() {
         >
           Strategy Performance Analysis
         </button>
+        <button
+          className={`tab-btn ${activeTab === 'RISK' ? 'active' : ''}`}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: activeTab === 'RISK' ? 'var(--cyan)' : 'var(--text-muted)',
+            padding: '0.75rem 1rem',
+            fontSize: '1rem',
+            fontWeight: activeTab === 'RISK' ? 600 : 400,
+            borderBottom: activeTab === 'RISK' ? '2px solid var(--cyan)' : '2px solid transparent',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => setActiveTab('RISK')}
+        >
+          Risk Engine
+        </button>
       </div>
+
+      {activeTab === 'RISK' && (
+        <div className="animate-fade-in">
+          {riskLoading ? (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}><div className="spinner"></div></div>
+          ) : !risk ? (
+            <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
+              <p className="page-subtitle">No risk data.</p>
+            </div>
+          ) : (
+            <>
+              {/* Flags */}
+              {risk.flags?.length > 0 && (
+                <div className="card" style={{ padding: '1rem 1.25rem', marginBottom: '1.5rem', borderLeft: '4px solid var(--red)' }}>
+                  {risk.flags.map((f: string, i: number) => (
+                    <p key={i} style={{ margin: '0.25rem 0', color: 'var(--red)' }}>⚠️ {f}</p>
+                  ))}
+                </div>
+              )}
+              {risk.openPositions === 0 && (!risk.flags || risk.flags.length === 0) && (
+                <div className="card" style={{ padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
+                  <p className="page-subtitle" style={{ margin: 0 }}>No open positions — book is flat (zero risk deployed).</p>
+                </div>
+              )}
+
+              {/* Top metrics */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+                <div className="metric-card">
+                  <p className="metric-label">Open Positions</p>
+                  <p className="metric-value">{risk.openPositions}</p>
+                </div>
+                <div className="metric-card">
+                  <p className="metric-label">Deployed Capital</p>
+                  <p className="metric-value">₹{Number(risk.deployedCapital).toLocaleString('en-IN')}</p>
+                  <p className="metric-label">{risk.deployedPct}% of capital</p>
+                </div>
+                <div className="metric-card">
+                  <p className="metric-label">Total Heat (risk-at-stop)</p>
+                  <p className="metric-value" style={{ color: risk.heatPct > 6 ? 'var(--red)' : 'var(--text-primary)' }}>₹{Number(risk.totalHeat).toLocaleString('en-IN')}</p>
+                  <p className="metric-label">{risk.heatPct}% of capital</p>
+                </div>
+                <div className="metric-card">
+                  <p className="metric-label">Available Capital</p>
+                  <p className="metric-value">₹{Number(risk.availableCapital).toLocaleString('en-IN')}</p>
+                </div>
+              </div>
+
+              {/* Sector concentration */}
+              {risk.sectorConcentration?.length > 0 && (
+                <div style={{ marginBottom: '2rem' }}>
+                  <h3 style={{ marginBottom: '1rem' }}>Sector Concentration</h3>
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead><tr><th>Sector</th><th style={{ textAlign: 'right' }}>Exposure</th><th style={{ textAlign: 'right' }}>% of Book</th></tr></thead>
+                      <tbody>
+                        {risk.sectorConcentration.map((s: any, i: number) => (
+                          <tr key={i}>
+                            <td>{s.sector}</td>
+                            <td style={{ textAlign: 'right' }}>₹{Number(s.exposure).toLocaleString('en-IN')}</td>
+                            <td style={{ textAlign: 'right' }} className={s.pctOfBook > 40 ? 'negative' : ''}>{s.pctOfBook}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Per-position */}
+              {risk.positions?.length > 0 && (
+                <div>
+                  <h3 style={{ marginBottom: '1rem' }}>Open Positions</h3>
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead><tr><th>Symbol</th><th>Strategy</th><th>Sector</th><th style={{ textAlign: 'right' }}>Qty</th><th style={{ textAlign: 'right' }}>Exposure</th><th style={{ textAlign: 'right' }}>Risk @ Stop</th></tr></thead>
+                      <tbody>
+                        {risk.positions.map((p: any, i: number) => (
+                          <tr key={i}>
+                            <td><span className="stock-symbol" style={{ fontWeight: 600 }}>{p.symbol}</span></td>
+                            <td>{p.strategy}</td>
+                            <td>{p.sector}</td>
+                            <td style={{ textAlign: 'right' }}>{p.qty}</td>
+                            <td style={{ textAlign: 'right' }}>₹{Number(p.exposure).toLocaleString('en-IN')}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--red)' }}>₹{Number(p.riskAtStop).toLocaleString('en-IN')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Summary cards */}
       {stats && activeTab === 'PORTFOLIO' && (

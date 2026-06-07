@@ -1,13 +1,23 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-
-const API = 'http://localhost:3000';
+import { API } from '../config';
 
 interface Strategy {
   name: string;
   timeframe: string;
   holdDuration: string;
+}
+
+interface LeaderRow {
+  strategy: string;
+  reports: number;
+  avgWinRate: number;
+  avgRoi: number;
+  avgMaxDrawdownPct: number;
+  avgTrades: number;
+  totalNetProfit: number;
+  riskAdjustedScore: number;
 }
 
 const HOLD_LABELS: Record<string, { label: string; color: string }> = {
@@ -22,9 +32,15 @@ export function Backtesting() {
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [leaders, setLeaders] = useState<LeaderRow[]>([]);
+  const [showBoard, setShowBoard] = useState(true);
 
   useEffect(() => {
     fetchStrategies();
+    axios
+      .get(`${API}/api/engine/leaderboard`)
+      .then((r) => setLeaders(r.data.leaderboard || []))
+      .catch(() => setLeaders([]));
   }, []);
 
   const fetchStrategies = async () => {
@@ -47,7 +63,49 @@ export function Backtesting() {
           <h1 className="page-title">Backtesting Hub</h1>
           <p className="page-subtitle">Test predefined strategies against the entire stock database</p>
         </div>
+        {leaders.length > 0 && (
+          <button className="btn btn-secondary" onClick={() => setShowBoard((s) => !s)}>
+            {showBoard ? 'Hide' : 'Show'} 🏆 Leaderboard
+          </button>
+        )}
       </div>
+
+      {showBoard && leaders.length > 0 && (
+        <div className="card animate-fade-in-up" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
+          <h2 className="card-title" style={{ marginTop: 0 }}>🏆 Risk-Adjusted Leaderboard</h2>
+          <p className="page-subtitle" style={{ marginTop: 0 }}>
+            Ranked by <strong>ROI ÷ max-drawdown</strong> (× sample confidence) across stored backtests — not raw ROI.
+          </p>
+          <div className="table-container">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Strategy</th>
+                  <th style={{ textAlign: 'right' }}>Score</th>
+                  <th style={{ textAlign: 'right' }}>Avg ROI</th>
+                  <th style={{ textAlign: 'right' }}>Avg DD%</th>
+                  <th style={{ textAlign: 'right' }}>Win%</th>
+                  <th style={{ textAlign: 'right' }}>Reports</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaders.slice(0, 10).map((l, i) => (
+                  <tr key={l.strategy} style={{ cursor: 'pointer' }} onClick={() => navigate(`/backtesting/${l.strategy}`)}>
+                    <td>{i + 1}</td>
+                    <td><span style={{ fontWeight: 600, color: 'var(--cyan)' }}>{l.strategy.replace(/_/g, ' ')}</span></td>
+                    <td style={{ textAlign: 'right' }} className={l.riskAdjustedScore >= 0 ? 'positive' : 'negative'}>{l.riskAdjustedScore}</td>
+                    <td style={{ textAlign: 'right' }} className={l.avgRoi >= 0 ? 'positive' : 'negative'}>{l.avgRoi}%</td>
+                    <td style={{ textAlign: 'right' }}>{l.avgMaxDrawdownPct}%</td>
+                    <td style={{ textAlign: 'right' }}>{l.avgWinRate}%</td>
+                    <td style={{ textAlign: 'right' }}>{l.reports}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}>
@@ -63,11 +121,15 @@ export function Backtesting() {
           {strategies.map((str, idx) => {
             const hold = HOLD_LABELS[str.holdDuration] || { label: str.holdDuration, color: 'var(--text-muted)' };
             return (
-              <div 
-                key={idx} 
-                className="card" 
+              <div
+                key={idx}
+                className="card"
+                role="button"
+                tabIndex={0}
+                aria-label={`Backtest ${str.name.replace(/_/g, ' ')}`}
                 style={{ cursor: 'pointer', transition: 'transform 0.2s', display: 'flex', flexDirection: 'column', gap: '1rem' }}
                 onClick={() => navigate(`/backtesting/${str.name}`)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(`/backtesting/${str.name}`); } }}
                 onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-4px)'}
                 onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
               >

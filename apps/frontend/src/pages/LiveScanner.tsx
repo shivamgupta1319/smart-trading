@@ -2,8 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import { useSocket, TradeAlert } from "../hooks/useSocket";
 import { ToastContainer } from "../components/ToastNotification";
-
-const API = "http://localhost:3000";
+import { API } from "../config";
 
 interface Config {
   id: number;

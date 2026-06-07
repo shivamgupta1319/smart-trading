@@ -1,6 +1,11 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
+ARG VITE_API_KEY
+ENV VITE_API_KEY=$VITE_API_KEY
+
 # Copy root package/lock
 COPY package*.json ./
 # Copy workspace config and frontend package.json

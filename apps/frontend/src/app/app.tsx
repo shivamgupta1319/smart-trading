@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
+import { AuthGate } from "../components/AuthGate";
 import { Navbar } from "../components/Navbar";
 import { Dashboard } from "../pages/Dashboard";
 import { StockDetail } from "../pages/StockDetail";
@@ -9,11 +10,14 @@ import { SectorDetail } from "../pages/SectorDetail";
 import { Portfolio } from "../pages/Portfolio";
 import { Backtesting } from "../pages/Backtesting";
 import { BacktestingStrategy } from "../pages/BacktestingStrategy";
+import { Settings } from "../pages/Settings";
+import { StrategyBuilder } from "../pages/StrategyBuilder";
+import { NotFound } from "../pages/NotFound";
 import "../styles/index.css";
 
 export default function App() {
   return (
-    <>
+    <AuthGate>
       <Navbar />
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -29,7 +33,10 @@ export default function App() {
           path="/backtesting/:strategyName"
           element={<BacktestingStrategy />}
         />
+        <Route path="/builder" element={<StrategyBuilder />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
-    </>
+    </AuthGate>
   );
 }
