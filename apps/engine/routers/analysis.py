@@ -43,17 +43,33 @@ class LLMClient:
         self.gemini_key = os.getenv("GEMINI_API_KEY")
 
     async def generate(self, prompt: str) -> str:
+        # Try providers in order, falling back on any failure so a single dead
+        # key (e.g. a revoked OpenRouter key) doesn't take AI analysis down when
+        # another working provider is configured.
+        errors = []
         if self.openrouter_key:
-            return await self._call_openrouter(prompt)
-        elif self.gemini_key:
-            return await self._call_gemini(prompt)
-        else:
+            try:
+                return await self._call_openrouter(prompt)
+            except Exception as e:
+                errors.append(f"OpenRouter: {e}")
+        if self.gemini_key:
+            try:
+                return await self._call_gemini(prompt)
+            except Exception as e:
+                errors.append(f"Gemini: {e}")
+        if errors:
             return (
-                "> [!WARNING]\n> **Missing API Keys!**\n\n"
-                "To enable AI Research & Analysis, please add `OPENROUTER_API_KEY` or `GEMINI_API_KEY` "
-                "to your `apps/engine/.env` file and restart the engine container.\n\n"
-                "Example:\n```env\nOPENROUTER_API_KEY=\"sk-or-v1-...\"\n```\n"
+                "> [!WARNING]\n> **AI analysis unavailable.**\n\n"
+                "All configured LLM providers failed:\n\n- "
+                + "\n- ".join(errors)
+                + "\n\nCheck your `OPENROUTER_API_KEY` / `GEMINI_API_KEY` in the engine `.env`."
             )
+        return (
+            "> [!WARNING]\n> **Missing API Keys!**\n\n"
+            "To enable AI Research & Analysis, please add `OPENROUTER_API_KEY` or `GEMINI_API_KEY` "
+            "to your `apps/engine/.env` file and restart the engine container.\n\n"
+            "Example:\n```env\nOPENROUTER_API_KEY=\"sk-or-v1-...\"\n```\n"
+        )
 
     async def _call_openrouter(self, prompt: str) -> str:
         url = "https://openrouter.ai/api/v1/chat/completions"
@@ -76,10 +92,10 @@ class LLMClient:
                 data = resp.json()
                 return data["choices"][0]["message"]["content"]
             else:
-                return f"Error from OpenRouter: {resp.text}"
+                raise RuntimeError(f"HTTP {resp.status_code} {resp.text}")
 
     async def _call_gemini(self, prompt: str) -> str:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.gemini_key}"
         headers = {"Content-Type": "application/json"}
         payload = {
             "contents": [{
