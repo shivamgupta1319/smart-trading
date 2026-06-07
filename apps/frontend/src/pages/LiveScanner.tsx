@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import axios from 'axios';
-import { useSocket, TradeAlert } from '../hooks/useSocket';
-import { ToastContainer } from '../components/ToastNotification';
+import { useState, useEffect, useRef, useCallback } from "react";
+import axios from "axios";
+import { useSocket, TradeAlert } from "../hooks/useSocket";
+import { ToastContainer } from "../components/ToastNotification";
 
-const API = 'http://localhost:3000';
+const API = "http://localhost:3000";
 
 interface Config {
   id: number;
@@ -13,12 +13,23 @@ interface Config {
   stock: { symbol: string; name: string };
 }
 
-interface Signal extends TradeAlert { stock?: { symbol: string }; }
+interface Signal extends TradeAlert {
+  stock?: { symbol: string };
+  trade?: {
+    trailingState?: string;
+    originalStopLoss?: number;
+    peakPrice?: number;
+    remainingQty?: number;
+    quantity?: number;
+  };
+}
 
 // Audio chime using Web Audio API
 function playChime() {
   try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const ctx = new (
+      window.AudioContext || (window as any).webkitAudioContext
+    )();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
@@ -29,13 +40,18 @@ function playChime() {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.5);
-  } catch { /* noop if audio not supported */ }
+  } catch {
+    /* noop if audio not supported */
+  }
 }
 
 function isMarketOpen() {
   const now = new Date();
-  const ist = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-  const h = ist.getHours(), m = ist.getMinutes();
+  const ist = new Date(
+    now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
+  );
+  const h = ist.getHours(),
+    m = ist.getMinutes();
   const day = ist.getDay();
   const minutes = h * 60 + m;
   return day >= 1 && day <= 5 && minutes >= 555 && minutes <= 930;
@@ -45,34 +61,46 @@ export function LiveScanner() {
   const { connected, alerts } = useSocket();
   const [configs, setConfigs] = useState<Config[]>([]);
   const [activeSignals, setActiveSignals] = useState<Signal[]>([]);
-  const [toasts, setToasts] = useState<Array<TradeAlert & { toastId: string }>>([]);
+  const [toasts, setToasts] = useState<Array<TradeAlert & { toastId: string }>>(
+    [],
+  );
   const [newSignalIds, setNewSignalIds] = useState<Set<number>>(new Set());
   const prevAlertsLen = useRef(0);
 
   useEffect(() => {
-    axios.get(`${API}/api/configs`).then(r => setConfigs(r.data)).catch(() => {});
-    axios.get(`${API}/api/signals/active`).then(r => setActiveSignals(r.data)).catch(() => {});
+    axios
+      .get(`${API}/api/configs`)
+      .then((r) => setConfigs(r.data))
+      .catch(() => {});
+    axios
+      .get(`${API}/api/signals/active`)
+      .then((r) => setActiveSignals(r.data))
+      .catch(() => {});
   }, []);
 
   // React to new alerts from socket
   useEffect(() => {
     if (alerts.length > prevAlertsLen.current) {
       const newAlerts = alerts.slice(0, alerts.length - prevAlertsLen.current);
-      newAlerts.forEach(alert => {
+      newAlerts.forEach((alert) => {
         // Show toast
         const toastId = `${alert.id}-${Date.now()}`;
-        setToasts(prev => [{ ...alert, toastId }, ...prev].slice(0, 5));
+        setToasts((prev) => [{ ...alert, toastId }, ...prev].slice(0, 5));
         // Play chime
         playChime();
         // Add to active signals table
-        setActiveSignals(prev => {
-          const existing = prev.find(s => s.id === alert.id);
+        setActiveSignals((prev) => {
+          const existing = prev.find((s) => s.id === alert.id);
           return existing ? prev : [alert, ...prev];
         });
         // Flash highlight
-        setNewSignalIds(prev => new Set([...prev, alert.id]));
+        setNewSignalIds((prev) => new Set([...prev, alert.id]));
         setTimeout(() => {
-          setNewSignalIds(prev => { const n = new Set(prev); n.delete(alert.id); return n; });
+          setNewSignalIds((prev) => {
+            const n = new Set(prev);
+            n.delete(alert.id);
+            return n;
+          });
         }, 2000);
       });
     }
@@ -80,26 +108,36 @@ export function LiveScanner() {
   }, [alerts]);
 
   const dismissToast = useCallback((id: string) => {
-    setToasts(prev => prev.filter(t => t.toastId !== id));
+    setToasts((prev) => prev.filter((t) => t.toastId !== id));
   }, []);
 
   const closeSignal = async (id: number, symbol: string) => {
     try {
       let payload = {};
       try {
-        const liveRes = await axios.post(`${API}/api/engine/live-prices`, { symbols: [symbol] });
+        const liveRes = await axios.post(`${API}/api/engine/live-prices`, {
+          symbols: [symbol],
+        });
         const livePriceData = liveRes.data[symbol];
-        const livePrice = livePriceData ? (typeof livePriceData === 'object' ? livePriceData.price : livePriceData) : undefined;
+        const livePrice = livePriceData
+          ? typeof livePriceData === "object"
+            ? livePriceData.price
+            : livePriceData
+          : undefined;
         if (livePrice) {
           payload = { exitPrice: livePrice };
         }
       } catch (e) {
-        console.error('Failed to fetch live price for closing', e);
+        console.error("Failed to fetch live price for closing", e);
       }
-      
+
       await axios.patch(`${API}/api/signals/${id}/close`, payload);
-      setActiveSignals(prev => prev.map(s => s.id === id ? { ...s, status: 'CLOSED' } : s));
-    } catch { /* noop */ }
+      setActiveSignals((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, status: "CLOSED" } : s)),
+      );
+    } catch {
+      /* noop */
+    }
   };
 
   const marketOpen = isMarketOpen();
@@ -109,59 +147,94 @@ export function LiveScanner() {
       <ToastContainer alerts={toasts} onDismiss={dismissToast} />
 
       <div className="page-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "1rem",
+            flexWrap: "wrap",
+          }}
+        >
           <div>
-            <h1 className="page-title">Live <span>Scanner</span></h1>
-            <p className="page-subtitle">Real-time trade alerts via WebSocket</p>
+            <h1 className="page-title">
+              Live <span>Scanner</span>
+            </h1>
+            <p className="page-subtitle">
+              Real-time trade alerts via WebSocket
+            </p>
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-            <span className={`connection-badge ${connected ? 'connected' : 'disconnected'}`}>
+          <div
+            style={{
+              marginLeft: "auto",
+              display: "flex",
+              gap: "0.75rem",
+              alignItems: "center",
+            }}
+          >
+            <span
+              className={`connection-badge ${connected ? "connected" : "disconnected"}`}
+            >
               <span className="connection-dot"></span>
-              {connected ? 'Connected' : 'Disconnected'}
+              {connected ? "Connected" : "Disconnected"}
             </span>
           </div>
         </div>
       </div>
 
       {!connected && (
-        <div className="alert alert-warning" style={{ marginBottom: '1.5rem' }}>
-          ⚠ Reconnecting to server... Check that NestJS API is running on port 3000.
+        <div className="alert alert-warning" style={{ marginBottom: "1.5rem" }}>
+          ⚠ Reconnecting to server... Check that NestJS API is running on port
+          3000.
         </div>
       )}
 
       {!marketOpen && (
-        <div className="alert alert-info" style={{ marginBottom: '1.5rem' }}>
-          🕐 Market is currently <strong>CLOSED</strong>. Scanner pauses until 09:15 IST (Mon–Fri).
+        <div className="alert alert-info" style={{ marginBottom: "1.5rem" }}>
+          🕐 Market is currently <strong>CLOSED</strong>. Scanner pauses until
+          09:15 IST (Mon–Fri).
         </div>
       )}
 
       {/* Active Configurations */}
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
+      <div className="card" style={{ marginBottom: "1.5rem" }}>
         <div className="card-title">📡 Monitored Stocks ({configs.length})</div>
         {configs.length === 0 ? (
-          <div className="empty-state" style={{ padding: '2rem' }}>
+          <div className="empty-state" style={{ padding: "2rem" }}>
             <span className="empty-icon">🔕</span>
             <span className="empty-title">No stocks being monitored</span>
-            <span className="empty-subtitle">Go to Backtest Arena → run a backtest → Set Active Strategy</span>
+            <span className="empty-subtitle">
+              Go to Backtest Arena → run a backtest → Set Active Strategy
+            </span>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
-            {configs.map(c => (
-              <div key={c.id} style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border-light)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0.5rem 1rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                fontSize: '0.85rem',
-              }}>
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)', fontWeight: 600 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
+            {configs.map((c) => (
+              <div
+                key={c.id}
+                style={{
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--border-light)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: "0.5rem 1rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.75rem",
+                  fontSize: "0.85rem",
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--cyan)",
+                    fontWeight: 600,
+                  }}
+                >
                   {c.stock.symbol}
                 </span>
-                <span style={{ color: 'var(--text-muted)' }}>→</span>
-                <span style={{ color: 'var(--text-secondary)' }}>{c.strategyName}</span>
+                <span style={{ color: "var(--text-muted)" }}>→</span>
+                <span style={{ color: "var(--text-secondary)" }}>
+                  {c.strategyName}
+                </span>
                 <span className="badge badge-active">{c.timeframe}</span>
               </div>
             ))}
@@ -171,14 +244,22 @@ export function LiveScanner() {
 
       {/* Active Signals */}
       <div className="card">
-        <div className="card-title">🚨 Active Signals ({activeSignals.filter(s => s.status === 'ACTIVE').length})</div>
+        <div className="card-title">
+          🚨 Active Signals (
+          {activeSignals.filter((s) => s.status === "ACTIVE").length})
+        </div>
 
         {activeSignals.length === 0 ? (
           <div className="empty-state">
             <span className="empty-icon">🔍</span>
             <span className="empty-title">Waiting for signals...</span>
             <span className="empty-subtitle">
-              Start the live scanner: <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)' }}>python apps/engine/scanner/live_scanner.py</code>
+              Start the live scanner:{" "}
+              <code
+                style={{ fontFamily: "var(--font-mono)", color: "var(--cyan)" }}
+              >
+                python apps/engine/scanner/live_scanner.py
+              </code>
             </span>
           </div>
         ) : (
@@ -190,64 +271,244 @@ export function LiveScanner() {
                   <th>Stock</th>
                   <th>Strategy</th>
                   <th>Hold</th>
+                  <th>Qty</th>
                   <th>Entry ₹</th>
                   <th>Stop Loss ₹</th>
                   <th>Target ₹</th>
                   <th>R:R</th>
+                  <th>Protection</th>
                   <th>Time</th>
-                  <th>Status</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {activeSignals.map(s => {
-                  const rr = Math.abs((s.target - s.entryPrice) / (s.entryPrice - s.stopLoss));
-                  const isBuy = s.signalType === 'BUY';
+                {activeSignals.map((s) => {
+                  const rr = Math.abs(
+                    (s.target - s.entryPrice) / (s.entryPrice - s.stopLoss),
+                  );
+                  const isBuy = s.signalType === "BUY";
                   const symbol = s.symbol || s.stock?.symbol || `#${s.stockId}`;
-                  const holdLabels: Record<string, { label: string; color: string; icon: string }> = {
-                    INTRADAY: { label: 'Intraday', color: '#22d3ee', icon: '⏱' },
-                    SHORT_SWING: { label: 'Short', color: '#fbbf24', icon: '📅' },
-                    MID_SWING: { label: 'Mid', color: '#a78bfa', icon: '📆' },
-                    LONG_POSITIONAL: { label: 'Long', color: '#60a5fa', icon: '🗓' },
+                  const holdLabels: Record<
+                    string,
+                    { label: string; color: string; icon: string }
+                  > = {
+                    INTRADAY: {
+                      label: "Intraday",
+                      color: "#22d3ee",
+                      icon: "⏱",
+                    },
+                    SHORT_SWING: {
+                      label: "Short",
+                      color: "#fbbf24",
+                      icon: "📅",
+                    },
+                    MID_SWING: { label: "Mid", color: "#a78bfa", icon: "📆" },
+                    LONG_POSITIONAL: {
+                      label: "Long",
+                      color: "#60a5fa",
+                      icon: "🗓",
+                    },
                   };
-                  const hold = holdLabels[(s as any).holdDuration] || { label: '—', color: '#4b5563', icon: '' };
+                  const hold = holdLabels[(s as any).holdDuration] || {
+                    label: "—",
+                    color: "#4b5563",
+                    icon: "",
+                  };
+
+                  // Trailing state from trade data
+                  const trailingState = s.trade?.trailingState || "INITIAL";
+                  const originalSL = s.trade?.originalStopLoss;
+                  const slChanged =
+                    originalSL != null &&
+                    Math.abs(originalSL - s.stopLoss) > 0.01;
+
+                  const trailingBadges: Record<
+                    string,
+                    { label: string; color: string; icon: string; bg: string }
+                  > = {
+                    INITIAL: {
+                      label: "Active",
+                      color: "#64748b",
+                      icon: "⏳",
+                      bg: "#64748b15",
+                    },
+                    PHASE1: {
+                      label: "Phase 1",
+                      color: "#64748b",
+                      icon: "⏳",
+                      bg: "#64748b15",
+                    },
+                    PHASE2: {
+                      label: "Phase 2 (BE)",
+                      color: "#22c55e",
+                      icon: "🔒",
+                      bg: "#22c55e15",
+                    },
+                    PHASE3: {
+                      label: "Phase 3 (Trail)",
+                      color: "#f59e0b",
+                      icon: "💰",
+                      bg: "#f59e0b15",
+                    },
+                    REVERSAL_EXIT: {
+                      label: "Reversal Exit",
+                      color: "#ef4444",
+                      icon: "⚠️",
+                      bg: "#ef444415",
+                    },
+                    // legacy fallback
+                    BREAKEVEN: {
+                      label: "Breakeven",
+                      color: "#22c55e",
+                      icon: "🔒",
+                      bg: "#22c55e15",
+                    },
+                    PROFIT_LOCK: {
+                      label: "Profit Locked",
+                      color: "#f59e0b",
+                      icon: "💰",
+                      bg: "#f59e0b15",
+                    },
+                  };
+                  const trailInfo =
+                    trailingBadges[trailingState] || trailingBadges.INITIAL;
+
                   return (
-                    <tr key={s.id} className={newSignalIds.has(s.id) ? 'signal-row-new' : ''}>
+                    <tr
+                      key={s.id}
+                      className={newSignalIds.has(s.id) ? "signal-row-new" : ""}
+                    >
                       <td>
-                        <span className={`badge ${isBuy ? 'badge-buy' : 'badge-sell'}`}>
-                          {isBuy ? '▲' : '▼'} {s.signalType}
+                        <span
+                          className={`badge ${isBuy ? "badge-buy" : "badge-sell"}`}
+                        >
+                          {isBuy ? "▲" : "▼"} {s.signalType}
                         </span>
                       </td>
                       <td>
-                        <span className="mono" style={{ color: 'var(--cyan)', fontWeight: 600 }}>{symbol}</span>
+                        <span
+                          className="mono"
+                          style={{ color: "var(--cyan)", fontWeight: 600 }}
+                        >
+                          {symbol}
+                        </span>
                       </td>
                       <td>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{s.strategyName}</span>
+                        <span
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          {s.strategyName}
+                        </span>
                       </td>
                       <td>
-                        <span className="badge" style={{ background: `${hold.color}20`, color: hold.color, border: `1px solid ${hold.color}40`, fontSize: '0.65rem' }}>
+                        <span
+                          className="badge"
+                          style={{
+                            background: `${hold.color}20`,
+                            color: hold.color,
+                            border: `1px solid ${hold.color}40`,
+                            fontSize: "0.65rem",
+                          }}
+                        >
                           {hold.icon} {hold.label}
                         </span>
                       </td>
-                      <td className="mono" style={{ color: isBuy ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
-                        ₹{s.entryPrice.toFixed(2)}
-                      </td>
-                      <td className="mono" style={{ color: 'var(--red)' }}>₹{s.stopLoss.toFixed(2)}</td>
-                      <td className="mono" style={{ color: 'var(--green)' }}>₹{s.target.toFixed(2)}</td>
-                      <td className="mono" style={{ color: rr >= 2 ? 'var(--green)' : 'var(--yellow)' }}>
-                        1:{rr.toFixed(1)}
-                      </td>
-                      <td style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                        {new Date(s.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}
-                      </td>
                       <td>
-                        <span className={`badge ${s.status === 'ACTIVE' ? 'badge-active' : 'badge-closed'}`}>
-                          {s.status}
+                        <span className="mono" style={{ fontSize: "0.8rem" }}>
+                          {s.trade && s.trade.remainingQty !== undefined && s.trade.quantity !== undefined &&
+                          s.trade.remainingQty < s.trade.quantity
+                            ? `${s.trade.remainingQty}/${s.trade.quantity}`
+                            : s.trade?.quantity || 1}
                         </span>
                       </td>
+                      <td
+                        className="mono"
+                        style={{
+                          color: isBuy ? "var(--green)" : "var(--red)",
+                          fontWeight: 600,
+                        }}
+                      >
+                        ₹{s.entryPrice.toFixed(2)}
+                      </td>
                       <td>
-                        {s.status === 'ACTIVE' && (
-                          <button className="btn btn-danger btn-sm" onClick={() => closeSignal(s.id, symbol)}>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.15rem",
+                          }}
+                        >
+                          <span
+                            className="mono"
+                            style={{
+                              color: slChanged ? "var(--green)" : "var(--red)",
+                              fontWeight: 600,
+                              fontSize: "0.85rem",
+                            }}
+                          >
+                            ₹{s.stopLoss.toFixed(2)}
+                          </span>
+                          {slChanged && originalSL != null && (
+                            <span
+                              style={{
+                                fontSize: "0.65rem",
+                                color: "var(--text-muted)",
+                                textDecoration: "line-through",
+                              }}
+                            >
+                              ₹{originalSL.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="mono" style={{ color: "var(--green)" }}>
+                        ₹{s.target.toFixed(2)}
+                      </td>
+                      <td
+                        className="mono"
+                        style={{
+                          color: rr >= 2 ? "var(--green)" : "var(--yellow)",
+                        }}
+                      >
+                        1:{rr.toFixed(1)}
+                      </td>
+                      <td>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.3rem",
+                            padding: "0.2rem 0.5rem",
+                            borderRadius: "4px",
+                            fontSize: "0.7rem",
+                            fontWeight: 600,
+                            background: trailInfo.bg,
+                            color: trailInfo.color,
+                            border: `1px solid ${trailInfo.color}30`,
+                          }}
+                        >
+                          {trailInfo.icon} {trailInfo.label}
+                        </span>
+                      </td>
+                      <td
+                        style={{
+                          color: "var(--text-muted)",
+                          fontSize: "0.78rem",
+                        }}
+                      >
+                        {new Date(s.timestamp).toLocaleTimeString("en-IN", {
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </td>
+                      <td>
+                        {s.status === "ACTIVE" && (
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => closeSignal(s.id, symbol)}
+                          >
                             Close
                           </button>
                         )}

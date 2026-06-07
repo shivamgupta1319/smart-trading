@@ -9,6 +9,9 @@ from .intraday.ema20_pullback import EMA20PullbackStrategy
 from .intraday.cpr_breakout import CPRBreakoutStrategy
 from .intraday.pdh_pdl_breakout import PDHPDLBreakoutStrategy
 from .intraday.bb_mean_reversion_intraday import BBMeanReversionIntradayStrategy
+from .intraday.smc_fvg import SMCFVGStrategy
+from .intraday.vol_profile_poc import VolumeProfilePOCStrategy
+from .intraday.rvol_orb import RVOLORBStrategy
 from .swing.sma44_pullback import SMA44PullbackStrategy
 from .swing.ema200_macd import EMA200MACDStrategy
 from .swing.bb_squeeze import BBSqueezeStrategy
@@ -39,6 +42,9 @@ STRATEGY_REGISTRY = {
     "CPR_Breakout": CPRBreakoutStrategy(),
     "PDH_PDL_Breakout": PDHPDLBreakoutStrategy(),
     "BB_Mean_Reversion_Intraday": BBMeanReversionIntradayStrategy(),
+    "SMC_FVG": SMCFVGStrategy(),
+    "Volume_Profile_POC": VolumeProfilePOCStrategy(),
+    "RVOL_ORB": RVOLORBStrategy(),
     "SMA44_Pullback": SMA44PullbackStrategy(),
     "EMA200_MACD": EMA200MACDStrategy(),
     "BB_Squeeze": BBSqueezeStrategy(),
@@ -70,6 +76,9 @@ STRATEGY_TIMEFRAMES = {
     "CPR_Breakout": "5m",
     "PDH_PDL_Breakout": "5m",
     "BB_Mean_Reversion_Intraday": "15m",
+    "SMC_FVG": "15m",
+    "Volume_Profile_POC": "15m",
+    "RVOL_ORB": "15m",
     "SMA44_Pullback": "1D",
     "EMA200_MACD": "1D",
     "BB_Squeeze": "1D",
@@ -106,6 +115,9 @@ STRATEGY_HOLD_DURATIONS = {
     "CPR_Breakout": "INTRADAY",
     "PDH_PDL_Breakout": "INTRADAY",
     "BB_Mean_Reversion_Intraday": "INTRADAY",
+    "SMC_FVG": "INTRADAY",
+    "Volume_Profile_POC": "INTRADAY",
+    "RVOL_ORB": "INTRADAY",
     "SMA44_Pullback": "SHORT_SWING",
     "EMA200_MACD": "SHORT_SWING",
     "SuperTrend_EMA": "SHORT_SWING",

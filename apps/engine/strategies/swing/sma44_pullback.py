@@ -1,10 +1,9 @@
-"""Strategy 6: 44 SMA Pullback (Swing)"""
 import pandas as pd
 import pandas_ta as ta
 from strategies.base import BaseStrategy
 
-
 class SMA44PullbackStrategy(BaseStrategy):
+    """Strategy 6: 44 SMA Pullback (Swing)"""
     name = "SMA44_Pullback"
     timeframe = "1D"
 
@@ -18,26 +17,22 @@ class SMA44PullbackStrategy(BaseStrategy):
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        for i in range(1, len(df)):
-            curr = df.iloc[i]
-            prev = df.iloc[i - 1]
+        prev_low = df['Low'].shift(1)
+        
+        above_200 = df['Close'] > df['sma200']
+        touched_44 = (prev_low <= df['sma44']) | (df['Low'] <= df['sma44'])
+        bullish_candle = df['Close'] > df['Open']
 
-            if any(pd.isna([curr['sma44'], curr['sma200'], curr['atr14']])):
-                continue
+        bullish_cond = above_200 & touched_44 & bullish_candle
+        
+        # Edge trigger
+        prev_bullish = bullish_cond.shift(1, fill_value=False)
+        valid_bull = bullish_cond & ~prev_bullish
 
-            # Filter: price must be above 200 SMA
-            if curr['Close'] <= curr['sma200']:
-                continue
+        sl = df['Low'] - 1.5 * df['atr14']
 
-            # Entry: price touches 44 SMA and closes bullish
-            touched_44 = prev['Low'] <= curr['sma44'] or curr['Low'] <= curr['sma44']
-            bullish_candle = curr['Close'] > curr['Open']
-
-            if touched_44 and bullish_candle:
-                sl = curr['Low'] - 1.5 * curr['atr14']
-                rr = curr['Close'] - sl
-                df.iloc[i, df.columns.get_loc('signal')] = 1
-                df.iloc[i, df.columns.get_loc('stop_loss')] = sl
-                df.iloc[i, df.columns.get_loc('target')] = curr['Close'] + 2 * rr
+        df.loc[valid_bull, 'signal'] = 1
+        df.loc[valid_bull, 'stop_loss'] = sl[valid_bull]
+        df.loc[valid_bull, 'target'] = df['Close'][valid_bull] + 2 * (df['Close'][valid_bull] - sl[valid_bull])
 
         return df
