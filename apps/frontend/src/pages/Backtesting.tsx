@@ -133,7 +133,7 @@ export function Backtesting() {
                           <td>
                             {s.picked.map((p: any) => (
                               <span key={p.symbol} className="badge" style={{ marginRight: '0.4rem' }}>
-                                {p.symbol} · {p.roiPercentage}% · DD {p.maxDrawdownPct}%
+                                {p.symbol} · {p.roiPercentage}% · DD {p.maxDrawdownPct}% · R/DD {p.returnDdRatio}×
                               </span>
                             ))}
                           </td>

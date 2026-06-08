@@ -145,3 +145,28 @@ def target_r_for_bucket(bucket: str | None):
     """Reward:risk multiple to apply for a hold-duration bucket, or None to keep
     the strategy's own target."""
     return TARGET_R_BY_BUCKET.get(bucket) if bucket else None
+
+
+# --- Swing exit style: ATR chandelier trailing stop + fixed R target -----------
+# Swing/mid/long trades trail the stop at (peak-since-entry ∓ mult×ATR) and exit
+# at the fixed R target OR the trailing stop, whichever hits first — no partial
+# booking, no reversal exit (those stay INTRADAY-only). Intraday keeps a plain
+# fixed SL/TP in the backtest. Modelled the same way in backtest and live.
+TRAILING_BUCKETS = {"SHORT_SWING", "MID_SWING", "LONG_POSITIONAL"}
+SWING_TRAIL_ATR_PERIOD = _i("SWING_TRAIL_ATR_PERIOD", 14)
+# ATR multiple for the chandelier trail, BY bucket. Wider targets need wider
+# trails (a tight trail just clips the winner before it reaches a far target);
+# tuned on the user's data — looser for longer holds. Env-overridable.
+TRAIL_ATR_MULT_BY_BUCKET = {
+    "SHORT_SWING": _f("SWING_TRAIL_ATR_MULT_SHORT", 6.0),
+    "MID_SWING": _f("SWING_TRAIL_ATR_MULT_MID", 5.0),
+    "LONG_POSITIONAL": _f("SWING_TRAIL_ATR_MULT_LONG", 8.0),
+}
+
+
+def uses_trailing_exit(bucket: str | None) -> bool:
+    return bucket in TRAILING_BUCKETS
+
+
+def trail_mult_for_bucket(bucket: str | None) -> float:
+    return TRAIL_ATR_MULT_BY_BUCKET.get(bucket, 5.0)

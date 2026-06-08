@@ -413,55 +413,76 @@ def auto_close_signals(cache):
             # one price. Partials are also reconciled: SL/state only advance if
             # the partial-close PATCH actually succeeded.
             original_state = current_state
+            hold_duration = sig.get('holdDuration') or "UNKNOWN"
 
-            # ── PHASE 1 -> PHASE 2 (50%+): SL to breakeven, book 35% ──
-            if original_state == "INITIAL" and progress >= 0.50:
-                booked = True
-                if qty >= MIN_QTY_FOR_PARTIAL:
-                    print(f"  💰 PHASE 2 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
-                    booked = book_partial(signal_id, 0.35, latest_price, "Phase 2 Partial (50% Target)")
-                if booked:
-                    be_sl = entry + (entry * 0.001) if is_buy else entry - (entry * 0.001)
-                    sl_better = (is_buy and be_sl > sl) or (not is_buy and be_sl < sl)
-                    new_sl = be_sl if sl_better else sl
-                    update_trailing_sl(signal_id, new_sl, "PHASE2", latest_price)
-                    sl = new_sl
-                    current_state = "PHASE2"
+            if hold_duration == "INTRADAY":
+                # ── INTRADAY: 3-phase partial booking + breakeven + trail + reversal ──
+                # ── PHASE 1 -> PHASE 2 (50%+): SL to breakeven, book 35% ──
+                if original_state == "INITIAL" and progress >= 0.50:
+                    booked = True
+                    if qty >= MIN_QTY_FOR_PARTIAL:
+                        print(f"  💰 PHASE 2 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
+                        booked = book_partial(signal_id, 0.35, latest_price, "Phase 2 Partial (50% Target)")
+                    if booked:
+                        be_sl = entry + (entry * 0.001) if is_buy else entry - (entry * 0.001)
+                        sl_better = (is_buy and be_sl > sl) or (not is_buy and be_sl < sl)
+                        new_sl = be_sl if sl_better else sl
+                        update_trailing_sl(signal_id, new_sl, "PHASE2", latest_price)
+                        sl = new_sl
+                        current_state = "PHASE2"
 
-            # ── PHASE 2 -> PHASE 3 (75%+): trail below candle, book another 35% ──
-            elif original_state == "PHASE2" and progress >= 0.75:
-                booked = True
-                if qty >= MIN_QTY_FOR_PARTIAL:
-                    print(f"  💰 PHASE 3 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
-                    booked = book_partial(signal_id, 0.35, latest_price, "Phase 3 Partial (75% Target)")
-                if booked:
+                # ── PHASE 2 -> PHASE 3 (75%+): trail below candle, book another 35% ──
+                elif original_state == "PHASE2" and progress >= 0.75:
+                    booked = True
+                    if qty >= MIN_QTY_FOR_PARTIAL:
+                        print(f"  💰 PHASE 3 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
+                        booked = book_partial(signal_id, 0.35, latest_price, "Phase 3 Partial (75% Target)")
+                    if booked:
+                        trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
+                        sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
+                        new_sl = trail_sl if sl_better else sl
+                        update_trailing_sl(signal_id, new_sl, "PHASE3", latest_price)
+                        sl = new_sl
+                        current_state = "PHASE3"
+
+                # PHASE 3 TRAILING (update SL with candle lows)
+                if current_state == "PHASE3":
                     trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
                     sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
-                    new_sl = trail_sl if sl_better else sl
-                    update_trailing_sl(signal_id, new_sl, "PHASE3", latest_price)
-                    sl = new_sl
-                    current_state = "PHASE3"
+                    if sl_better:
+                        update_trailing_sl(signal_id, trail_sl, "PHASE3", latest_price)
+                        sl = trail_sl
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # PHASE 3 TRAILING (Update SL with candle lows)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if current_state == "PHASE3":
-                trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
-                sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
-                if sl_better:
-                    update_trailing_sl(signal_id, trail_sl, "PHASE3", latest_price)
-                    sl = trail_sl
+                # LAYER 3: Reversal Detection (80%+)
+                if progress >= REVERSAL_ZONE_START and not should_close:
+                    if not recent_df.empty:
+                        is_reversal, reason = detect_reversal(recent_df, is_buy)
+                        if is_reversal:
+                            should_close = True
+                            exit_price = latest_price
+                            close_reason = f"REVERSAL DETECTED ({reason}) at {progress*100:.0f}%"
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # LAYER 3: Reversal Detection (80%+)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if progress >= REVERSAL_ZONE_START and not should_close:
-                if not recent_df.empty:
-                    is_reversal, reason = detect_reversal(recent_df, is_buy)
-                    if is_reversal:
-                        should_close = True
-                        exit_price = latest_price
-                        close_reason = f"REVERSAL DETECTED ({reason}) at {progress*100:.0f}%"
+            else:
+                # ── SWING / MID / LONG: ATR chandelier trailing stop, no partials,
+                # no reversal. Exit happens below at the fixed target OR trailed SL.
+                peak = float(trade.get('peakPrice') or entry)
+                peak = max(peak, latest_price) if is_buy else min(peak, latest_price)
+                atr_val = None
+                if not recent_df.empty and len(recent_df) >= 2:
+                    try:
+                        atr_series = ta.atr(recent_df['High'], recent_df['Low'], recent_df['Close'], length=14)
+                        if atr_series is not None and not atr_series.dropna().empty:
+                            atr_val = float(atr_series.dropna().iloc[-1])
+                    except Exception:
+                        atr_val = None
+                if atr_val and atr_val > 0:
+                    from backtest_config import trail_mult_for_bucket
+                    mult = trail_mult_for_bucket(hold_duration)
+                    new_sl = peak - mult * atr_val if is_buy else peak + mult * atr_val
+                    sl_better = (is_buy and new_sl > sl) or (not is_buy and new_sl < sl)
+                    if sl_better:
+                        update_trailing_sl(signal_id, new_sl, "TRAILING", peak)
+                        sl = new_sl
 
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             # SL / TP / Intraday Hit Check

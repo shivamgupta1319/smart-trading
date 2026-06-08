@@ -5,7 +5,6 @@ import { CreateSignalDto } from "./dto/create-signal.dto";
 import {
   INITIAL_CAPITAL,
   MAX_CONCURRENT_POSITIONS,
-  SLOT_CAPITAL,
   leverageFor,
 } from "../common/risk";
 import { toNum, round2, safePct, normalizeTradeMoney } from "../common/money";
@@ -60,28 +59,45 @@ export class SignalsService {
     });
     if (existing) return { signal: existing, isNew: false, fundingStatus: undefined };
 
-    // Equal-weight slot sizing: each trade gets ~one slot's notional (₹10k), so
-    // no single stock can take the whole wallet and every signal can be a REAL
-    // trade until all slots are full. riskAmount is kept for R-multiple analytics
-    // but no longer drives sizing. leverage is 1× unless intraday.
+    // Equal-weight slot sizing, COMPOUNDING: each trade gets ~one slot's
+    // notional, where slot = CURRENT account equity ÷ slots. As realized P&L
+    // grows the account, slots (and positions) grow — gains snowball, the way
+    // real long-term trading compounds. No single stock takes more than a slot;
+    // a signal is SHADOW only when all slots are full. riskAmount is kept for
+    // R-multiple analytics, not sizing. leverage is 1× unless intraday.
     const leverage = leverageFor(dto.holdDuration);
     const riskPerShare = Math.abs(dto.entryPrice - dto.stopLoss);
-    const quantity = dto.entryPrice > 0 ? Math.max(1, Math.floor(SLOT_CAPITAL / dto.entryPrice)) : 1;
-    const capitalUsed = round2(quantity * dto.entryPrice);
-    const riskAmount = round2(quantity * riskPerShare);
-    const marginRequired = round2(capitalUsed / leverage);
 
+    let quantity = 1;
+    let capitalUsed = 0;
+    let riskAmount = 0;
+    let marginRequired = 0;
     let fundingStatus: "FUNDED" | "SHADOW" = "FUNDED";
     let declineReason = "";
 
     try {
       // Signal + Trade are created atomically: a failure in either rolls back both.
       const signal = await this.prisma.$transaction(async (tx) => {
-        // Funding decision (computed inside the tx to limit double-funding races):
-        // a trade is FUNDED if a slot is free AND its margin fits remaining cash.
-        // Otherwise it's a SHADOW trade — recorded and tracked for would-be P&L,
-        // but excluded from the ₹1L portfolio ROI. With 10 slots, SHADOW only
-        // happens when the book is genuinely full.
+        // Current equity = ₹1L seed + realized P&L of all FUNDED closed trades.
+        // Sizing off REALIZED (not paper) equity is the conservative standard.
+        const closedFunded = await tx.trade.findMany({
+          where: { status: "CLOSED", fundingStatus: "FUNDED" },
+          select: { pnl: true },
+        });
+        const realizedPnl = closedFunded.reduce((s, t) => s + toNum(t.pnl), 0);
+        const currentEquity = INITIAL_CAPITAL + realizedPnl;
+        const slotCapital = currentEquity / MAX_CONCURRENT_POSITIONS;
+
+        // Size to one (compounding) slot's notional.
+        quantity = dto.entryPrice > 0 ? Math.max(1, Math.floor(slotCapital / dto.entryPrice)) : 1;
+        capitalUsed = round2(quantity * dto.entryPrice);
+        riskAmount = round2(quantity * riskPerShare);
+        marginRequired = round2(capitalUsed / leverage);
+
+        // Funding decision (inside the tx to limit double-funding races): FUNDED
+        // if a slot is free AND margin fits remaining cash; otherwise SHADOW —
+        // recorded for would-be P&L but excluded from portfolio ROI. With N slots,
+        // SHADOW only happens when the book is genuinely full.
         const openFunded = await tx.trade.findMany({
           where: { status: "OPEN", fundingStatus: "FUNDED" },
         });
@@ -92,7 +108,7 @@ export class SignalsService {
           const notional = qty * entry;
           committedMargin += notional / leverageFor(t.holdDuration);
         }
-        const cashLeft = INITIAL_CAPITAL - committedMargin;
+        const cashLeft = currentEquity - committedMargin;
         const slotOk = openFunded.length < MAX_CONCURRENT_POSITIONS;
         const fundsOk = marginRequired <= cashLeft;
         if (!slotOk || !fundsOk) {

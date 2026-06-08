@@ -4,7 +4,16 @@ import math
 import numpy as np
 import pandas as pd
 
-from backtest_config import RISK, CostModel
+from backtest_config import (
+    RISK, CostModel, uses_trailing_exit, trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD,
+)
+
+
+def _atr_array(h, low, c, period: int):
+    """Wilder-ish ATR via a simple rolling mean of True Range (period bars)."""
+    prev_c = np.concatenate([[c[0]], c[:-1]])
+    tr = np.maximum.reduce([h - low, np.abs(h - prev_c), np.abs(low - prev_c)])
+    return pd.Series(tr).rolling(period, min_periods=1).mean().to_numpy()
 
 
 class BaseStrategy(ABC):
@@ -20,6 +29,15 @@ class BaseStrategy(ABC):
         """
         pass
 
+    def _hold_bucket(self):
+        """This strategy's hold-duration bucket (INTRADAY/SHORT_SWING/…) or None.
+        Lazy import avoids a circular dependency with the strategies package."""
+        try:
+            from strategies import STRATEGY_HOLD_DURATIONS
+            return STRATEGY_HOLD_DURATIONS.get(getattr(self, "name", ""), None)
+        except Exception:
+            return None
+
     def _apply_bucket_target(self, df: pd.DataFrame) -> pd.DataFrame:
         """Override the `target` column to a bucket-specific reward:risk multiple
         (the validated R:R-by-horizon model). The STOP is left exactly as the
@@ -31,12 +49,7 @@ class BaseStrategy(ABC):
         bar's Close, the same reference each strategy uses for its own target.
         """
         from backtest_config import target_r_for_bucket
-        try:
-            from strategies import STRATEGY_HOLD_DURATIONS
-            bucket = STRATEGY_HOLD_DURATIONS.get(getattr(self, "name", ""), None)
-        except Exception:
-            bucket = None
-        r = target_r_for_bucket(bucket)
+        r = target_r_for_bucket(self._hold_bucket())
         if r is None or "signal" not in df.columns or "stop_loss" not in df.columns:
             return df
 
@@ -58,7 +71,7 @@ class BaseStrategy(ABC):
         sim = self.simulate(df)
         return self._metrics(
             sim["net_trades"], sim["gross_trades"], sim["total_costs"],
-            sim["max_dd"], sim["skipped_invalid"],
+            sim["max_dd"], sim["max_dd_pct"], sim["skipped_invalid"],
         )
 
     def simulate(self, df: pd.DataFrame) -> dict:
@@ -92,11 +105,15 @@ class BaseStrategy(ABC):
 
         n = len(df)
         slip = RISK.slippage_bps / 10_000.0
+        # Swing/mid/long trail the stop (chandelier); intraday keeps fixed SL/TP.
+        _bucket = self._hold_bucket()
+        trailing = uses_trailing_exit(_bucket)
+        atr = _atr_array(h, low, c, SWING_TRAIL_ATR_PERIOD) if trailing else None
+        trail_mult = trail_mult_for_bucket(_bucket)
         # A single-cell backtest simulates ONE portfolio slot (₹10k) traded
         # repeatedly, so its P&L/ROI is comparable to one live slot rather than
         # to the whole ₹1L account.
         initial_capital = RISK.slot_capital
-        risk_budget = initial_capital * RISK.risk_per_trade_pct / 100.0
 
         net_trades: list[float] = []
         gross_trades: list[float] = []
@@ -104,6 +121,7 @@ class BaseStrategy(ABC):
         current_capital = initial_capital
         peak = initial_capital
         max_dd = 0.0
+        max_dd_pct = 0.0
         skipped_invalid = 0
 
         i = 0
@@ -135,30 +153,51 @@ class BaseStrategy(ABC):
                 i += 1
                 continue
 
-            qty = int(min(risk_budget / risk_per_share, RISK.max_position_value / entry))
-            if qty < 1:
-                i += 1
-                continue
+            # Equal-weight slot sizing, COMPOUNDING — size from the slot's
+            # CURRENT equity (grows with prior P&L), identical in spirit to the
+            # live model (slot = current account equity ÷ slots). qty =
+            # floor(equity / entry), min 1 — notional, not risk-based, so the
+            # backtest takes exactly the trades the live ledger would.
+            qty = max(1, int(current_capital / entry))
 
-            # Walk forward to find the exit bar via intrabar High/Low.
+            # Walk forward to the exit bar via intrabar High/Low. For swing
+            # buckets `cur_sl` ratchets up with a chandelier trail (peak ∓ k·ATR);
+            # for intraday it stays fixed (== sl), so this loop covers both.
             exit_price = None
             exit_idx = n - 1
+            cur_sl = sl
+            px_peak = entry  # best PRICE since entry (for the chandelier trail)
             for j in range(entry_idx, n):
                 hi, lo = h[j], low[j]
                 if ttype == 1:
-                    hit_sl, hit_tp = lo <= sl, hi >= tp
+                    hit_sl, hit_tp = lo <= cur_sl, hi >= tp
                 else:
-                    hit_sl, hit_tp = hi >= sl, lo <= tp
+                    hit_sl, hit_tp = hi >= cur_sl, lo <= tp
                 if hit_sl and hit_tp:
-                    exit_price = sl if RISK.pessimistic_intrabar else tp
+                    exit_price = cur_sl if RISK.pessimistic_intrabar else tp
                     exit_idx = j
                     break
                 if hit_sl:
-                    exit_price, exit_idx = sl, j
+                    exit_price, exit_idx = cur_sl, j
                     break
                 if hit_tp:
                     exit_price, exit_idx = tp, j
                     break
+                # Ratchet the trailing stop using THIS bar's extreme, applied to
+                # the NEXT bar (so no intrabar lookahead).
+                if trailing:
+                    if ttype == 1:
+                        if hi > px_peak:
+                            px_peak = hi
+                        new_sl = px_peak - trail_mult * atr[j]
+                        if new_sl > cur_sl:
+                            cur_sl = new_sl
+                    else:
+                        if lo < px_peak:
+                            px_peak = lo
+                        new_sl = px_peak + trail_mult * atr[j]
+                        if new_sl < cur_sl:
+                            cur_sl = new_sl
             if exit_price is None:
                 exit_price = c[n - 1]  # still open at series end → mark to last close
 
@@ -184,6 +223,12 @@ class BaseStrategy(ABC):
             dd = peak - current_capital
             if dd > max_dd:
                 max_dd = dd
+            # Peak-relative drawdown — the standard "max drawdown %". With a
+            # compounding curve, % of INITIAL capital is meaningless (a late dip
+            # can exceed 100% of the seed); % of the running peak is correct.
+            dd_pct = dd / peak if peak > 0 else 0.0
+            if dd_pct > max_dd_pct:
+                max_dd_pct = dd_pct
 
             i = exit_idx + 1  # no overlapping positions
 
@@ -192,12 +237,14 @@ class BaseStrategy(ABC):
             "gross_trades": gross_trades,
             "total_costs": total_costs,
             "max_dd": max_dd,
+            "max_dd_pct": max_dd_pct,
             "skipped_invalid": skipped_invalid,
         }
 
     @staticmethod
-    def _metrics(net_trades, gross_trades, total_costs, max_dd, skipped_invalid) -> dict:
-        # ROI / drawdown are reported against one slot's capital (see simulate()).
+    def _metrics(net_trades, gross_trades, total_costs, max_dd, max_dd_pct, skipped_invalid) -> dict:
+        # ROI is the compounded return on one slot's capital; maxDrawdownPct is the
+        # peak-relative max drawdown (see simulate()).
         initial_capital = RISK.slot_capital
         if not net_trades:
             return {
@@ -227,7 +274,7 @@ class BaseStrategy(ABC):
             "grossProfit": round(gross_profit, 2),
             "totalCosts": round(total_costs, 2),
             "maxDrawdown": round(max_dd, 2),
-            "maxDrawdownPct": round(max_dd / initial_capital * 100, 2),
+            "maxDrawdownPct": round(max_dd_pct * 100, 2),
             "roiPercentage": round(net_profit / initial_capital * 100, 2),
             "grossRoiPercentage": round(gross_profit / initial_capital * 100, 2),
             "profitFactor": round(profit_factor, 2),

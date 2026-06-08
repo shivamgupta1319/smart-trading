@@ -34,9 +34,13 @@ def _f(name: str, default: float) -> float:
 # reject losing / inconsistent cells, but don't demand a flawless edge that no
 # real strategy clears. Raise these back up for a stricter selection.
 MIN_TRADES = int(_f("AUTOSELECT_MIN_TRADES", 10))          # min sample size
-MAX_DD_PCT = _f("AUTOSELECT_MAX_DD_PCT", 40.0)             # drawdown cap (% of slot)
+MAX_DD_PCT = _f("AUTOSELECT_MAX_DD_PCT", 40.0)             # drawdown cap (% of peak)
 MIN_PROFIT_FACTOR = _f("AUTOSELECT_MIN_PROFIT_FACTOR", 1.05)
 MIN_ROI = _f("AUTOSELECT_MIN_ROI", 0.0)                    # in-sample ROI must be >0
+# Risk/reward floor: total return must be at least this multiple of max drawdown
+# (a Calmar-like bar). 1.5 = "make at least 1.5× what you risk in drawdown";
+# rejects the 4%-return / 19%-DD type picks. Env: AUTOSELECT_MIN_RETURN_DD.
+MIN_RETURN_DD_RATIO = _f("AUTOSELECT_MIN_RETURN_DD", 1.5)
 MIN_PROFITABLE_FOLDS = _f("AUTOSELECT_MIN_PROFITABLE_FOLDS", 40.0)  # % of OOS folds
 # Require the strict "low variance" consistency flag too (std <= |mean|)? Off by
 # default — we still require mean OOS ROI > 0, just not low dispersion.
@@ -182,6 +186,11 @@ def auto_select(req: AutoSelectRequest):
             if m["maxDrawdownPct"] > MAX_DD_PCT:
                 rejections.append({"symbol": symbol, "gate": "drawdown", "value": m["maxDrawdownPct"]})
                 continue
+            # Risk/reward: return must meaningfully exceed drawdown (Calmar-like).
+            ret_dd = m["roiPercentage"] / max(m["maxDrawdownPct"], 0.5)
+            if ret_dd < MIN_RETURN_DD_RATIO:
+                rejections.append({"symbol": symbol, "gate": "return/DD", "value": round(ret_dd, 2)})
+                continue
 
             # Gate 2 — out-of-sample: mean fold ROI must be positive and enough
             # folds profitable. Optionally also demand the strict low-variance flag.
@@ -208,6 +217,7 @@ def auto_select(req: AutoSelectRequest):
                 "winRate": m["winRate"],
                 "profitFactor": m["profitFactor"],
                 "maxDrawdownPct": m["maxDrawdownPct"],
+                "returnDdRatio": round(m["roiPercentage"] / max(m["maxDrawdownPct"], 0.5), 2),
                 "trades": m["totalTrades"],
                 "oosProfitableFolds": wf["pctProfitableFolds"],
                 "mcP5Roi": mc["p5Roi"],
@@ -227,7 +237,8 @@ def auto_select(req: AutoSelectRequest):
             "passedGates": len(candidates),
             "picked": [{k: p[k] for k in (
                 "symbol", "score", "roiPercentage", "winRate", "profitFactor",
-                "maxDrawdownPct", "trades", "oosProfitableFolds", "mcP5Roi", "mcProbProfit",
+                "maxDrawdownPct", "returnDdRatio", "trades", "oosProfitableFolds",
+                "mcP5Roi", "mcProbProfit",
             )} for p in picks],
             "rejectedSample": rejections[:8],
         })
@@ -255,6 +266,7 @@ def auto_select(req: AutoSelectRequest):
             "minRoiPct": MIN_ROI,
             "minProfitFactor": MIN_PROFIT_FACTOR,
             "maxDrawdownPct": MAX_DD_PCT,
+            "minReturnDdRatio": MIN_RETURN_DD_RATIO,
             "minProfitableFoldsPct": MIN_PROFITABLE_FOLDS,
             "walkForwardRequireConsistent": WF_REQUIRE_CONSISTENT,
             "monteCarloMinProbProfitPct": MC_MIN_PROB,
