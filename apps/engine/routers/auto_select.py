@@ -122,6 +122,22 @@ def _upsert_active(conn, stock_id: int, strategy_name: str, timeframe: str):
     """), {"sid": stock_id, "sn": strategy_name, "tf": timeframe})
 
 
+def _save_report(conn, stock_id: int, strategy_name: str, timeframe: str, metrics: dict):
+    """Persist a BacktestReport row (mirrors routers.backtest.save_report) so the
+    monitor's latest-snapshot lookup finds a current report for each pick."""
+    conn.execute(text("""
+        INSERT INTO "BacktestReport"
+          ("stockId", "strategyName", "timeframe", "winRate", "totalTrades",
+           "maxDrawdown", "netProfit", "roiPercentage", "createdAt")
+        VALUES (:sid, :sn, :tf, :wr, :tt, :md, :np, :roi, NOW())
+    """), {
+        "sid": stock_id, "sn": strategy_name, "tf": timeframe,
+        "wr": float(metrics["winRate"]), "tt": int(metrics["totalTrades"]),
+        "md": float(metrics["maxDrawdown"]), "np": float(metrics["netProfit"]),
+        "roi": float(metrics["roiPercentage"]),
+    })
+
+
 @router.post("/auto-select")
 def auto_select(req: AutoSelectRequest):
     strategy_names = req.strategies or list(STRATEGY_REGISTRY.keys())
@@ -196,12 +212,13 @@ def auto_select(req: AutoSelectRequest):
                 "oosProfitableFolds": wf["pctProfitableFolds"],
                 "mcP5Roi": mc["p5Roi"],
                 "mcProbProfit": mc["probabilityOfProfit"],
+                "_metrics": m,  # full metrics, persisted as a BacktestReport for the pick
             })
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
         picks = candidates[:top_n]
         for p in picks:
-            all_picks.append((p["stockId"], sname, timeframe))
+            all_picks.append((p["stockId"], sname, timeframe, p["_metrics"]))
 
         summary.append({
             "strategy": sname,
@@ -220,8 +237,11 @@ def auto_select(req: AutoSelectRequest):
         with engine.begin() as conn:
             if req.clearExisting:
                 conn.execute(text('DELETE FROM "ActiveConfiguration"'))
-            for stock_id, sname, timeframe in all_picks:
+            for stock_id, sname, timeframe, metrics in all_picks:
                 _upsert_active(conn, stock_id, sname, timeframe)
+                # Persist a fresh BacktestReport so the monitor shows numbers
+                # immediately instead of "no backtest — Re-run".
+                _save_report(conn, stock_id, sname, timeframe, metrics)
                 written += 1
 
     return {
