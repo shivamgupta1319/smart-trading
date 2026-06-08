@@ -20,6 +20,39 @@ class BaseStrategy(ABC):
         """
         pass
 
+    def _apply_bucket_target(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Override the `target` column to a bucket-specific reward:risk multiple
+        (the validated R:R-by-horizon model). The STOP is left exactly as the
+        strategy set it — only the reward distance changes. For buckets with no
+        configured multiple (e.g. INTRADAY) the native target is kept unchanged.
+
+        Applied in BOTH the backtest (via simulate) and live signals (via the
+        scanner), so the two never diverge. Reward is measured from the signal
+        bar's Close, the same reference each strategy uses for its own target.
+        """
+        from backtest_config import target_r_for_bucket
+        try:
+            from strategies import STRATEGY_HOLD_DURATIONS
+            bucket = STRATEGY_HOLD_DURATIONS.get(getattr(self, "name", ""), None)
+        except Exception:
+            bucket = None
+        r = target_r_for_bucket(bucket)
+        if r is None or "signal" not in df.columns or "stop_loss" not in df.columns:
+            return df
+
+        df = df.copy()
+        sig = df["signal"].to_numpy()
+        close = df["Close"].to_numpy(dtype=float)
+        sl = df["stop_loss"].to_numpy(dtype=float)
+        tgt = (df["target"].to_numpy(dtype=float).copy()
+               if "target" in df.columns else np.full(len(df), np.nan))
+        long = (sig > 0) & np.isfinite(sl) & (close > sl)
+        short = (sig < 0) & np.isfinite(sl) & (sl > close)
+        tgt[long] = close[long] + r * (close[long] - sl[long])
+        tgt[short] = close[short] - r * (sl[short] - close[short])
+        df["target"] = tgt
+        return df
+
     def run_backtest(self, df: pd.DataFrame) -> dict:
         """Run a realistic backtest and return aggregate metrics."""
         sim = self.simulate(df)
@@ -45,6 +78,7 @@ class BaseStrategy(ABC):
         Returns {net_trades, gross_trades, total_costs, max_dd, skipped_invalid}.
         """
         df = self.generate_signals(df).copy()
+        df = self._apply_bucket_target(df)  # bucket reward:risk override (R:R-by-horizon)
         tf = getattr(self, "timeframe", "1D")
         costs = CostModel(tf)
 

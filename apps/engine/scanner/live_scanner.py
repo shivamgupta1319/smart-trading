@@ -140,6 +140,7 @@ def check_and_fire_signal(config, cache, last_fired_times):
             return
 
         df = strategy.generate_signals(df)
+        df = strategy._apply_bucket_target(df)  # bucket reward:risk override (matches backtest)
         latest = df.iloc[-1]
         candle_time = latest.name
 

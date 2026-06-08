@@ -120,3 +120,28 @@ class CostModel:
 
 
 RISK = RiskConfig()
+
+
+# --- Reward:risk by hold-duration bucket (validated R:R-by-horizon model) -------
+# Longer holds justify a higher reward multiple (lower win rate, bigger winners).
+# The STOP stays whatever each strategy set (that defines risk); only the target
+# distance is standardised per bucket. None = keep the strategy's native target
+# (INTRADAY keeps its own ~2R — wider isn't realistically capturable same-day).
+# All env-tunable, e.g. TARGET_R_SHORT_SWING=3.5.
+def _target_r(name: str, default: float):
+    v = _f(name, default)
+    return v if v and v > 0 else None
+
+
+TARGET_R_BY_BUCKET = {
+    "INTRADAY": _target_r("TARGET_R_INTRADAY", 0.0),          # 0 -> keep native
+    "SHORT_SWING": _target_r("TARGET_R_SHORT_SWING", 3.0),
+    "MID_SWING": _target_r("TARGET_R_MID_SWING", 4.0),
+    "LONG_POSITIONAL": _target_r("TARGET_R_LONG_POSITIONAL", 5.0),
+}
+
+
+def target_r_for_bucket(bucket: str | None):
+    """Reward:risk multiple to apply for a hold-duration bucket, or None to keep
+    the strategy's own target."""
+    return TARGET_R_BY_BUCKET.get(bucket) if bucket else None
