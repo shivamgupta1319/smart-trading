@@ -35,9 +35,10 @@ export class SignalsController {
   @Post("new")
   @HttpCode(201)
   async create(@Body() dto: CreateSignalDto) {
-    const { signal, isNew } = await this.signalsService.create(dto);
-    // Emit WebSocket event to all connected clients only if the signal is new
-    if (isNew) {
+    const { signal, isNew, fundingStatus } = await this.signalsService.create(dto);
+    // Alert only for new, FUNDED signals — SHADOW trades are recorded for research but
+    // aren't actionable (the ₹1L account couldn't fund them), so they don't ping.
+    if (isNew && fundingStatus === "FUNDED") {
       const payload = {
         ...signal,
         symbol: signal.stock?.symbol,

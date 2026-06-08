@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { INITIAL_CAPITAL } from '../common/risk';
+import {
+  INITIAL_CAPITAL,
+  MAX_HEAT_PCT,
+  MIN_TRADES_FOR_CONFIDENCE,
+  leverageFor,
+} from '../common/risk';
 import { toNum, round2, safePct, normalizeTradeMoney } from '../common/money';
 
 @Injectable()
@@ -38,16 +43,22 @@ export class TradesService {
       orderBy: { entryTime: 'asc' },
     });
 
+    type AnyTrade = (typeof allTrades)[number];
     const closedTrades = allTrades.filter((t) => t.status === 'CLOSED');
     const openTrades = allTrades.filter((t) => t.status === 'OPEN');
+    // Portfolio P&L/ROI reflect only FUNDED trades (what the ₹1L account could afford).
+    // Research breakdowns below use ALL closed trades (funded + shadow) so the
+    // strategy×stock edge analysis stays unbiased by capital availability.
+    const fundedClosed = closedTrades.filter((t) => t.fundingStatus === 'FUNDED');
 
     const pnlOf = (t: { pnl: unknown }) => toNum(t.pnl as never);
+    const riskOf = (t: { riskAmount: unknown }) => toNum(t.riskAmount as never);
 
-    const totalPnl = closedTrades.reduce((sum, t) => sum + pnlOf(t), 0);
-    const wins = closedTrades.filter((t) => t.outcome === 'WIN');
-    const losses = closedTrades.filter((t) => t.outcome === 'LOSS');
-    const winRate = closedTrades.length > 0 ? (wins.length / closedTrades.length) * 100 : 0;
-
+    // ---- Portfolio metrics (FUNDED closed only) -------------------------------
+    const totalPnl = fundedClosed.reduce((sum, t) => sum + pnlOf(t), 0);
+    const wins = fundedClosed.filter((t) => t.outcome === 'WIN');
+    const losses = fundedClosed.filter((t) => t.outcome === 'LOSS');
+    const winRate = fundedClosed.length > 0 ? (wins.length / fundedClosed.length) * 100 : 0;
     const avgWin =
       wins.length > 0 ? wins.reduce((sum, t) => sum + pnlOf(t), 0) / wins.length : 0;
     const avgLoss =
@@ -56,32 +67,10 @@ export class TradesService {
         : 0;
     const profitFactor =
       avgLoss > 0 ? (avgWin * wins.length) / (avgLoss * losses.length) : 0;
+    const roiPct = safePct(totalPnl, INITIAL_CAPITAL);
 
-    // Best strategy by total P&L
-    const strategyPnl: Record<string, { pnl: number; trades: number; wins: number }> = {};
-    for (const t of closedTrades) {
-      if (!strategyPnl[t.strategyName]) {
-        strategyPnl[t.strategyName] = { pnl: 0, trades: 0, wins: 0 };
-      }
-      strategyPnl[t.strategyName].pnl += pnlOf(t);
-      strategyPnl[t.strategyName].trades++;
-      if (t.outcome === 'WIN') strategyPnl[t.strategyName].wins++;
-    }
-
-    const strategyBreakdown = Object.entries(strategyPnl)
-      .map(([name, data]) => ({
-        strategy: name,
-        totalPnl: round2(data.pnl),
-        trades: data.trades,
-        wins: data.wins,
-        winRate: data.trades > 0 ? round2((data.wins / data.trades) * 100) : 0,
-      }))
-      .sort((a, b) => b.totalPnl - a.totalPnl);
-
-    const bestStrategy = strategyBreakdown.length > 0 ? strategyBreakdown[0].strategy : 'N/A';
-
-    // Equity curve: cumulative P&L over time
-    const sortedTrades = [...closedTrades].sort(
+    // Equity curve: cumulative FUNDED P&L over time
+    const sortedTrades = [...fundedClosed].sort(
       (a, b) =>
         new Date(a.exitTime || a.entryTime).getTime() -
         new Date(b.exitTime || b.entryTime).getTime(),
@@ -98,7 +87,85 @@ export class TradesService {
       value: round2(value),
     }));
 
-    // Hold duration breakdown
+    // ---- Decision-grade edge metrics for a group of closed trades -------------
+    // Computed over funded+shadow so a pair's edge is judged on every signal it fired.
+    const cellMetrics = (group: AnyTrade[]) => {
+      const trades = group.length;
+      const grpWins = group.filter((t) => t.outcome === 'WIN');
+      const grpLosses = group.filter((t) => t.outcome === 'LOSS');
+      const grpPnl = group.reduce((s, t) => s + pnlOf(t), 0);
+      const grossWin = grpWins.reduce((s, t) => s + pnlOf(t), 0);
+      const grossLoss = Math.abs(grpLosses.reduce((s, t) => s + pnlOf(t), 0));
+      const cellAvgWin = grpWins.length ? grossWin / grpWins.length : 0;
+      const cellAvgLoss = grpLosses.length ? grossLoss / grpLosses.length : 0;
+      // Avg R-multiple = mean(pnl / riskAmount). Normalizes capped (sub-2%) and full
+      // trades onto one scale — the apples-to-apples edge metric to rank pairs by.
+      const rTrades = group.filter((t) => riskOf(t) > 0);
+      const avgRMultiple = rTrades.length
+        ? rTrades.reduce((s, t) => s + pnlOf(t) / riskOf(t), 0) / rTrades.length
+        : 0;
+      // Max drawdown of the cell's cumulative P&L (trades ordered by exit time).
+      const ordered = [...group].sort(
+        (a, b) =>
+          new Date(a.exitTime || a.entryTime).getTime() -
+          new Date(b.exitTime || b.entryTime).getTime(),
+      );
+      let cum = 0;
+      let peak = 0;
+      let maxDd = 0;
+      for (const t of ordered) {
+        cum += pnlOf(t);
+        if (cum > peak) peak = cum;
+        if (peak - cum > maxDd) maxDd = peak - cum;
+      }
+      const funded = group.filter((t) => t.fundingStatus === 'FUNDED').length;
+      const confidence = trades >= 30 ? 'HIGH' : trades >= 10 ? 'MEDIUM' : 'LOW';
+      return {
+        trades,
+        wins: grpWins.length,
+        winRate: trades > 0 ? round2((grpWins.length / trades) * 100) : 0,
+        totalPnl: round2(grpPnl),
+        avgWin: round2(cellAvgWin),
+        avgLoss: round2(cellAvgLoss),
+        expectancy: trades > 0 ? round2(grpPnl / trades) : 0,
+        avgRMultiple: round2(avgRMultiple),
+        profitFactor: round2(grossLoss > 0 ? grossWin / grossLoss : 0),
+        maxDrawdown: round2(maxDd),
+        funded,
+        shadow: trades - funded,
+        confidence,
+        reliable: trades >= MIN_TRADES_FOR_CONFIDENCE,
+      };
+    };
+
+    const groupBy = (trades: AnyTrade[], keyFn: (t: AnyTrade) => string) => {
+      const map = new Map<string, AnyTrade[]>();
+      for (const t of trades) {
+        const k = keyFn(t);
+        (map.get(k) || map.set(k, []).get(k)!).push(t);
+      }
+      return map;
+    };
+
+    // ---- Research breakdowns (ALL closed: funded + shadow) --------------------
+    const strategyBreakdown = Array.from(
+      groupBy(closedTrades, (t) => t.strategyName).entries(),
+    )
+      .map(([strategy, group]) => ({ strategy, ...cellMetrics(group) }))
+      .sort((a, b) => b.totalPnl - a.totalPnl);
+
+    const bestStrategy = strategyBreakdown.length > 0 ? strategyBreakdown[0].strategy : 'N/A';
+
+    const stockWiseStrategyBreakdown = Array.from(
+      groupBy(closedTrades, (t) => `${t.symbol}|@|${t.strategyName}`).entries(),
+    )
+      .map(([key, group]) => {
+        const [symbol, strategy] = key.split('|@|');
+        return { symbol, strategy, ...cellMetrics(group) };
+      })
+      .sort((a, b) => b.totalPnl - a.totalPnl);
+
+    // Hold duration breakdown (all closed)
     const holdDurationStats: Record<string, { trades: number; pnl: number }> = {};
     for (const t of closedTrades) {
       const hd = t.holdDuration || 'UNKNOWN';
@@ -107,37 +174,15 @@ export class TradesService {
       holdDurationStats[hd].pnl = round2(holdDurationStats[hd].pnl + pnlOf(t));
     }
 
-    // Stock-wise Strategy Breakdown
-    const stockWiseStrategyBreakdown: Array<Record<string, unknown>> = [];
-    const stockStrategyMap = new Map<string, { pnl: number; trades: number; wins: number }>();
-    for (const t of closedTrades) {
-      const key = JSON.stringify({ symbol: t.symbol, strategy: t.strategyName });
-      const stats = stockStrategyMap.get(key) || { pnl: 0, trades: 0, wins: 0 };
-      stats.pnl += pnlOf(t);
-      stats.trades++;
-      if (t.outcome === 'WIN') stats.wins++;
-      stockStrategyMap.set(key, stats);
-    }
-    for (const [key, data] of stockStrategyMap.entries()) {
-      const parsed = JSON.parse(key);
-      stockWiseStrategyBreakdown.push({
-        symbol: parsed.symbol,
-        strategy: parsed.strategy,
-        totalPnl: round2(data.pnl),
-        trades: data.trades,
-        wins: data.wins,
-        winRate: data.trades > 0 ? round2((data.wins / data.trades) * 100) : 0,
-      });
-    }
-    stockWiseStrategyBreakdown.sort(
-      (a, b) => (b.totalPnl as number) - (a.totalPnl as number),
-    );
-
     return {
       totalTrades: allTrades.length,
       openTrades: openTrades.length,
       closedTrades: closedTrades.length,
+      fundedClosedTrades: fundedClosed.length,
+      shadowClosedTrades: closedTrades.length - fundedClosed.length,
+      // Portfolio (FUNDED only):
       totalPnl: round2(totalPnl),
+      roiPct: round2(roiPct),
       winRate: round2(winRate),
       wins: wins.length,
       losses: losses.length,
@@ -161,9 +206,14 @@ export class TradesService {
    * book is over-exposed or too concentrated.
    */
   async getRiskMetrics() {
-    const open = (await this.prisma.trade.findMany({ where: { status: 'OPEN' } })).map(
-      (t) => normalizeTradeMoney(t)!,
-    );
+    // Only FUNDED open positions consume real buying power. SHADOW positions are
+    // research-only and are reported separately (count) but don't lock up capital.
+    const open = (
+      await this.prisma.trade.findMany({ where: { status: 'OPEN', fundingStatus: 'FUNDED' } })
+    ).map((t) => normalizeTradeMoney(t)!);
+    const shadowPositions = await this.prisma.trade.count({
+      where: { status: 'OPEN', fundingStatus: 'SHADOW' },
+    });
 
     const symbols = [...new Set(open.map((t) => t.symbol))];
     const sectorRows = symbols.length
@@ -171,14 +221,18 @@ export class TradesService {
       : [];
     const sectorOf = new Map(sectorRows.map((r) => [r.symbol, r.sector || 'Unknown']));
 
-    let exposure = 0;
+    let exposure = 0; // total notional
+    let marginUsed = 0; // cash locked up = Σ notional ÷ leverage
     let heat = 0;
     const bySector: Record<string, number> = {};
     const positions = open.map((t) => {
       const qty = t.remainingQty ?? t.quantity;
-      const posExposure = qty * t.entryPrice;
-      const posRisk = qty * Math.abs(t.entryPrice - t.stopLoss);
+      const entry = toNum(t.entryPrice);
+      const posExposure = qty * entry;
+      const posMargin = posExposure / leverageFor(t.holdDuration);
+      const posRisk = qty * Math.abs(entry - toNum(t.stopLoss));
       exposure += posExposure;
+      marginUsed += posMargin;
       heat += posRisk;
       const sector = sectorOf.get(t.symbol) || 'Unknown';
       bySector[sector] = round2((bySector[sector] || 0) + posExposure);
@@ -188,6 +242,7 @@ export class TradesService {
         sector,
         qty,
         exposure: round2(posExposure),
+        margin: round2(posMargin),
         riskAtStop: round2(posRisk),
       };
     });
@@ -201,21 +256,32 @@ export class TradesService {
       .sort((a, b) => b.exposure - a.exposure);
 
     const heatPct = safePct(heat, INITIAL_CAPITAL);
-    const exposurePct = safePct(exposure, INITIAL_CAPITAL);
+    // Margin (not notional) is what the cash account funds, so measure usage against cash.
+    const marginUsedPct = safePct(marginUsed, INITIAL_CAPITAL);
+    const availableCash = round2(INITIAL_CAPITAL - marginUsed);
     const flags: string[] = [];
-    if (heatPct > 6) flags.push(`Total heat ${heatPct.toFixed(1)}% exceeds the 6% guideline (3× the 2% per-trade rule).`);
-    if (exposurePct > 100) flags.push(`Deployed capital ${exposurePct.toFixed(0)}% exceeds available capital — over-leveraged.`);
+    if (heatPct > MAX_HEAT_PCT)
+      flags.push(
+        `Total heat ${heatPct.toFixed(1)}% exceeds the ${MAX_HEAT_PCT}% guideline (3× the 2% per-trade rule).`,
+      );
+    // With the entry-time funding cap, margin should never exceed cash — flag only if it does.
+    if (marginUsed > INITIAL_CAPITAL)
+      flags.push(
+        `Margin used ₹${round2(marginUsed).toFixed(0)} exceeds cash ₹${INITIAL_CAPITAL.toFixed(0)} — funding guard breached.`,
+      );
     const topSector = sectorConcentration[0];
     if (topSector && topSector.pctOfBook > 40)
       flags.push(`${topSector.pctOfBook.toFixed(0)}% of the book is in ${topSector.sector} — concentrated.`);
 
     return {
       openPositions: open.length,
-      deployedCapital: round2(exposure),
-      deployedPct: round2(exposurePct),
+      shadowPositions,
+      notional: round2(exposure),
+      marginUsed: round2(marginUsed),
+      marginUsedPct: round2(marginUsedPct),
+      availableCash,
       totalHeat: round2(heat),
       heatPct: round2(heatPct),
-      availableCapital: round2(INITIAL_CAPITAL - exposure),
       sectorConcentration,
       positions,
       flags,

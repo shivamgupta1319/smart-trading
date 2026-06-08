@@ -95,7 +95,7 @@ Severity = impact × likelihood for the intended use. `file:line` references inc
 | M8 | **WebSocket emits only `NEW_TRADE_ALERT`.** Trade closes, partial exits, SL trails, and reversals go to Telegram but **not** the socket → the dashboard can't react in real time and must poll. | `signals.gateway.ts:38`, `signals.service.ts` |
 | M9 | **No tests of correctness anywhere.** Engine `test/` are ad-hoc timing benchmarks with no assertions; frontend has zero tests; no CI. The most bug-prone code (3-phase exit, `detect_reversal`, `run_backtest`) is untested. | `engine/test/*`, repo-wide |
 | M10 | **CORS / origins hardcoded to localhost**, no env-driven config; `credentials:true` is pointless without auth. | `apps/api/src/main.ts:8-11`, `engine/main.py:20` |
-| M11 | **No portfolio-level exposure cap** — 2% risk per trade is enforced, but nothing prevents concurrent open trades from exceeding `INITIAL_CAPITAL`; no available-vs-deployed capital accounting. | `signals.service.ts`, `trades.service.ts:164` |
+| M11 | ✅ **RESOLVED** — capital model now enforces a buying-power funding gate at entry: a trade is FUNDED only if its margin (`notional ÷ leverage`, INTRADAY 5× / delivery 1×) fits remaining cash **and** total open heat stays ≤ 6%; otherwise it's a SHADOW trade (tracked, excluded from portfolio ROI). `GET /api/trades/risk` reports margin used / available cash; portfolio ROI is funded-only. | `common/risk.ts`, `signals.service.ts:create`, `trades.service.ts:getRiskMetrics` |
 
 ### 🟢 LOW / Cleanup
 

@@ -54,6 +54,53 @@ def get_stock_id(symbol: str) -> int:
         return result[0]
 
 
+def _resolve_stock_id(symbol: str):
+    """Non-raising stock-id lookup (returns None if absent) for non-HTTP callers."""
+    with engine.connect() as conn:
+        result = conn.execute(
+            text('SELECT id FROM "Stock" WHERE symbol = :sym'),
+            {"sym": symbol.upper()}
+        ).fetchone()
+        return result[0] if result else None
+
+
+def fetch_and_store(symbol: str, timeframes=None) -> dict:
+    """Download OHLCV from yfinance and upsert into HistoricalData.
+
+    Shared core for the HTTP endpoint and the background fetch scheduler. Because
+    upsert never deletes, repeated runs accumulate history beyond yfinance's
+    per-request intraday window (15m/5m are capped to ~60 days per call), which is
+    how the backtest dataset grows over time. Returns per-timeframe row counts.
+    """
+    timeframes = timeframes or ["1D", "15m", "5m"]
+    original_symbol = symbol.upper()
+    stock_id = _resolve_stock_id(original_symbol)
+    if stock_id is None:
+        return {"symbol": original_symbol, "error": "not found in Stock table"}
+
+    yf_symbol = original_symbol if original_symbol.endswith(".NS") else original_symbol + ".NS"
+    results = {}
+    ticker = yf.Ticker(yf_symbol)
+
+    for tf in timeframes:
+        if tf not in TIMEFRAME_CONFIG:
+            continue
+        cfg = TIMEFRAME_CONFIG[tf]
+        try:
+            df = ticker.history(period=cfg["period"], interval=cfg["interval"])
+            if df.empty:
+                results[tf] = {"rows": 0, "status": "empty"}
+                continue
+            df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+            rows = upsert_ohlcv(stock_id, df, tf)
+            results[tf] = {"rows": rows, "status": "ok"}
+        except Exception as e:
+            results[tf] = {"rows": 0, "status": f"error: {str(e)}"}
+        time.sleep(1)  # Rate limit friendly
+
+    return {"symbol": original_symbol, "results": results}
+
+
 def upsert_ohlcv(stock_id: int, df: pd.DataFrame, timeframe: str):
     if df.empty:
         return 0
@@ -88,35 +135,8 @@ def upsert_ohlcv(stock_id: int, df: pd.DataFrame, timeframe: str):
 
 @router.post("/fetch-history")
 def fetch_history(req: FetchHistoryRequest):
-    original_symbol = req.symbol.upper()
-    stock_id = get_stock_id(original_symbol)
-    
-    # Prepare symbol for Yahoo Finance
-    yf_symbol = original_symbol
-    if not yf_symbol.endswith(".NS"):
-        yf_symbol = yf_symbol + ".NS"
-
-
-    results = {}
-    ticker = yf.Ticker(yf_symbol)
-
-    for tf in req.timeframes:
-        if tf not in TIMEFRAME_CONFIG:
-            continue
-        cfg = TIMEFRAME_CONFIG[tf]
-        try:
-            df = ticker.history(period=cfg["period"], interval=cfg["interval"])
-            if df.empty:
-                results[tf] = {"rows": 0, "status": "empty"}
-                continue
-            df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
-            rows = upsert_ohlcv(stock_id, df, tf)
-            results[tf] = {"rows": rows, "status": "ok"}
-        except Exception as e:
-            results[tf] = {"rows": 0, "status": f"error: {str(e)}"}
-        time.sleep(1)  # Rate limit friendly
-
-    return {"symbol": original_symbol, "results": results}
+    get_stock_id(req.symbol)  # validate the symbol exists → 404 if not
+    return fetch_and_store(req.symbol, req.timeframes)
 
 class LivePriceRequest(BaseModel):
     symbols: List[str]

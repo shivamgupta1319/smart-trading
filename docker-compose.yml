@@ -122,5 +122,27 @@ services:
     volumes:
       - ./apps/engine:/app
 
+  # Historical-data fetch scheduler — opt-in (profile: live). Runs a daily
+  # after-close fetch of all active stocks so the backtest dataset grows.
+  scheduler:
+    build:
+      context: apps/engine
+      dockerfile: Dockerfile
+    container_name: smart-trading-v2-scheduler
+    restart: unless-stopped
+    profiles: ["live"]
+    command: python scheduler/fetch_scheduler.py
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      FETCH_RUN_HOUR_IST: ${FETCH_RUN_HOUR_IST:-16}
+      FETCH_RUN_MINUTE_IST: ${FETCH_RUN_MINUTE_IST:-0}
+      FETCH_TIMEFRAMES: ${FETCH_TIMEFRAMES:-1D,15m,5m}
+      FETCH_ON_START: ${FETCH_ON_START:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./apps/engine:/app
+
 volumes:
   postgres_data:

@@ -71,9 +71,13 @@ show net losses after realistic fills+costs.
 |------|--------------|--------|
 | Walk-forward | `POST /api/engine/run-walk-forward` — rolling out-of-sample folds, % profitable folds, OOS ROI mean/std, consistency flag. | ✅ verified |
 | Monte-Carlo | `POST /api/engine/run-monte-carlo` — bootstraps the trade sequence; ROI & max-drawdown percentiles + probability of profit. | ✅ verified |
-| Portfolio risk engine | `GET /api/trades/risk` — open exposure, total heat, per-sector concentration, over-exposure flags. | ✅ verified |
+| Portfolio risk engine | `GET /api/trades/risk` — margin used / buying power / available cash, total heat, per-sector concentration. Now leverage-aware (INTRADAY 5× / delivery 1×). | ✅ verified |
+| Capital-constrained paper trading (dual-track) | Entry-time funding gate: FUNDED if margin fits cash **and** heat ≤ 6%, else SHADOW (tracked for would-be P&L, excluded from portfolio ROI). Authentic ₹1L ROI; position size capped to buying power. | ✅ delivered |
+| Decision-grade (stock×strategy) analytics | `GET /api/trades/stats` per-pair `expectancy / avgRMultiple / profitFactor / maxDrawdown / confidence / reliable` (funded+shadow) — the metrics to trust before going live. | ✅ delivered |
+| Scanner monitored-stocks management | `/scanner` split into Live Scanner + Monitored Stocks tabs; the latter lists each pair's latest backtest with Re-run + Remove. | ✅ delivered |
 | Broker paper-trading parity | **Built (data layer).** Free **DhanHQ** adapter (`brokers/dhan.py`) + Upstox alternative (`brokers/upstox.py`) behind a facade (`brokers/__init__.py`) with **automatic yfinance fallback**. Wired into `/live-prices` + the scanner; diagnostics at `/api/engine/broker/status` & `/probe/{symbol}`. Paper fills stay simulated (no real orders). Setup: [dhan-paper-trading.md](dhan-paper-trading.md). | ✅ facade + fallback verified (Dhan calls need your token to test) |
 | Regime detection | **Not built** — ADX/India-VIX regime tagging + per-regime strategy gating. Designed as next step. | ⬜ |
+| Automated history fetch | **Built.** `scheduler` service (profile `live`) runs a daily after-close fetch of all active stocks (`scheduler/fetch_scheduler.py`); intraday history accumulates past yfinance's 60-day cap via upsert. Env-tunable cadence. | ✅ delivered |
 | Second data source | **Not built** — NSE bhavcopy / paid feed + corporate-action adjustment. Designed as next step. | ⬜ |
 
 ## Phase 5 — Product ✅ (multi-user intentionally swapped for single-user PIN)

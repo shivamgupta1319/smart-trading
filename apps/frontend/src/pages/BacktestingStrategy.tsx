@@ -109,6 +109,9 @@ export function BacktestingStrategy() {
       const res = await axios.post(`${API}/api/configs/toggle`, { symbol, strategyName, timeframe: strategyTimeframe });
       if (res.data.status === 'added') {
         setActiveConfigs(prev => [...prev, { symbol, strategyName: strategyName! }]);
+        // No snapshot write needed here: running the backtest (run-strategy-all-stocks)
+        // already persisted a BacktestReport per stock×strategy on the engine side, so the
+        // Monitored Stocks tab will pick up this pair's latest result automatically.
         showMessage('success', `${strategyName} is now set for Live Signals on ${symbol}!`);
       } else {
         setActiveConfigs(prev => prev.filter(c => !(c.symbol === symbol && c.strategyName === strategyName)));

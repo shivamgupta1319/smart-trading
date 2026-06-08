@@ -128,6 +128,9 @@ model Trade {
   peakPrice     Decimal?  @db.Decimal(18, 4)   // Best favorable price reached during the trade
   realizedPnl   Decimal   @default(0) @db.Decimal(18, 4) // PnL accumulated from partial exits
   remainingQty  Int       @default(1) // Remaining quantity after partials
+  // "FUNDED": ₹1L account could afford it (counts toward portfolio ROI/P&L).
+  // "SHADOW": capital/heat exhausted at entry — tracked for would-be P&L (research only).
+  fundingStatus String    @default("FUNDED") // "FUNDED" | "SHADOW"
   createdAt     DateTime  @default(now())
 
   signal        LiveSignal @relation(fields: [signalId], references: [id], onDelete: Cascade)
@@ -136,4 +139,5 @@ model Trade {
   @@index([stockId, status])
   @@index([status])
   @@index([strategyName])
+  @@index([status, fundingStatus])
 }

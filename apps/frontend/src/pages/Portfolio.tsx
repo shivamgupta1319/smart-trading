@@ -11,6 +11,15 @@ const HOLD_LABELS: Record<string, { label: string; color: string; icon: string }
   UNKNOWN: { label: 'Unknown', color: '#4b5563', icon: '❓' },
 };
 
+// Mirrors MIN_TRADES_FOR_CONFIDENCE on the API (default 20) — a (stock×strategy) cell is
+// only "reliable" above this many closed trades.
+const CONFIDENCE_MIN_TRADES = 20;
+const CONFIDENCE_COLOR: Record<string, string> = {
+  HIGH: '#10b981',
+  MEDIUM: '#fbbf24',
+  LOW: '#4b5563',
+};
+
 interface Trade {
   id: number;
   signalId: number;
@@ -40,11 +49,32 @@ interface Trade {
   peakPrice: number | null;
 }
 
+// Decision-grade edge metrics computed per (stock×strategy) and per strategy cell.
+interface EdgeMetrics {
+  trades: number;
+  wins: number;
+  winRate: number;
+  totalPnl: number;
+  avgWin: number;
+  avgLoss: number;
+  expectancy: number;
+  avgRMultiple: number;
+  profitFactor: number;
+  maxDrawdown: number;
+  funded: number;
+  shadow: number;
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
+  reliable: boolean;
+}
+
 interface PortfolioStats {
   totalTrades: number;
   openTrades: number;
   closedTrades: number;
+  fundedClosedTrades: number;
+  shadowClosedTrades: number;
   totalPnl: number;
+  roiPct: number;
   winRate: number;
   wins: number;
   losses: number;
@@ -52,21 +82,8 @@ interface PortfolioStats {
   avgLoss: number;
   profitFactor: number;
   bestStrategy: string;
-  strategyBreakdown: {
-    strategy: string;
-    totalPnl: number;
-    trades: number;
-    wins: number;
-    winRate: number;
-  }[];
-  stockWiseStrategyBreakdown: {
-    symbol: string;
-    strategy: string;
-    totalPnl: number;
-    trades: number;
-    wins: number;
-    winRate: number;
-  }[];
+  strategyBreakdown: ({ strategy: string } & EdgeMetrics)[];
+  stockWiseStrategyBreakdown: ({ symbol: string; strategy: string } & EdgeMetrics)[];
   equityCurve: { time: number; value: number }[];
   holdDurationStats: Record<string, { trades: number; pnl: number }>;
   initialCapital: number;
@@ -329,11 +346,14 @@ export function Portfolio() {
                 <div className="metric-card">
                   <p className="metric-label">Open Positions</p>
                   <p className="metric-value">{risk.openPositions}</p>
+                  {risk.shadowPositions > 0 && (
+                    <p className="metric-label">+{risk.shadowPositions} shadow (unfunded)</p>
+                  )}
                 </div>
                 <div className="metric-card">
-                  <p className="metric-label">Deployed Capital</p>
-                  <p className="metric-value">₹{Number(risk.deployedCapital).toLocaleString('en-IN')}</p>
-                  <p className="metric-label">{risk.deployedPct}% of capital</p>
+                  <p className="metric-label">Margin Used</p>
+                  <p className="metric-value" style={{ color: risk.marginUsedPct > 100 ? 'var(--red)' : 'var(--text-primary)' }}>₹{Number(risk.marginUsed).toLocaleString('en-IN')}</p>
+                  <p className="metric-label">{risk.marginUsedPct}% of cash · ₹{Number(risk.notional).toLocaleString('en-IN')} notional</p>
                 </div>
                 <div className="metric-card">
                   <p className="metric-label">Total Heat (risk-at-stop)</p>
@@ -341,8 +361,8 @@ export function Portfolio() {
                   <p className="metric-label">{risk.heatPct}% of capital</p>
                 </div>
                 <div className="metric-card">
-                  <p className="metric-label">Available Capital</p>
-                  <p className="metric-value">₹{Number(risk.availableCapital).toLocaleString('en-IN')}</p>
+                  <p className="metric-label">Available Cash</p>
+                  <p className="metric-value">₹{Number(risk.availableCash).toLocaleString('en-IN')}</p>
                 </div>
               </div>
 
@@ -373,7 +393,7 @@ export function Portfolio() {
                   <h3 style={{ marginBottom: '1rem' }}>Open Positions</h3>
                   <div className="table-container">
                     <table className="data-table">
-                      <thead><tr><th>Symbol</th><th>Strategy</th><th>Sector</th><th style={{ textAlign: 'right' }}>Qty</th><th style={{ textAlign: 'right' }}>Exposure</th><th style={{ textAlign: 'right' }}>Risk @ Stop</th></tr></thead>
+                      <thead><tr><th>Symbol</th><th>Strategy</th><th>Sector</th><th style={{ textAlign: 'right' }}>Qty</th><th style={{ textAlign: 'right' }}>Notional</th><th style={{ textAlign: 'right' }}>Margin</th><th style={{ textAlign: 'right' }}>Risk @ Stop</th></tr></thead>
                       <tbody>
                         {risk.positions.map((p: any, i: number) => (
                           <tr key={i}>
@@ -382,6 +402,7 @@ export function Portfolio() {
                             <td>{p.sector}</td>
                             <td style={{ textAlign: 'right' }}>{p.qty}</td>
                             <td style={{ textAlign: 'right' }}>₹{Number(p.exposure).toLocaleString('en-IN')}</td>
+                            <td style={{ textAlign: 'right' }}>₹{Number(p.margin).toLocaleString('en-IN')}</td>
                             <td style={{ textAlign: 'right', color: 'var(--red)' }}>₹{Number(p.riskAtStop).toLocaleString('en-IN')}</td>
                           </tr>
                         ))}
@@ -409,6 +430,9 @@ export function Portfolio() {
               <p className="metric-label">Total P&L</p>
               <p className={`metric-value ${stats.totalPnl >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
                 {stats.totalPnl >= 0 ? '+' : ''}₹{stats.totalPnl.toLocaleString('en-IN')}
+              </p>
+              <p className={`metric-label ${stats.roiPct >= 0 ? 'positive' : 'negative'}`}>
+                {stats.roiPct >= 0 ? '+' : ''}{stats.roiPct}% ROI on ₹{stats.initialCapital.toLocaleString('en-IN')}
               </p>
             </div>
             <div className="metric-card">
@@ -566,37 +590,58 @@ export function Portfolio() {
             </div>
           )}
 
-          {/* Stock-wise Strategy Performance */}
+          {/* Stock-wise Strategy Performance — decision-grade edge metrics */}
           {stats.stockWiseStrategyBreakdown && stats.stockWiseStrategyBreakdown.length > 0 && (
             <div className="card" style={{ marginBottom: '2rem' }}>
-              <h3 className="card-title" style={{ marginBottom: '1rem' }}>Stock-wise Strategy Performance</h3>
+              <h3 className="card-title" style={{ marginBottom: '0.5rem' }}>Stock-wise Strategy Performance</h3>
+              <p className="page-subtitle" style={{ marginTop: 0, marginBottom: '1rem', fontSize: '0.8rem' }}>
+                Rank by <strong>Avg R</strong> and <strong>Expectancy</strong> among <strong>reliable</strong> pairs
+                (≥ {CONFIDENCE_MIN_TRADES} trades). Low-confidence rows are dimmed — don't trust real money to them yet.
+              </p>
               <div className="table-wrapper">
                 <table>
                   <thead>
                     <tr>
                       <th>Symbol</th>
                       <th>Strategy</th>
-                      <th>Trades</th>
-                      <th>Wins</th>
-                      <th>Win Rate</th>
-                      <th>Total P&L</th>
+                      <th style={{ textAlign: 'right' }}>Trades</th>
+                      <th style={{ textAlign: 'right' }}>Win Rate</th>
+                      <th style={{ textAlign: 'right' }}>Expectancy</th>
+                      <th style={{ textAlign: 'right' }}>Avg R</th>
+                      <th style={{ textAlign: 'right' }}>Profit Factor</th>
+                      <th style={{ textAlign: 'right' }}>Max DD</th>
+                      <th style={{ textAlign: 'right' }}>Total P&L</th>
+                      <th>Confidence</th>
                     </tr>
                   </thead>
                   <tbody>
                     {stats.stockWiseStrategyBreakdown.map((s) => (
-                      <tr key={`${s.symbol}-${s.strategy}`}>
+                      <tr key={`${s.symbol}-${s.strategy}`} style={{ opacity: s.reliable ? 1 : 0.45 }}>
                         <td><span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-primary)' }}>{s.symbol}</span></td>
                         <td><span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)', fontWeight: 600 }}>{s.strategy}</span></td>
-                        <td>{s.trades}</td>
-                        <td>{s.wins}</td>
-                        <td>
-                          <span style={{ color: s.winRate >= 50 ? 'var(--green)' : 'var(--red)' }}>
-                            {s.winRate}%
+                        <td style={{ textAlign: 'right' }}>
+                          {s.trades}
+                          {s.shadow > 0 && (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}> ({s.funded}F/{s.shadow}S)</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right', color: s.winRate >= 50 ? 'var(--green)' : 'var(--red)' }}>{s.winRate}%</td>
+                        <td style={{ textAlign: 'right', color: s.expectancy >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>
+                          {s.expectancy >= 0 ? '+' : ''}₹{s.expectancy.toLocaleString('en-IN')}
+                        </td>
+                        <td style={{ textAlign: 'right', color: s.avgRMultiple >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                          {s.avgRMultiple >= 0 ? '+' : ''}{s.avgRMultiple}R
+                        </td>
+                        <td style={{ textAlign: 'right', color: s.profitFactor >= 1 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>{s.profitFactor}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--red)', fontFamily: 'var(--font-mono)' }}>-₹{s.maxDrawdown.toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <span style={{ color: s.totalPnl >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                            {s.totalPnl >= 0 ? '+' : ''}₹{s.totalPnl.toLocaleString('en-IN')}
                           </span>
                         </td>
                         <td>
-                          <span style={{ color: s.totalPnl >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                            {s.totalPnl >= 0 ? '+' : ''}₹{s.totalPnl.toLocaleString('en-IN')}
+                          <span className="badge" style={{ background: `${CONFIDENCE_COLOR[s.confidence]}22`, color: CONFIDENCE_COLOR[s.confidence], border: `1px solid ${CONFIDENCE_COLOR[s.confidence]}55` }}>
+                            {s.confidence}
                           </span>
                         </td>
                       </tr>
