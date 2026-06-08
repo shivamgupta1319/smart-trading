@@ -13,6 +13,7 @@ import { EngineModule } from '../engine/engine.module';
 import { NseStocksModule } from '../nse-stocks/nse-stocks.module';
 import { TradesModule } from '../trades/trades.module';
 import { TelegramModule } from '../telegram/telegram.module';
+import { AdminModule } from '../admin/admin.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { TelegramModule } from '../telegram/telegram.module';
     NseStocksModule,
     TradesModule,
     TelegramModule,
+    AdminModule,
   ],
   controllers: [AuthController],
   providers: [

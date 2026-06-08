@@ -3,9 +3,9 @@ import axios from "axios";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateSignalDto } from "./dto/create-signal.dto";
 import {
-  MAX_RISK_PER_TRADE,
   INITIAL_CAPITAL,
-  MAX_HEAT,
+  MAX_CONCURRENT_POSITIONS,
+  SLOT_CAPITAL,
   leverageFor,
 } from "../common/risk";
 import { toNum, round2, safePct, normalizeTradeMoney } from "../common/money";
@@ -60,15 +60,13 @@ export class SignalsService {
     });
     if (existing) return { signal: existing, isNew: false, fundingStatus: undefined };
 
-    // Position sizing: 2%-risk quantity, capped at the trade's buying power so a
-    // tight-stop stock can't size into a notional the ₹1L account could never fund
-    // (mirrors the backtest's MAX_POSITION_VALUE cap). leverage is 1× unless intraday.
+    // Equal-weight slot sizing: each trade gets ~one slot's notional (₹10k), so
+    // no single stock can take the whole wallet and every signal can be a REAL
+    // trade until all slots are full. riskAmount is kept for R-multiple analytics
+    // but no longer drives sizing. leverage is 1× unless intraday.
     const leverage = leverageFor(dto.holdDuration);
-    const buyingPower = INITIAL_CAPITAL * leverage; // intraday ₹5L, delivery ₹1L
     const riskPerShare = Math.abs(dto.entryPrice - dto.stopLoss);
-    const riskQty = riskPerShare > 0 ? Math.floor(MAX_RISK_PER_TRADE / riskPerShare) : 1;
-    const capQty = dto.entryPrice > 0 ? Math.floor(buyingPower / dto.entryPrice) : 1;
-    const quantity = Math.max(1, Math.min(riskQty, capQty));
+    const quantity = dto.entryPrice > 0 ? Math.max(1, Math.floor(SLOT_CAPITAL / dto.entryPrice)) : 1;
     const capitalUsed = round2(quantity * dto.entryPrice);
     const riskAmount = round2(quantity * riskPerShare);
     const marginRequired = round2(capitalUsed / leverage);
@@ -80,29 +78,28 @@ export class SignalsService {
       // Signal + Trade are created atomically: a failure in either rolls back both.
       const signal = await this.prisma.$transaction(async (tx) => {
         // Funding decision (computed inside the tx to limit double-funding races):
-        // a trade is FUNDED only if its margin fits remaining cash AND it keeps total
-        // open risk within the heat cap. Otherwise it's a SHADOW trade — recorded and
-        // tracked for would-be P&L, but excluded from the ₹1L portfolio ROI.
+        // a trade is FUNDED if a slot is free AND its margin fits remaining cash.
+        // Otherwise it's a SHADOW trade — recorded and tracked for would-be P&L,
+        // but excluded from the ₹1L portfolio ROI. With 10 slots, SHADOW only
+        // happens when the book is genuinely full.
         const openFunded = await tx.trade.findMany({
           where: { status: "OPEN", fundingStatus: "FUNDED" },
         });
         let committedMargin = 0; // cash locked up = Σ notional ÷ leverage
-        let currentHeat = 0; // money at risk if every open stop hits
         for (const t of openFunded) {
           const qty = t.remainingQty ?? t.quantity;
           const entry = toNum(t.entryPrice);
           const notional = qty * entry;
           committedMargin += notional / leverageFor(t.holdDuration);
-          currentHeat += qty * Math.abs(entry - toNum(t.stopLoss));
         }
         const cashLeft = INITIAL_CAPITAL - committedMargin;
+        const slotOk = openFunded.length < MAX_CONCURRENT_POSITIONS;
         const fundsOk = marginRequired <= cashLeft;
-        const heatOk = currentHeat + riskAmount <= MAX_HEAT;
-        if (!fundsOk || !heatOk) {
+        if (!slotOk || !fundsOk) {
           fundingStatus = "SHADOW";
-          declineReason = !fundsOk
-            ? `margin ₹${marginRequired.toFixed(0)} > cash left ₹${round2(cashLeft).toFixed(0)}`
-            : `heat ₹${round2(currentHeat + riskAmount).toFixed(0)} > cap ₹${MAX_HEAT.toFixed(0)}`;
+          declineReason = !slotOk
+            ? `all ${MAX_CONCURRENT_POSITIONS} slots in use`
+            : `margin ₹${marginRequired.toFixed(0)} > cash left ₹${round2(cashLeft).toFixed(0)}`;
         }
 
         const sig = await tx.liveSignal.create({

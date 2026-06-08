@@ -24,13 +24,23 @@ def _f(name: str, default: float) -> float:
         return default
 
 
+def _i(name: str, default: int) -> int:
+    try:
+        return int(float(os.getenv(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass(frozen=True)
 class RiskConfig:
     initial_capital: float = _f("BT_INITIAL_CAPITAL", 100_000.0)
-    # Risk a fixed % of *initial* capital per trade (matches the live 2% rule).
+    # The portfolio runs up to N equal-weight slots concurrently (live model).
+    # A single-cell backtest simulates ONE such slot traded repeatedly, so its
+    # ROI is directly comparable to a live slot. MUST match the API's
+    # MAX_CONCURRENT_POSITIONS (apps/api/src/common/risk.ts).
+    max_concurrent_positions: int = _i("BT_MAX_CONCURRENT_POSITIONS", 10)
+    # Risk a fixed % of *slot* capital per trade.
     risk_per_trade_pct: float = _f("BT_RISK_PER_TRADE_PCT", 2.0)
-    # Hard cap on rupees deployed per position (no leverage).
-    max_position_value: float = _f("BT_MAX_POSITION_VALUE", 100_000.0)
     # Slippage applied to BOTH entry and exit, in basis points (1bp = 0.01%).
     slippage_bps: float = _f("BT_SLIPPAGE_BPS", 5.0)
     # When a single bar's range straddles both SL and TP, assume the worse
@@ -38,6 +48,17 @@ class RiskConfig:
     pessimistic_intrabar: bool = os.getenv("BT_PESSIMISTIC_INTRABAR", "true").lower() != "false"
     # Enter on the NEXT bar's open (realistic) rather than the signal bar close.
     next_bar_entry: bool = os.getenv("BT_NEXT_BAR_ENTRY", "true").lower() != "false"
+
+    @property
+    def slot_capital(self) -> float:
+        """Rupees allocated to one position slot (₹1L / 10 = ₹10,000)."""
+        slots = self.max_concurrent_positions if self.max_concurrent_positions > 0 else 1
+        return self.initial_capital / slots
+
+    @property
+    def max_position_value(self) -> float:
+        """Hard cap on rupees deployed per position = one slot (no leverage)."""
+        return self.slot_capital
 
 
 @dataclass(frozen=True)

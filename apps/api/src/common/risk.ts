@@ -3,6 +3,15 @@ export const INITIAL_CAPITAL = Number(process.env.INITIAL_CAPITAL || 100000); //
 export const RISK_PER_TRADE_PCT = Number(process.env.RISK_PER_TRADE_PCT || 2); // 2% per trade
 export const MAX_RISK_PER_TRADE = INITIAL_CAPITAL * (RISK_PER_TRADE_PCT / 100); // ₹2,000
 
+// Equal-weight slot model: capital is split into N fixed slots so no single
+// stock can hog the wallet. Each new trade is sized to ~one slot's notional and
+// is FUNDED as long as a free slot exists. A signal only becomes SHADOW once all
+// slots are occupied — authentic, and avoids the "first tight-stop trade eats the
+// whole ₹1L" problem. MUST match the engine's BT_MAX_CONCURRENT_POSITIONS.
+export const MAX_CONCURRENT_POSITIONS = Number(process.env.MAX_CONCURRENT_POSITIONS || 10);
+export const SLOT_CAPITAL =
+  INITIAL_CAPITAL / (MAX_CONCURRENT_POSITIONS > 0 ? MAX_CONCURRENT_POSITIONS : 1); // ₹10,000
+
 // Intraday (MIS) gives ~5× buying power; delivery (CNC) needs full cash (1×). Leverage only
 // changes how much *margin* a position locks up (notional ÷ leverage), never the loss if the
 // stop hits — that stays RISK_PER_TRADE_PCT, set by quantity × stop-distance.

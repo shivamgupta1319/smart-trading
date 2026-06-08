@@ -7,6 +7,7 @@ from auth import require_api_key, llm_rate_limiter
 from routers.history import router as history_router
 from routers.backtest import router as backtest_router
 from routers.advanced_backtest import router as advanced_backtest_router
+from routers.auto_select import router as auto_select_router
 from routers.custom_strategy import router as custom_strategy_router
 from routers.broker import router as broker_router
 from routers.regime import router as regime_router
@@ -45,6 +46,10 @@ app.include_router(
 )
 app.include_router(
     advanced_backtest_router, prefix="/api/engine", tags=["advanced-backtest"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    auto_select_router, prefix="/api/engine", tags=["auto-select"],
     dependencies=[Depends(require_api_key)],
 )
 app.include_router(

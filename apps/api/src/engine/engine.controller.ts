@@ -59,6 +59,19 @@ export class EngineController {
     return response.data;
   }
 
+  @Post('auto-select')
+  async autoSelect(
+    @Body()
+    body: { strategies?: string[]; topN?: number; clearExisting?: boolean; dryRun?: boolean },
+  ) {
+    // Heavy: backtests every (strategy × stock) plus walk-forward + Monte-Carlo
+    // on survivors. Override the 60s default with a long timeout (10 min).
+    const response = await this.http.post(`/api/engine/auto-select`, body, {
+      timeout: 600000,
+    });
+    return response.data;
+  }
+
   @Post('custom-backtest')
   async customBacktest(@Body() body: { symbol: string; spec: any; timeframe?: string }) {
     const response = await this.http.post(`/api/engine/custom-backtest`, body);

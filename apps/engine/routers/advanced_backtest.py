@@ -103,7 +103,12 @@ def run_walk_forward(req: WalkForwardRequest):
         window = df.iloc[start:end]
         if len(window) < 30:
             continue
-        m = strategy.run_backtest(window)
+        # A strategy can raise on a short fold (e.g. an indicator that needs more
+        # bars). Skip that fold instead of 500-ing the whole validation.
+        try:
+            m = strategy.run_backtest(window)
+        except Exception:
+            continue
         fold_results.append({
             "fold": k + 1,
             "bars": len(window),

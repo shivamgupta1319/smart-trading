@@ -58,7 +58,10 @@ class BaseStrategy(ABC):
 
         n = len(df)
         slip = RISK.slippage_bps / 10_000.0
-        initial_capital = RISK.initial_capital
+        # A single-cell backtest simulates ONE portfolio slot (₹10k) traded
+        # repeatedly, so its P&L/ROI is comparable to one live slot rather than
+        # to the whole ₹1L account.
+        initial_capital = RISK.slot_capital
         risk_budget = initial_capital * RISK.risk_per_trade_pct / 100.0
 
         net_trades: list[float] = []
@@ -160,7 +163,8 @@ class BaseStrategy(ABC):
 
     @staticmethod
     def _metrics(net_trades, gross_trades, total_costs, max_dd, skipped_invalid) -> dict:
-        initial_capital = RISK.initial_capital
+        # ROI / drawdown are reported against one slot's capital (see simulate()).
+        initial_capital = RISK.slot_capital
         if not net_trades:
             return {
                 "winRate": 0.0, "totalTrades": 0, "netProfit": 0.0,

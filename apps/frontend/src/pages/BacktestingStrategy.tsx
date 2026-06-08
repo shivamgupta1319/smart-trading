@@ -134,18 +134,33 @@ export function BacktestingStrategy() {
     setMc(null);
     setValidationError(null);
     const body = { symbol, strategy: strategyName, timeframe: strategyTimeframe };
-    try {
-      const [wfRes, mcRes] = await Promise.all([
-        axios.post(`${API}/api/engine/run-walk-forward`, { ...body, folds: 5 }),
-        axios.post(`${API}/api/engine/run-monte-carlo`, { ...body, iterations: 2000 }),
-      ]);
-      setWf(wfRes.data);
-      setMc(mcRes.data);
-    } catch (e: any) {
-      setValidationError(e.response?.data?.detail || e.response?.data?.message || "Validation failed (need enough trades/bars).");
-    } finally {
-      setValidating(false);
+    // Run the two checks independently — Monte-Carlo needs >=5 trades, so it can
+    // legitimately fail for a thin stock while walk-forward still has folds to show.
+    const [wfRes, mcRes] = await Promise.allSettled([
+      axios.post(`${API}/api/engine/run-walk-forward`, { ...body, folds: 5 }),
+      axios.post(`${API}/api/engine/run-monte-carlo`, { ...body, iterations: 2000 }),
+    ]);
+
+    const describe = (r: PromiseRejectedResult): string => {
+      const err = r.reason;
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail || err?.response?.data?.message;
+      if (status === 400 || status === 404) return detail || "Not enough data for this stock.";
+      if (status >= 500) return `Server error${detail ? `: ${detail}` : ""}. This is a bug — please report it.`;
+      return detail || "Validation failed.";
+    };
+
+    if (wfRes.status === "fulfilled") setWf(wfRes.value.data);
+    if (mcRes.status === "fulfilled") setMc(mcRes.value.data);
+
+    // Only show a blocking error if BOTH failed; otherwise render what we got.
+    if (wfRes.status === "rejected" && mcRes.status === "rejected") {
+      setValidationError(describe(wfRes));
+    } else {
+      if (wfRes.status === "rejected") setValidationError(`Walk-forward: ${describe(wfRes)}`);
+      else if (mcRes.status === "rejected") setValidationError(`Monte-Carlo: ${describe(mcRes)}`);
     }
+    setValidating(false);
   };
 
   return (
@@ -386,10 +401,15 @@ export function BacktestingStrategy() {
                 <div className="spinner"></div>
                 <p className="page-subtitle">Running rolling folds + 2,000 Monte-Carlo paths…</p>
               </div>
-            ) : validationError ? (
+            ) : validationError && !wf && !mc ? (
               <div style={{ color: "var(--red)", padding: "1rem" }}>⚠️ {validationError}</div>
             ) : (
               <>
+                {validationError && (
+                  <div style={{ color: "var(--amber, var(--red))", padding: "0.5rem 1rem", marginBottom: "1rem", fontSize: "0.85rem" }}>
+                    ⚠️ {validationError}
+                  </div>
+                )}
                 {/* Walk-forward */}
                 {wf && (
                   <div style={{ marginBottom: "1.5rem" }}>

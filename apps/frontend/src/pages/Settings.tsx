@@ -39,9 +39,33 @@ export function Settings() {
     }
   };
 
+  const [resetting, setResetting] = useState(false);
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
+
   useEffect(() => {
     fetchStatus();
   }, []);
+
+  const resetPaperTrading = async () => {
+    const ok = window.confirm(
+      'This permanently deletes ALL trades, signals and selected stock+strategy configs.\n\n' +
+        'Backtest reports and historical data are kept. Continue?',
+    );
+    if (!ok) return;
+    setResetting(true);
+    setResetMsg(null);
+    try {
+      const res = await axios.post(`${API}/api/admin/reset`, { confirm: 'RESET' });
+      const d = res.data;
+      setResetMsg(
+        `Done — removed ${d.tradesDeleted} trades, ${d.signalsDeleted} signals, ${d.activeConfigsDeleted} configs.`,
+      );
+    } catch (err: any) {
+      setResetMsg(err?.response?.data?.message || err?.message || 'Reset failed.');
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const saveToken = async () => {
     if (!token.trim()) return;
@@ -165,6 +189,21 @@ export function Settings() {
             {saving ? 'Saving…' : 'Save & Activate'}
           </button>
           {message && <span style={{ color: 'var(--text-secondary)' }}>{message}</span>}
+        </div>
+      </div>
+
+      {/* Danger zone — reset paper trading */}
+      <div className="card" style={{ padding: '1.5rem', marginTop: '1.5rem', borderTop: '4px solid var(--red)' }}>
+        <h2 className="card-title" style={{ marginTop: 0, color: 'var(--red)' }}>Danger zone — reset paper trading</h2>
+        <p className="page-subtitle" style={{ marginTop: 0 }}>
+          Clears all trades, live signals and selected (stock × strategy) configs so you can start fresh —
+          e.g. before running auto-select. Backtest reports and historical price data are preserved.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1rem' }}>
+          <button onClick={resetPaperTrading} disabled={resetting} className="btn btn-danger">
+            {resetting ? 'Resetting…' : 'Reset paper trading'}
+          </button>
+          {resetMsg && <span style={{ color: 'var(--text-secondary)' }}>{resetMsg}</span>}
         </div>
       </div>
     </div>
