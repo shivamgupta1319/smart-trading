@@ -12,7 +12,7 @@ import { SignalsService } from "./signals.service";
 import { SignalsGateway } from "./signals.gateway";
 import { TelegramService } from "../telegram/telegram.service";
 import { CreateSignalDto } from "./dto/create-signal.dto";
-import { toNum } from "../common/money";
+import { toNum, normalizeTradeMoney } from "../common/money";
 
 @Controller("api/signals")
 export class SignalsController {
@@ -39,8 +39,11 @@ export class SignalsController {
     // Alert only for new, FUNDED signals — SHADOW trades are recorded for research but
     // aren't actionable (the ₹1L account couldn't fund them), so they don't ping.
     if (isNew && fundingStatus === "FUNDED") {
+      // Prisma returns money columns as Decimal objects which serialize to
+      // strings over the socket; coerce them to plain numbers so the UI can
+      // call .toFixed() on entryPrice/stopLoss/target.
       const payload = {
-        ...signal,
+        ...normalizeTradeMoney(signal),
         symbol: signal.stock?.symbol,
       };
       this.signalsGateway.emitNewAlert(payload);
