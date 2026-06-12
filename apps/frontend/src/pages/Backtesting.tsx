@@ -61,10 +61,11 @@ export function Backtesting() {
 
   const runAutoSelect = async () => {
     const ok = window.confirm(
-      'Auto-select backtests every strategy against every stock with data, runs walk-forward + ' +
-        'Monte-Carlo on survivors, and ADDS the top picks to your active (stock × strategy) configs. ' +
-        'Your existing selections are kept, and any pick already active is skipped. ' +
-        'This can take several minutes. Continue?',
+      'Auto-select first pulls the latest candles for your stocks (full history for newly added ones, ' +
+        'incremental top-up for the rest), then backtests every strategy against every stock, runs ' +
+        'walk-forward + Monte-Carlo on survivors, and ADDS the top picks to your active ' +
+        '(stock × strategy) configs. Your existing selections are kept, and any pick already active is ' +
+        'skipped. This can take several minutes. Continue?',
     );
     if (!ok) return;
     setAutoRunning(true);
@@ -104,13 +105,16 @@ export function Backtesting() {
           <h2 className="card-title" style={{ marginTop: 0 }}>✨ Auto-select (strict, quality-first)</h2>
           {autoRunning && (
             <p className="page-subtitle" style={{ marginTop: 0 }}>
-              Backtesting every strategy × stock, then walk-forward + Monte-Carlo on survivors. This can take a few minutes…
+              Pulling the latest candles, then backtesting every strategy × stock, then walk-forward + Monte-Carlo on survivors. This can take a few minutes…
             </p>
           )}
           {autoError && <div style={{ color: 'var(--red)' }}>⚠️ {autoError}</div>}
           {autoResult && (
             <>
               <p className="page-subtitle" style={{ marginTop: 0 }}>
+                {typeof autoResult.stocksRefreshed === 'number' && (
+                  <>Refreshed data for <strong>{autoResult.stocksRefreshed}</strong> stocks. </>
+                )}
                 Promoted <strong>{autoResult.totalPicks}</strong> (stock × strategy) cells across{' '}
                 <strong>{autoResult.strategiesEvaluated}</strong> strategies — added{' '}
                 <strong>{autoResult.written}</strong> new, kept existing

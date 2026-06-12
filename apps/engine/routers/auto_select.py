@@ -23,6 +23,7 @@ from sqlalchemy import text
 from db.client import engine
 from strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES
 from routers.backtest import load_historical
+from routers.history import fetch_and_store
 
 router = APIRouter()
 
@@ -63,6 +64,9 @@ class AutoSelectRequest(BaseModel):
     # picks, and skip any (stock × strategy) cell already active. Set true to
     # wipe ActiveConfiguration first (old "replace" behavior).
     clearExisting: bool = False
+    # Pull the latest candles before backtesting: full history for stocks with no
+    # data yet (e.g. just added on the dashboard), incremental top-up for the rest.
+    refreshData: bool = True
     dryRun: bool = False                 # compute but don't write
 
 
@@ -157,6 +161,23 @@ def auto_select(req: AutoSelectRequest):
 
     with engine.connect() as conn:
         stocks = conn.execute(text('SELECT id, symbol FROM "Stock"')).fetchall()
+
+    # Refresh data first so backtests run on the latest candles. Only the
+    # timeframes the selected strategies actually use are pulled. New stocks
+    # (no stored data) get a full download; existing ones a quick incremental
+    # top-up. A per-stock fetch failure must not abort the whole run.
+    refreshed = 0
+    if req.refreshData and not req.dryRun:
+        timeframes_needed = sorted({
+            STRATEGY_TIMEFRAMES.get(s, getattr(STRATEGY_REGISTRY[s], "timeframe", "1D"))
+            for s in strategy_names
+        })
+        for _sid, symbol in stocks:
+            try:
+                fetch_and_store(symbol, timeframes_needed)
+                refreshed += 1
+            except Exception:
+                continue
 
     summary = []
     all_picks = []  # (stock_id, strategy, timeframe)
@@ -278,6 +299,7 @@ def auto_select(req: AutoSelectRequest):
     return {
         "strategiesEvaluated": len(strategy_names),
         "totalPicks": len(all_picks),
+        "stocksRefreshed": refreshed,  # stocks whose candles were pulled before backtesting
         "written": written,
         "skipped": skipped,  # picks already active, left untouched
         "dryRun": req.dryRun,

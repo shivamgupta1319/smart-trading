@@ -1,6 +1,7 @@
 """POST /api/engine/fetch-history — Downloads OHLCV from yfinance and stores in PostgreSQL"""
 import os
 import time
+from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 from fastapi import APIRouter, HTTPException
@@ -64,13 +65,31 @@ def _resolve_stock_id(symbol: str):
         return result[0] if result else None
 
 
-def fetch_and_store(symbol: str, timeframes=None) -> dict:
+def _last_timestamp(stock_id: int, timeframe: str):
+    """Newest stored bar for (stock, timeframe), or None if we have no data yet.
+    Stored timestamps are IST-naive (see normalize_to_ist_naive)."""
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT MAX("timestamp") FROM "HistoricalData"
+            WHERE "stockId" = :sid AND timeframe = :tf
+        """), {"sid": stock_id, "tf": timeframe}).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def fetch_and_store(symbol: str, timeframes=None, incremental: bool = True) -> dict:
     """Download OHLCV from yfinance and upsert into HistoricalData.
 
     Shared core for the HTTP endpoint and the background fetch scheduler. Because
     upsert never deletes, repeated runs accumulate history beyond yfinance's
     per-request intraday window (15m/5m are capped to ~60 days per call), which is
     how the backtest dataset grows over time. Returns per-timeframe row counts.
+
+    With ``incremental`` (default), we only pull what's missing: a stock with NO
+    stored data for a timeframe gets the full window (yfinance ``period``), while a
+    stock that already has data is topped up from its last stored bar forward
+    (yfinance ``start``) — so old + only-the-new candles merge via upsert instead
+    of re-downloading years every run. Pass ``incremental=False`` to force a full
+    re-pull (e.g. to backfill/repair a corrupted series).
     """
     timeframes = timeframes or ["1D", "15m", "5m"]
     original_symbol = symbol.upper()
@@ -86,16 +105,33 @@ def fetch_and_store(symbol: str, timeframes=None) -> dict:
         if tf not in TIMEFRAME_CONFIG:
             continue
         cfg = TIMEFRAME_CONFIG[tf]
+        last_ts = _last_timestamp(stock_id, tf) if incremental else None
+        mode = "full" if last_ts is None else "incremental"
         try:
-            df = ticker.history(period=cfg["period"], interval=cfg["interval"])
+            if last_ts is None:
+                # No data yet → pull the full window.
+                df = ticker.history(period=cfg["period"], interval=cfg["interval"])
+            else:
+                # Have data → fetch only from the last stored bar forward. A small
+                # buffer re-fetches the most recent bars so a partial/adjusted last
+                # candle gets corrected; the upsert merges old + new cleanly.
+                buffer_days = 5 if cfg["interval"] == "1d" else 1
+                start = (last_ts - timedelta(days=buffer_days)).date()
+                # yfinance caps intraday history to ~60 days per request — never ask
+                # for an intraday start older than that or the call errors out.
+                if cfg["interval"] != "1d":
+                    earliest = (datetime.now() - timedelta(days=59)).date()
+                    if start < earliest:
+                        start = earliest
+                df = ticker.history(start=start.isoformat(), interval=cfg["interval"])
             if df.empty:
-                results[tf] = {"rows": 0, "status": "empty"}
+                results[tf] = {"rows": 0, "status": "empty", "mode": mode}
                 continue
             df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
             rows = upsert_ohlcv(stock_id, df, tf)
-            results[tf] = {"rows": rows, "status": "ok"}
+            results[tf] = {"rows": rows, "status": "ok", "mode": mode}
         except Exception as e:
-            results[tf] = {"rows": 0, "status": f"error: {str(e)}"}
+            results[tf] = {"rows": 0, "status": f"error: {str(e)}", "mode": mode}
         time.sleep(1)  # Rate limit friendly
 
     return {"symbol": original_symbol, "results": results}

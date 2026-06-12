@@ -75,6 +75,15 @@ def run_backtest(req: BacktestRequest):
     stock_id = get_stock_id(symbol)
     strategy = STRATEGY_REGISTRY[req.strategy]
 
+    # Pull the latest candles before backtesting (full download if this stock has
+    # no data yet, incremental top-up otherwise). A fetch failure must not block a
+    # backtest on already-stored data, so swallow errors and fall through to load.
+    try:
+        from routers.history import fetch_and_store
+        fetch_and_store(symbol, [req.timeframe])
+    except Exception:
+        pass
+
     df = load_historical(stock_id, req.timeframe)
 
     if len(df) < 30:
