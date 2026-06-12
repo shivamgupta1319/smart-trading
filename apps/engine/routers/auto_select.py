@@ -8,6 +8,10 @@ before ranking on a risk-adjusted (Calmar-like) score and promoting the top N.
 The picks are written straight into `ActiveConfiguration` (the table the live
 scanner reads via get_active_configs), i.e. the same surface as the manual
 `POST /api/configs/toggle` toggle.
+
+By default we APPEND: existing active configs are kept, new picks are added, and
+any (stock × strategy) cell already active is skipped. Pass clearExisting=true to
+wipe the table first (the old replace-everything behavior).
 """
 import os
 
@@ -55,7 +59,10 @@ MIN_BARS = int(_f("AUTOSELECT_MIN_BARS", 60))
 class AutoSelectRequest(BaseModel):
     strategies: list[str] | None = None  # default: all
     topN: int = TOP_N
-    clearExisting: bool = True           # wipe ActiveConfiguration first
+    # Append by default: keep the existing active configs, add only the new
+    # picks, and skip any (stock × strategy) cell already active. Set true to
+    # wipe ActiveConfiguration first (old "replace" behavior).
+    clearExisting: bool = False
     dryRun: bool = False                 # compute but don't write
 
 
@@ -244,21 +251,35 @@ def auto_select(req: AutoSelectRequest):
         })
 
     written = 0
+    skipped = 0
     if not req.dryRun:
         with engine.begin() as conn:
             if req.clearExisting:
                 conn.execute(text('DELETE FROM "ActiveConfiguration"'))
+                existing = set()
+            else:
+                # Append mode: remember the (stock × strategy) cells already
+                # active so we keep them untouched and only add genuinely new ones.
+                rows = conn.execute(
+                    text('SELECT "stockId", "strategyName" FROM "ActiveConfiguration"')
+                ).fetchall()
+                existing = {(r[0], r[1]) for r in rows}
             for stock_id, sname, timeframe, metrics in all_picks:
+                if (stock_id, sname) in existing:
+                    skipped += 1  # already active — leave the old config in place
+                    continue
                 _upsert_active(conn, stock_id, sname, timeframe)
                 # Persist a fresh BacktestReport so the monitor shows numbers
                 # immediately instead of "no backtest — Re-run".
                 _save_report(conn, stock_id, sname, timeframe, metrics)
+                existing.add((stock_id, sname))
                 written += 1
 
     return {
         "strategiesEvaluated": len(strategy_names),
         "totalPicks": len(all_picks),
         "written": written,
+        "skipped": skipped,  # picks already active, left untouched
         "dryRun": req.dryRun,
         "clearedExisting": req.clearExisting and not req.dryRun,
         "gates": {

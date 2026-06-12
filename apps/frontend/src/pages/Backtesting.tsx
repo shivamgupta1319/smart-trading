@@ -62,15 +62,16 @@ export function Backtesting() {
   const runAutoSelect = async () => {
     const ok = window.confirm(
       'Auto-select backtests every strategy against every stock with data, runs walk-forward + ' +
-        'Monte-Carlo on survivors, and REPLACES your active (stock × strategy) configs with the ' +
-        'top picks. This can take several minutes. Continue?',
+        'Monte-Carlo on survivors, and ADDS the top picks to your active (stock × strategy) configs. ' +
+        'Your existing selections are kept, and any pick already active is skipped. ' +
+        'This can take several minutes. Continue?',
     );
     if (!ok) return;
     setAutoRunning(true);
     setAutoError(null);
     setAutoResult(null);
     try {
-      const res = await axios.post(`${API}/api/engine/auto-select`, { clearExisting: true });
+      const res = await axios.post(`${API}/api/engine/auto-select`, { clearExisting: false });
       setAutoResult(res.data);
     } catch (e: any) {
       setAutoError(e.response?.data?.message || e.response?.data?.detail || e.message || 'Auto-select failed.');
@@ -111,7 +112,12 @@ export function Backtesting() {
             <>
               <p className="page-subtitle" style={{ marginTop: 0 }}>
                 Promoted <strong>{autoResult.totalPicks}</strong> (stock × strategy) cells across{' '}
-                <strong>{autoResult.strategiesEvaluated}</strong> strategies. Gates: ≥{autoResult.gates?.minTrades} trades,
+                <strong>{autoResult.strategiesEvaluated}</strong> strategies — added{' '}
+                <strong>{autoResult.written}</strong> new, kept existing
+                {typeof autoResult.skipped === 'number' && autoResult.skipped > 0 && (
+                  <> (skipped <strong>{autoResult.skipped}</strong> already active)</>
+                )}
+                . Gates: ≥{autoResult.gates?.minTrades} trades,
                 ROI&gt;{autoResult.gates?.minRoiPct}%, PF≥{autoResult.gates?.minProfitFactor}, DD≤{autoResult.gates?.maxDrawdownPct}%,
                 walk-forward consistent, positive Monte-Carlo p5.
               </p>
