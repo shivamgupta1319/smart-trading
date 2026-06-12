@@ -1,0 +1,12 @@
+{
+  "features": [
+    {
+      "id": "FEAT-001",
+      "title": "Backtest Report Trust",
+      "status": "DOCS_REVIEWED",
+      "createdAt": "2026-06-12T07:21:30Z",
+      "path": "docs/features/backtest-report-trust",
+      "origin": "docs/agent-reports/2026-06-12-whats-not-working.md (findings F1, F2; sizing from F-notes)"
+    }
+  ]
+}
