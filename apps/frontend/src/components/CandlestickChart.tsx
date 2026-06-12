@@ -9,8 +9,7 @@ import {
   LineSeries,
 } from 'lightweight-charts';
 import axios from 'axios';
-
-const API = 'http://localhost:3000';
+import { API } from '../config';
 
 interface ChartData {
   candles: { time: number; open: number; high: number; low: number; close: number }[];

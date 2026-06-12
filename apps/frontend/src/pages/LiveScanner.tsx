@@ -1,9 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useSocket, TradeAlert } from "../hooks/useSocket";
 import { ToastContainer } from "../components/ToastNotification";
+import { API } from "../config";
 
-const API = "http://localhost:3000";
+interface BacktestSnapshot {
+  winRate: number;
+  totalTrades: number;
+  netProfit: number;
+  maxDrawdown: number;
+  roiPercentage: number;
+  createdAt: string;
+}
 
 interface Config {
   id: number;
@@ -11,6 +20,7 @@ interface Config {
   strategyName: string;
   timeframe: string;
   stock: { symbol: string; name: string };
+  latestBacktest?: BacktestSnapshot | null;
 }
 
 interface Signal extends TradeAlert {
@@ -59,24 +69,65 @@ function isMarketOpen() {
 
 export function LiveScanner() {
   const { connected, alerts } = useSocket();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<"SCANNER" | "MONITORED">("SCANNER");
   const [configs, setConfigs] = useState<Config[]>([]);
   const [activeSignals, setActiveSignals] = useState<Signal[]>([]);
   const [toasts, setToasts] = useState<Array<TradeAlert & { toastId: string }>>(
     [],
   );
   const [newSignalIds, setNewSignalIds] = useState<Set<number>>(new Set());
+  const [rerunningId, setRerunningId] = useState<number | null>(null);
   const prevAlertsLen = useRef(0);
 
-  useEffect(() => {
+  const fetchConfigs = useCallback(() => {
     axios
       .get(`${API}/api/configs`)
       .then((r) => setConfigs(r.data))
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchConfigs();
     axios
       .get(`${API}/api/signals/active`)
       .then((r) => setActiveSignals(r.data))
       .catch(() => {});
-  }, []);
+  }, [fetchConfigs]);
+
+  // Stop monitoring a stock×strategy whose edge has faded.
+  const removeConfig = async (c: Config) => {
+    if (
+      !window.confirm(
+        `Remove ${c.strategyName} on ${c.stock.symbol} from the live scanner? The scanner stops watching this pair next cycle.`,
+      )
+    )
+      return;
+    try {
+      await axios.delete(`${API}/api/configs/${c.id}`);
+      setConfigs((prev) => prev.filter((x) => x.id !== c.id));
+    } catch {
+      /* noop */
+    }
+  };
+
+  // Re-run the backtest for a monitored pair. The engine persists a fresh BacktestReport,
+  // so we just refetch the configs (which carry the latest snapshot) when it returns.
+  const rerunBacktest = async (c: Config) => {
+    setRerunningId(c.id);
+    try {
+      await axios.post(`${API}/api/engine/run-backtest`, {
+        symbol: c.stock.symbol,
+        strategy: c.strategyName,
+        timeframe: c.timeframe,
+      });
+      fetchConfigs();
+    } catch {
+      /* noop */
+    } finally {
+      setRerunningId(null);
+    }
+  };
 
   // React to new alerts from socket
   useEffect(() => {
@@ -181,6 +232,43 @@ export function LiveScanner() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div
+        style={{
+          display: "flex",
+          gap: "1rem",
+          marginBottom: "1.5rem",
+          borderBottom: "1px solid var(--border-light)",
+        }}
+      >
+        {(["SCANNER", "MONITORED"] as const).map((t) => (
+          <button
+            key={t}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: activeTab === t ? "var(--cyan)" : "var(--text-muted)",
+              padding: "0.75rem 1rem",
+              fontSize: "1rem",
+              fontWeight: activeTab === t ? 600 : 400,
+              borderBottom:
+                activeTab === t
+                  ? "2px solid var(--cyan)"
+                  : "2px solid transparent",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+            onClick={() => setActiveTab(t)}
+          >
+            {t === "SCANNER"
+              ? "Live Scanner"
+              : `Monitored Stocks (${configs.length})`}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "SCANNER" && (
+        <>
       {!connected && (
         <div className="alert alert-warning" style={{ marginBottom: "1.5rem" }}>
           ⚠ Reconnecting to server... Check that NestJS API is running on port
@@ -194,53 +282,6 @@ export function LiveScanner() {
           09:15 IST (Mon–Fri).
         </div>
       )}
-
-      {/* Active Configurations */}
-      <div className="card" style={{ marginBottom: "1.5rem" }}>
-        <div className="card-title">📡 Monitored Stocks ({configs.length})</div>
-        {configs.length === 0 ? (
-          <div className="empty-state" style={{ padding: "2rem" }}>
-            <span className="empty-icon">🔕</span>
-            <span className="empty-title">No stocks being monitored</span>
-            <span className="empty-subtitle">
-              Go to Backtest Arena → run a backtest → Set Active Strategy
-            </span>
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
-            {configs.map((c) => (
-              <div
-                key={c.id}
-                style={{
-                  background: "var(--bg-secondary)",
-                  border: "1px solid var(--border-light)",
-                  borderRadius: "var(--radius-sm)",
-                  padding: "0.5rem 1rem",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.75rem",
-                  fontSize: "0.85rem",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    color: "var(--cyan)",
-                    fontWeight: 600,
-                  }}
-                >
-                  {c.stock.symbol}
-                </span>
-                <span style={{ color: "var(--text-muted)" }}>→</span>
-                <span style={{ color: "var(--text-secondary)" }}>
-                  {c.strategyName}
-                </span>
-                <span className="badge badge-active">{c.timeframe}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
       {/* Active Signals */}
       <div className="card">
@@ -521,6 +562,183 @@ export function LiveScanner() {
           </div>
         )}
       </div>
+        </>
+      )}
+
+      {activeTab === "MONITORED" && (
+        <div className="card">
+          <div className="card-title">
+            📡 Monitored Stocks ({configs.length})
+          </div>
+          {configs.length === 0 ? (
+            <div className="empty-state" style={{ padding: "2rem" }}>
+              <span className="empty-icon">🔕</span>
+              <span className="empty-title">No stocks being monitored</span>
+              <span className="empty-subtitle">
+                Go to Backtest Arena → run a backtest → Set Live
+              </span>
+            </div>
+          ) : (
+            <>
+              <p
+                className="page-subtitle"
+                style={{ marginTop: 0, marginBottom: "1rem", fontSize: "0.8rem" }}
+              >
+                Each pair's latest backtest. Re-run to refresh, or remove a stock
+                whose edge has faded.
+              </p>
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>Strategy</th>
+                      <th>Timeframe</th>
+                      <th style={{ textAlign: "right" }}>Win Rate</th>
+                      <th style={{ textAlign: "right" }}>Trades</th>
+                      <th style={{ textAlign: "right" }}>Net Profit</th>
+                      <th style={{ textAlign: "right" }}>ROI</th>
+                      <th style={{ textAlign: "right" }}>Max DD</th>
+                      <th>Last Tested</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {configs.map((c) => {
+                      const bt = c.latestBacktest;
+                      return (
+                        <tr key={c.id}>
+                          <td>
+                            <span
+                              className="mono"
+                              style={{ color: "var(--cyan)", fontWeight: 700 }}
+                            >
+                              {c.stock.symbol}
+                            </span>
+                          </td>
+                          <td>
+                            <span
+                              style={{
+                                fontSize: "0.85rem",
+                                color: "var(--text-secondary)",
+                              }}
+                            >
+                              {c.strategyName}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="badge badge-active">
+                              {c.timeframe}
+                            </span>
+                          </td>
+                          {bt ? (
+                            <>
+                              <td
+                                style={{
+                                  textAlign: "right",
+                                  color:
+                                    bt.winRate >= 50
+                                      ? "var(--green)"
+                                      : "var(--red)",
+                                }}
+                              >
+                                {bt.winRate}%
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                {bt.totalTrades}
+                              </td>
+                              <td
+                                className="mono"
+                                style={{
+                                  textAlign: "right",
+                                  color:
+                                    bt.netProfit >= 0
+                                      ? "var(--green)"
+                                      : "var(--red)",
+                                }}
+                              >
+                                {bt.netProfit >= 0 ? "+" : ""}₹
+                                {bt.netProfit.toLocaleString("en-IN")}
+                              </td>
+                              <td
+                                className="mono"
+                                style={{
+                                  textAlign: "right",
+                                  color:
+                                    bt.roiPercentage >= 0
+                                      ? "var(--green)"
+                                      : "var(--red)",
+                                }}
+                              >
+                                {bt.roiPercentage >= 0 ? "+" : ""}
+                                {bt.roiPercentage}%
+                              </td>
+                              <td
+                                className="mono"
+                                style={{
+                                  textAlign: "right",
+                                  color: "var(--red)",
+                                }}
+                              >
+                                -₹{bt.maxDrawdown.toLocaleString("en-IN")}
+                              </td>
+                              <td
+                                style={{
+                                  color: "var(--text-muted)",
+                                  fontSize: "0.78rem",
+                                }}
+                              >
+                                {new Date(bt.createdAt).toLocaleDateString(
+                                  "en-IN",
+                                )}
+                              </td>
+                            </>
+                          ) : (
+                            <td
+                              colSpan={6}
+                              style={{
+                                color: "var(--text-muted)",
+                                fontSize: "0.8rem",
+                              }}
+                            >
+                              No backtest yet — Re-run to generate one.
+                            </td>
+                          )}
+                          <td>
+                            <div style={{ display: "flex", gap: "0.4rem" }}>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                disabled={rerunningId === c.id}
+                                onClick={() => rerunBacktest(c)}
+                              >
+                                {rerunningId === c.id ? "Running…" : "Re-run"}
+                              </button>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() =>
+                                  navigate(`/backtesting/${c.strategyName}`)
+                                }
+                              >
+                                View
+                              </button>
+                              <button
+                                className="btn btn-danger btn-sm"
+                                onClick={() => removeConfig(c)}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -9,6 +9,14 @@ class SMA44PullbackStrategy(BaseStrategy):
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
+        # Needs a full 200-period SMA; on shorter slices (e.g. a walk-forward
+        # fold) pandas_ta returns None, so guard before touching it.
+        if df.empty or len(df) < 200:
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
+            return df
+
         df['sma44'] = ta.sma(df['Close'], length=44)
         df['sma200'] = ta.sma(df['Close'], length=200)
         df['atr14'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)

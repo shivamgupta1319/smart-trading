@@ -1,5 +1,7 @@
 """POST /api/engine/fetch-history — Downloads OHLCV from yfinance and stores in PostgreSQL"""
+import os
 import time
+from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 from fastapi import APIRouter, HTTPException
@@ -7,14 +9,34 @@ from pydantic import BaseModel
 from typing import List
 from sqlalchemy import text
 from db.client import engine
+from cache import cached, cache_get, cache_set
 
 router = APIRouter()
+
+LIVE_PRICE_TTL = float(os.getenv("LIVE_PRICE_TTL_S", "20"))
+CHART_TTL = float(os.getenv("CHART_TTL_S", "60"))
+
+IST = "Asia/Kolkata"
 
 TIMEFRAME_CONFIG = {
     "1D": {"period": "5y", "interval": "1d"},
     "15m": {"period": "60d", "interval": "15m"},
     "5m": {"period": "60d", "interval": "5m"},
 }
+
+
+def normalize_to_ist_naive(df: pd.DataFrame) -> pd.DataFrame:
+    """yfinance returns tz-aware timestamps (exchange tz / UTC depending on
+    interval & version). Storing them naively (as the old code did) silently
+    shifted intraday bars by hours, corrupting any session-aware strategy
+    (ORB/VWAP/CPR). Normalize every index to IST wall-clock, then drop tz so
+    time-of-day comparisons against NSE hours (09:15–15:30) are correct."""
+    if not isinstance(df.index, pd.DatetimeIndex):
+        return df
+    df = df.copy()
+    if df.index.tz is not None:
+        df.index = df.index.tz_convert(IST).tz_localize(None)
+    return df
 
 
 class FetchHistoryRequest(BaseModel):
@@ -33,86 +55,143 @@ def get_stock_id(symbol: str) -> int:
         return result[0]
 
 
+def _resolve_stock_id(symbol: str):
+    """Non-raising stock-id lookup (returns None if absent) for non-HTTP callers."""
+    with engine.connect() as conn:
+        result = conn.execute(
+            text('SELECT id FROM "Stock" WHERE symbol = :sym'),
+            {"sym": symbol.upper()}
+        ).fetchone()
+        return result[0] if result else None
+
+
+def _last_timestamp(stock_id: int, timeframe: str):
+    """Newest stored bar for (stock, timeframe), or None if we have no data yet.
+    Stored timestamps are IST-naive (see normalize_to_ist_naive)."""
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT MAX("timestamp") FROM "HistoricalData"
+            WHERE "stockId" = :sid AND timeframe = :tf
+        """), {"sid": stock_id, "tf": timeframe}).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def fetch_and_store(symbol: str, timeframes=None, incremental: bool = True) -> dict:
+    """Download OHLCV from yfinance and upsert into HistoricalData.
+
+    Shared core for the HTTP endpoint and the background fetch scheduler. Because
+    upsert never deletes, repeated runs accumulate history beyond yfinance's
+    per-request intraday window (15m/5m are capped to ~60 days per call), which is
+    how the backtest dataset grows over time. Returns per-timeframe row counts.
+
+    With ``incremental`` (default), we only pull what's missing: a stock with NO
+    stored data for a timeframe gets the full window (yfinance ``period``), while a
+    stock that already has data is topped up from its last stored bar forward
+    (yfinance ``start``) — so old + only-the-new candles merge via upsert instead
+    of re-downloading years every run. Pass ``incremental=False`` to force a full
+    re-pull (e.g. to backfill/repair a corrupted series).
+    """
+    timeframes = timeframes or ["1D", "15m", "5m"]
+    original_symbol = symbol.upper()
+    stock_id = _resolve_stock_id(original_symbol)
+    if stock_id is None:
+        return {"symbol": original_symbol, "error": "not found in Stock table"}
+
+    yf_symbol = original_symbol if original_symbol.endswith(".NS") else original_symbol + ".NS"
+    results = {}
+    ticker = yf.Ticker(yf_symbol)
+
+    for tf in timeframes:
+        if tf not in TIMEFRAME_CONFIG:
+            continue
+        cfg = TIMEFRAME_CONFIG[tf]
+        last_ts = _last_timestamp(stock_id, tf) if incremental else None
+        mode = "full" if last_ts is None else "incremental"
+        try:
+            if last_ts is None:
+                # No data yet → pull the full window.
+                df = ticker.history(period=cfg["period"], interval=cfg["interval"])
+            else:
+                # Have data → fetch only from the last stored bar forward. A small
+                # buffer re-fetches the most recent bars so a partial/adjusted last
+                # candle gets corrected; the upsert merges old + new cleanly.
+                buffer_days = 5 if cfg["interval"] == "1d" else 1
+                start = (last_ts - timedelta(days=buffer_days)).date()
+                # yfinance caps intraday history to ~60 days per request — never ask
+                # for an intraday start older than that or the call errors out.
+                if cfg["interval"] != "1d":
+                    earliest = (datetime.now() - timedelta(days=59)).date()
+                    if start < earliest:
+                        start = earliest
+                df = ticker.history(start=start.isoformat(), interval=cfg["interval"])
+            if df.empty:
+                results[tf] = {"rows": 0, "status": "empty", "mode": mode}
+                continue
+            df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+            rows = upsert_ohlcv(stock_id, df, tf)
+            results[tf] = {"rows": rows, "status": "ok", "mode": mode}
+        except Exception as e:
+            results[tf] = {"rows": 0, "status": f"error: {str(e)}", "mode": mode}
+        time.sleep(1)  # Rate limit friendly
+
+    return {"symbol": original_symbol, "results": results}
+
+
 def upsert_ohlcv(stock_id: int, df: pd.DataFrame, timeframe: str):
     if df.empty:
         return 0
 
-    rows = 0
-    with engine.connect() as conn:
-        for ts, row in df.iterrows():
-            ts_str = pd.Timestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
-            conn.execute(text("""
-                INSERT INTO "HistoricalData" ("stockId", "timestamp", "open", "high", "low", "close", "volume", "timeframe")
-                VALUES (:sid, :ts, :o, :h, :l, :c, :v, :tf)
-                ON CONFLICT ("stockId", "timestamp", "timeframe") DO UPDATE
-                SET open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low,
-                    close=EXCLUDED.close, volume=EXCLUDED.volume
-            """), {
-                "sid": stock_id, "ts": ts_str,
-                "o": float(row['Open']), "h": float(row['High']),
-                "l": float(row['Low']), "c": float(row['Close']),
-                "v": float(row.get('Volume', 0)), "tf": timeframe
-            })
-            rows += 1
-        conn.commit()
-    return rows
+    df = normalize_to_ist_naive(df)
+
+    # Build one parameter list and issue a single batched executemany instead of
+    # thousands of individual round-trips (the old behaviour).
+    params = [
+        {
+            "sid": stock_id,
+            "ts": pd.Timestamp(ts).to_pydatetime(),
+            "o": float(row["Open"]), "h": float(row["High"]),
+            "l": float(row["Low"]), "c": float(row["Close"]),
+            "v": float(row.get("Volume", 0)), "tf": timeframe,
+        }
+        for ts, row in df.iterrows()
+    ]
+    if not params:
+        return 0
+
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO "HistoricalData" ("stockId", "timestamp", "open", "high", "low", "close", "volume", "timeframe")
+            VALUES (:sid, :ts, :o, :h, :l, :c, :v, :tf)
+            ON CONFLICT ("stockId", "timestamp", "timeframe") DO UPDATE
+            SET open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low,
+                close=EXCLUDED.close, volume=EXCLUDED.volume
+        """), params)
+    return len(params)
 
 
 @router.post("/fetch-history")
 def fetch_history(req: FetchHistoryRequest):
-    original_symbol = req.symbol.upper()
-    stock_id = get_stock_id(original_symbol)
-    
-    # Prepare symbol for Yahoo Finance
-    yf_symbol = original_symbol
-    if not yf_symbol.endswith(".NS"):
-        yf_symbol = yf_symbol + ".NS"
-
-
-    results = {}
-    ticker = yf.Ticker(yf_symbol)
-
-    for tf in req.timeframes:
-        if tf not in TIMEFRAME_CONFIG:
-            continue
-        cfg = TIMEFRAME_CONFIG[tf]
-        try:
-            df = ticker.history(period=cfg["period"], interval=cfg["interval"])
-            if df.empty:
-                results[tf] = {"rows": 0, "status": "empty"}
-                continue
-            df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
-            rows = upsert_ohlcv(stock_id, df, tf)
-            results[tf] = {"rows": rows, "status": "ok"}
-        except Exception as e:
-            results[tf] = {"rows": 0, "status": f"error: {str(e)}"}
-        time.sleep(1)  # Rate limit friendly
-
-    return {"symbol": original_symbol, "results": results}
+    get_stock_id(req.symbol)  # validate the symbol exists → 404 if not
+    return fetch_and_store(req.symbol, req.timeframes)
 
 class LivePriceRequest(BaseModel):
     symbols: List[str]
 
 @router.post("/live-prices")
 def get_live_prices(req: LivePriceRequest):
+    from brokers import get_live_price as _broker_live_price
+
     results = {}
     for sym in req.symbols:
-        yf_sym = sym if sym.endswith(".NS") else sym + ".NS"
-        try:
-            ticker = yf.Ticker(yf_sym)
-            info = ticker.fast_info
-            last_price = info.last_price
-            prev_close = info.previous_close
-            change = last_price - prev_close if prev_close else 0
-            change_pct = (change / prev_close * 100) if prev_close else 0
-            
-            results[sym] = {
-                "price": round(last_price, 2),
-                "change": round(change, 2),
-                "change_pct": round(change_pct, 2)
-            }
-        except Exception:
-            results[sym] = None
+        cached_val = cache_get(f"live:{sym}", LIVE_PRICE_TTL)
+        if cached_val is not None:
+            results[sym] = cached_val
+            continue
+        # Routes to Dhan/Upstox when configured, else yfinance (see brokers/).
+        payload = _broker_live_price(sym)
+        if payload is not None:
+            cache_set(f"live:{sym}", payload)
+        results[sym] = payload
     return results
 
 
@@ -120,6 +199,11 @@ def get_live_prices(req: LivePriceRequest):
 def get_chart_data(symbol: str, timeframe: str = "1d"):
     """Return OHLCV + indicators for the candlestick chart component."""
     import pandas_ta as ta
+
+    cache_key = f"chart:{symbol.upper()}:{timeframe}"
+    cached_chart = cache_get(cache_key, CHART_TTL)
+    if cached_chart is not None:
+        return cached_chart
 
     yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
 
@@ -197,9 +281,11 @@ def get_chart_data(symbol: str, timeframe: str = "1d"):
             indicators["bbLower"] = bb_lower
             indicators["bbMid"] = bb_mid
 
-    return {
+    result = {
         "candles": candles,
         "volumes": volumes,
         "indicators": indicators,
     }
+    cache_set(cache_key, result)
+    return result
 

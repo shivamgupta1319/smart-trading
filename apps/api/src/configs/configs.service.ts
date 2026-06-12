@@ -7,10 +7,28 @@ export class ConfigsService {
   constructor(private prisma: PrismaService) {}
 
   async findAll() {
-    return this.prisma.activeConfiguration.findMany({
+    const configs = await this.prisma.activeConfiguration.findMany({
       include: { stock: true },
       orderBy: { updatedAt: 'desc' },
     });
+    if (configs.length === 0) return configs;
+
+    // Attach each config's most recent backtest snapshot. One query for all relevant
+    // (stockId) rows, newest first, then pick the first seen per (stockId, strategyName).
+    const stockIds = [...new Set(configs.map((c) => c.stockId))];
+    const reports = await this.prisma.backtestReport.findMany({
+      where: { stockId: { in: stockIds } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const latestByKey = new Map<string, (typeof reports)[number]>();
+    for (const r of reports) {
+      const key = `${r.stockId}|${r.strategyName}`;
+      if (!latestByKey.has(key)) latestByKey.set(key, r); // desc order → first = newest
+    }
+    return configs.map((c) => ({
+      ...c,
+      latestBacktest: latestByKey.get(`${c.stockId}|${c.strategyName}`) ?? null,
+    }));
   }
 
   async findBySymbol(symbol: string) {

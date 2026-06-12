@@ -25,7 +25,48 @@ from db.client import engine
 from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
 
 NESTJS_URL = os.getenv("NESTJS_SIGNAL_URL", "http://localhost:3000/api/signals/new")
+# Shared API key sent to the NestJS API (no-op when unset / API auth disabled).
+NEST_HEADERS = {"x-api-key": os.getenv("API_KEY")} if os.getenv("API_KEY") else {}
+# Positions smaller than this never partial-exit (booking 35% of 1-2 shares is moot).
+MIN_QTY_FOR_PARTIAL = int(os.getenv("MIN_QTY_FOR_PARTIAL", "3"))
 IST = pytz.timezone("Asia/Kolkata")
+
+
+def _signals_base() -> str:
+    return NESTJS_URL.replace("/signals/new", "/signals")
+
+
+def book_partial(signal_id, percent, exit_price, reason) -> bool:
+    """Book a partial exit and RECONCILE: only return True if the API confirms it.
+    Prevents the scanner's in-memory state from advancing past a failed PATCH."""
+    try:
+        r = httpx.patch(
+            f"{_signals_base()}/{signal_id}/partial-close",
+            json={"percent": percent, "exitPrice": exit_price, "reason": reason},
+            headers=NEST_HEADERS, timeout=10,
+        )
+        if r.status_code == 200:
+            return True
+        print(f"    ⚠️ partial-close #{signal_id} failed: HTTP {r.status_code} — will retry next poll")
+        return False
+    except Exception as e:
+        print(f"    [ERROR] partial-close #{signal_id}: {e} — will retry next poll")
+        return False
+
+
+def close_trade(signal_id, exit_price) -> bool:
+    try:
+        r = httpx.patch(
+            f"{_signals_base()}/{signal_id}/close",
+            json={"exitPrice": exit_price}, headers=NEST_HEADERS, timeout=10,
+        )
+        if r.status_code == 200:
+            return True
+        print(f"    ⚠️ close #{signal_id} failed: HTTP {r.status_code} — will retry next poll")
+        return False
+    except Exception as e:
+        print(f"    [ERROR] close #{signal_id}: {e} — will retry next poll")
+        return False
 MARKET_OPEN = dtime(9, 15)
 MARKET_CLOSE = dtime(15, 30)
 POLL_INTERVAL = 100  # seconds
@@ -99,6 +140,7 @@ def check_and_fire_signal(config, cache, last_fired_times):
             return
 
         df = strategy.generate_signals(df)
+        df = strategy._apply_bucket_target(df)  # bucket reward:risk override (matches backtest)
         latest = df.iloc[-1]
         candle_time = latest.name
 
@@ -131,7 +173,7 @@ def check_and_fire_signal(config, cache, last_fired_times):
         }
 
         print(f"  🚨 SIGNAL: {signal_type} {symbol} @ ₹{payload['entryPrice']} ({strategy_name})")
-        response = httpx.post(NESTJS_URL, json=payload, timeout=10)
+        response = httpx.post(NESTJS_URL, json=payload, headers=NEST_HEADERS, timeout=10)
         print(f"  ✅ Posted to NestJS: {response.status_code}")
         
         # Mark this candle as fired
@@ -142,10 +184,13 @@ def check_and_fire_signal(config, cache, last_fired_times):
 
 
 def get_live_price(symbol: str) -> float:
-    yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
+    # Routes to the configured broker (Dhan/Upstox) when available, else yfinance.
     try:
-        ticker = yf.Ticker(yf_symbol)
-        return ticker.fast_info.last_price
+        from brokers import get_live_price as _broker_live_price
+        q = _broker_live_price(symbol)
+        if q and q.get("price"):
+            return q["price"]
+        return None
     except Exception as e:
         print(f"  [ERROR] fetching live price for {symbol}: {e}")
         return None
@@ -294,7 +339,7 @@ def update_trailing_sl(signal_id: int, new_sl: float, state: str, peak_price: fl
         payload["peakPrice"] = round(peak_price, 2)
     
     try:
-        r = httpx.patch(f"{base_url}/{signal_id}/update-sl", json=payload, timeout=10)
+        r = httpx.patch(f"{base_url}/{signal_id}/update-sl", json=payload, headers=NEST_HEADERS, timeout=10)
         if r.status_code == 200:
             print(f"    ✅ Trailing SL updated: #{signal_id} → ₹{new_sl:.2f} ({state})")
         else:
@@ -316,7 +361,7 @@ def auto_close_signals(cache):
     is_square_off_time = now_time >= dtime(15, 15)
 
     try:
-        r = httpx.get(api_url, timeout=10)
+        r = httpx.get(api_url, headers=NEST_HEADERS, timeout=10)
         if r.status_code != 200:
             return
         active_signals = r.json()
@@ -361,60 +406,83 @@ def auto_close_signals(cache):
                 prev_low = latest_price
                 prev_high = latest_price
             
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # PHASE 1 -> PHASE 2 (50%+)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if current_state == "INITIAL" and progress >= 0.50:
-                current_state = "PHASE2"
-                be_sl = entry + (entry * 0.001) if is_buy else entry - (entry * 0.001)
-                sl_better = (is_buy and be_sl > sl) or (not is_buy and be_sl < sl)
-                
-                new_sl = be_sl if sl_better else sl
-                update_trailing_sl(signal_id, new_sl, "PHASE2", latest_price)
-                sl = new_sl
-                
-                if qty >= 3:
-                    print(f"  💰 PHASE 2 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
-                    httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{signal_id}/partial-close",
-                                json={"percent": 0.35, "exitPrice": latest_price, "reason": "Phase 2 Partial (50% Target)"}, timeout=10)
+            # NOTE: gate every transition on the state at the START of this poll
+            # (`original_state`) and use elif, so a single poll advances AT MOST
+            # one phase. The old code mutated current_state then re-checked it in
+            # the same poll, cascading INITIAL→PHASE2→PHASE3 and booking 70% at
+            # one price. Partials are also reconciled: SL/state only advance if
+            # the partial-close PATCH actually succeeded.
+            original_state = current_state
+            hold_duration = sig.get('holdDuration') or "UNKNOWN"
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # PHASE 2 -> PHASE 3 (75%+)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if current_state == "PHASE2" and progress >= 0.75:
-                current_state = "PHASE3"
-                trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
-                sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
-                
-                new_sl = trail_sl if sl_better else sl
-                update_trailing_sl(signal_id, new_sl, "PHASE3", latest_price)
-                sl = new_sl
-                
-                if qty >= 3:
-                    print(f"  💰 PHASE 3 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
-                    httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{signal_id}/partial-close",
-                                json={"percent": 0.35, "exitPrice": latest_price, "reason": "Phase 3 Partial (75% Target)"}, timeout=10)
+            if hold_duration == "INTRADAY":
+                # ── INTRADAY: 3-phase partial booking + breakeven + trail + reversal ──
+                # ── PHASE 1 -> PHASE 2 (50%+): SL to breakeven, book 35% ──
+                if original_state == "INITIAL" and progress >= 0.50:
+                    booked = True
+                    if qty >= MIN_QTY_FOR_PARTIAL:
+                        print(f"  💰 PHASE 2 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
+                        booked = book_partial(signal_id, 0.35, latest_price, "Phase 2 Partial (50% Target)")
+                    if booked:
+                        be_sl = entry + (entry * 0.001) if is_buy else entry - (entry * 0.001)
+                        sl_better = (is_buy and be_sl > sl) or (not is_buy and be_sl < sl)
+                        new_sl = be_sl if sl_better else sl
+                        update_trailing_sl(signal_id, new_sl, "PHASE2", latest_price)
+                        sl = new_sl
+                        current_state = "PHASE2"
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # PHASE 3 TRAILING (Update SL with candle lows)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if current_state == "PHASE3":
-                trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
-                sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
-                if sl_better:
-                    update_trailing_sl(signal_id, trail_sl, "PHASE3", latest_price)
-                    sl = trail_sl
+                # ── PHASE 2 -> PHASE 3 (75%+): trail below candle, book another 35% ──
+                elif original_state == "PHASE2" and progress >= 0.75:
+                    booked = True
+                    if qty >= MIN_QTY_FOR_PARTIAL:
+                        print(f"  💰 PHASE 3 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
+                        booked = book_partial(signal_id, 0.35, latest_price, "Phase 3 Partial (75% Target)")
+                    if booked:
+                        trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
+                        sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
+                        new_sl = trail_sl if sl_better else sl
+                        update_trailing_sl(signal_id, new_sl, "PHASE3", latest_price)
+                        sl = new_sl
+                        current_state = "PHASE3"
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # LAYER 3: Reversal Detection (80%+)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if progress >= REVERSAL_ZONE_START and not should_close:
-                if not recent_df.empty:
-                    is_reversal, reason = detect_reversal(recent_df, is_buy)
-                    if is_reversal:
-                        should_close = True
-                        exit_price = latest_price
-                        close_reason = f"REVERSAL DETECTED ({reason}) at {progress*100:.0f}%"
+                # PHASE 3 TRAILING (update SL with candle lows)
+                if current_state == "PHASE3":
+                    trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
+                    sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
+                    if sl_better:
+                        update_trailing_sl(signal_id, trail_sl, "PHASE3", latest_price)
+                        sl = trail_sl
+
+                # LAYER 3: Reversal Detection (80%+)
+                if progress >= REVERSAL_ZONE_START and not should_close:
+                    if not recent_df.empty:
+                        is_reversal, reason = detect_reversal(recent_df, is_buy)
+                        if is_reversal:
+                            should_close = True
+                            exit_price = latest_price
+                            close_reason = f"REVERSAL DETECTED ({reason}) at {progress*100:.0f}%"
+
+            else:
+                # ── SWING / MID / LONG: ATR chandelier trailing stop, no partials,
+                # no reversal. Exit happens below at the fixed target OR trailed SL.
+                peak = float(trade.get('peakPrice') or entry)
+                peak = max(peak, latest_price) if is_buy else min(peak, latest_price)
+                atr_val = None
+                if not recent_df.empty and len(recent_df) >= 2:
+                    try:
+                        atr_series = ta.atr(recent_df['High'], recent_df['Low'], recent_df['Close'], length=14)
+                        if atr_series is not None and not atr_series.dropna().empty:
+                            atr_val = float(atr_series.dropna().iloc[-1])
+                    except Exception:
+                        atr_val = None
+                if atr_val and atr_val > 0:
+                    from backtest_config import trail_mult_for_bucket
+                    mult = trail_mult_for_bucket(hold_duration)
+                    new_sl = peak - mult * atr_val if is_buy else peak + mult * atr_val
+                    sl_better = (is_buy and new_sl > sl) or (not is_buy and new_sl < sl)
+                    if sl_better:
+                        update_trailing_sl(signal_id, new_sl, "TRAILING", peak)
+                        sl = new_sl
 
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             # SL / TP / Intraday Hit Check
@@ -446,11 +514,7 @@ def auto_close_signals(cache):
                     
             if should_close:
                 print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{exit_price} {close_reason} (progress: {progress*100:.0f}%)")
-                httpx.patch(
-                    f"{NESTJS_URL.replace('/signals/new', '/signals')}/{signal_id}/close",
-                    json={"exitPrice": exit_price},
-                    timeout=10
-                )
+                close_trade(signal_id, exit_price)
                 
     except Exception as e:
         print(f"  [ERROR] auto-closing signals: {e}")
@@ -460,14 +524,19 @@ def main():
     print("🚀 Live Scanner started (Smart Trailing SL v2)")
     print(f"📡 Will POST signals to: {NESTJS_URL}")
     print(f"⏰ Market hours: {MARKET_OPEN} – {MARKET_CLOSE} IST")
-    print(f"📐 Trailing config: Breakeven@{BREAKEVEN_THRESHOLD*100:.0f}% | ProfitLock@{PROFIT_LOCK_THRESHOLD*100:.0f}% (lock {PROFIT_LOCK_PERCENT*100:.0f}%) | Reversal@{REVERSAL_ZONE_START*100:.0f}%+")
+    # Actual exit system (3-phase): SL→breakeven & book 35% at 50%, trail below
+    # candles & book 35% at 75%, reversal-exit the remainder at 80%+.
+    print(f"📐 3-Phase exit: BE+35%@50% | Trail+35%@75% | Reversal@{REVERSAL_ZONE_START*100:.0f}%+ | min qty for partials: {MIN_QTY_FOR_PARTIAL}")
     print("-" * 60)
 
     last_fired_times = {}
+    cycle = 0
 
     while True:
         now = datetime.now(IST)
-        print(f"\n[{now.strftime('%H:%M:%S')} IST] Scanning...")
+        cycle += 1
+        cycle_start = time.monotonic()
+        print(f"\n[{now.strftime('%H:%M:%S')} IST] ❤️  heartbeat cycle #{cycle} — scanning...")
 
         if not is_market_open():
             print("  Market is CLOSED. Sleeping 60s...")
@@ -476,10 +545,10 @@ def main():
 
         configs = get_active_configs()
         cache = {}
-        
+
         # 1. Smart auto-close with trailing SL + reversal detection
         auto_close_signals(cache)
-        
+
         # 2. Check for new setups
         if now.time() < dtime(9, 30):
             print("  Skipping new setups before 9:30 AM IST (avoiding fake opening moves).")
@@ -493,7 +562,13 @@ def main():
                 check_and_fire_signal(config, cache, last_fired_times)
                 time.sleep(1)  # Brief pause between stocks
 
-        print(f"  Done. Sleeping {POLL_INTERVAL}s...")
+        elapsed = time.monotonic() - cycle_start
+        # Stall detection: if a cycle takes longer than the poll interval, the
+        # scanner is falling behind (too many configs / slow yfinance).
+        if elapsed > POLL_INTERVAL:
+            print(f"  ⚠️ STALL: cycle #{cycle} took {elapsed:.0f}s > poll interval {POLL_INTERVAL}s — scanner is behind.")
+        else:
+            print(f"  Done in {elapsed:.1f}s ({len(configs)} configs). Sleeping {POLL_INTERVAL}s...")
         time.sleep(POLL_INTERVAL)
 
 

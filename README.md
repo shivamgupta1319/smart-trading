@@ -2,6 +2,17 @@
 
 A full-stack local platform for Indian stock market (NSE) algorithmic trading. Backtests 28 strategies, provides interactive candlestick charting, automatic portfolio/risk management tracking, and monitors live markets every 60 seconds to fire WebSocket and Telegram alerts.
 
+> **🛠 v2 hardening (branch `roadmap-v2`):** the system was audited and largely
+> hardened. Highlights: API-key **auth** across all services, **realistic
+> backtests** (intrabar fills + Indian costs + risk sizing), **Decimal** money,
+> transactional P&L, a fixed 3-phase exit, **walk-forward / Monte-Carlo** validation,
+> and a **portfolio risk engine**. See **[docs/roadmap-implementation.md](docs/roadmap-implementation.md)**,
+> **[docs/system-review-2026-06.md](docs/system-review-2026-06.md)**, and the isolated
+> dev setup in **[docs/v2-environment.md](docs/v2-environment.md)**.
+>
+> **Secrets are now read from a gitignored root `.env`** (template: `.env.example`).
+> Set a strong `API_KEY`, and **rotate** the previously-committed Telegram/LLM keys.
+
 ## Architecture
 
 ```
@@ -119,19 +130,36 @@ python scanner/live_scanner.py
 
 ## Environment Variables
 
-**apps/api/.env**
+All secrets/config now live in **one gitignored root `.env`** (copy `.env.example`).
+Docker Compose reads it automatically. Key variables:
 
 ```
-DATABASE_URL=postgresql://trader:trader@localhost:5470/smart_trading
-ENGINE_URL=http://smart-trading-engine:8000
-PORT=3000
-TELEGRAM_BOT_TOKEN="your_bot_token_here"
-TELEGRAM_CHAT_ID="your_chat_id_here"
+# Database
+POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB / DB_PORT
+DATABASE_URL                 # used by services inside docker
+
+# Service ports (host)
+API_PORT / ENGINE_PORT / FRONTEND_PORT
+
+# Auth (set a strong value to require it everywhere; unset = open/dev)
+API_KEY
+
+# Secrets (ROTATE the old leaked values)
+TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID / TELEGRAM_ENABLED
+OPENROUTER_API_KEY / GEMINI_API_KEY
+
+# Optional CORS + backtest realism tuning
+CORS_ORIGINS, BT_SLIPPAGE_BPS, BT_RISK_PER_TRADE_PCT, LIVE_PRICE_TTL_S, ...
 ```
 
-**apps/engine/.env**
+The frontend is built with `VITE_API_URL` (and `VITE_API_KEY` when auth is on),
+baked at image build time — see `apps/frontend/Dockerfile` and the compose `args`.
+
+### New endpoints (v2)
 
 ```
-DATABASE_URL=postgresql://trader:trader@localhost:5470/smart_trading
-NESTJS_SIGNAL_URL=http://smart-trading-api:3000/api/signals/new
+GET   /api/trades/risk                 # portfolio risk engine (exposure, heat, concentration)
+POST  /api/engine/run-walk-forward     # out-of-sample rolling validation
+POST  /api/engine/run-monte-carlo      # bootstrapped ROI / drawdown distribution
+WS    TRADE_UPDATE                      # CLOSED / PARTIAL / SL_UPDATED events
 ```

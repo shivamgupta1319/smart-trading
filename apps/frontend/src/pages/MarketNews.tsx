@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
-
-const API = 'http://localhost:3000';
+import { API } from '../config';
 
 interface NewsArticle {
   title: string;

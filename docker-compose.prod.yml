@@ -1,18 +1,24 @@
+# ============================================================================
+#  Production compose — uses pre-built images. ALL secrets come from the
+#  gitignored `.env` (see .env.example). No secrets are hard-coded here.
+# ============================================================================
+name: smart-trading
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: smart-trading-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: trader
-      POSTGRES_PASSWORD: trader
-      POSTGRES_DB: smart_trading
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5470:5432"
+      - "${DB_PORT:-5470}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trader -d smart_trading"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,13 +28,16 @@ services:
     container_name: smart-trading-api
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3000}:3000"
     environment:
-      DATABASE_URL: postgresql://trader:trader@postgres:5432/smart_trading
+      DATABASE_URL: ${DATABASE_URL}
       ENGINE_URL: http://engine:8000
       PORT: 3000
-      TELEGRAM_BOT_TOKEN: 8906932627:AAHXOczytpBcIlO23GeYE1iXSvEQ917T-Zc
-      TELEGRAM_CHAT_ID: 7511805281
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-true}
+      API_KEY: ${API_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,10 +47,14 @@ services:
     container_name: smart-trading-engine
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${ENGINE_PORT:-8000}:8000"
     environment:
-      DATABASE_URL: postgresql://trader:trader@postgres:5432/smart_trading
+      DATABASE_URL: ${DATABASE_URL}
       NESTJS_SIGNAL_URL: http://api:3000/api/signals/new
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      API_KEY: ${API_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,7 +64,7 @@ services:
     container_name: smart-trading-frontend
     restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-5173}:5173"
     depends_on:
       - api
 
@@ -61,8 +74,10 @@ services:
     restart: unless-stopped
     command: python scanner/live_scanner.py
     environment:
-      DATABASE_URL: postgresql://trader:trader@postgres:5432/smart_trading
+      DATABASE_URL: ${DATABASE_URL}
       NESTJS_SIGNAL_URL: http://api:3000/api/signals/new
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-true}
+      API_KEY: ${API_KEY}
     depends_on:
       postgres:
         condition: service_healthy

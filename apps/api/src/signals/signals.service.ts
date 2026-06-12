@@ -1,15 +1,18 @@
 import { Injectable, Logger } from "@nestjs/common";
+import axios from "axios";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateSignalDto } from "./dto/create-signal.dto";
-
-// Professional risk management constants
-const INITIAL_CAPITAL = 100000; // ₹1,00,000
-const RISK_PER_TRADE_PCT = 2; // 2% risk per trade (standard for professional traders)
-const MAX_RISK_PER_TRADE = INITIAL_CAPITAL * (RISK_PER_TRADE_PCT / 100); // ₹2,000
+import {
+  INITIAL_CAPITAL,
+  MAX_CONCURRENT_POSITIONS,
+  leverageFor,
+} from "../common/risk";
+import { toNum, round2, safePct, normalizeTradeMoney } from "../common/money";
 
 @Injectable()
 export class SignalsService {
   private readonly logger = new Logger(SignalsService.name);
+  private readonly engineUrl = process.env.ENGINE_URL || "http://localhost:8000";
 
   constructor(private prisma: PrismaService) {}
 
@@ -28,153 +31,182 @@ export class SignalsService {
     });
   }
 
-  async create(dto: CreateSignalDto) {
-    // Avoid duplicate active signals for same stock+strategy
-    const existing = await this.prisma.liveSignal.findFirst({
-      where: {
-        stockId: dto.stockId,
-        strategyName: dto.strategyName,
-        status: "ACTIVE",
-      },
-      include: { stock: true },
-    });
-    if (existing) return { signal: existing, isNew: false }; // idempotent
-
-    const signal = await this.prisma.liveSignal.create({
-      data: {
-        stockId: dto.stockId,
-        strategyName: dto.strategyName,
-        signalType: dto.signalType,
-        entryPrice: dto.entryPrice,
-        stopLoss: dto.stopLoss,
-        target: dto.target,
-        holdDuration: dto.holdDuration || null,
-      },
-      include: { stock: true },
-    });
-
-    // Auto-create Trade record with professional position sizing
+  /** Best-effort current market price from the engine; null if unavailable. */
+  private async fetchLivePrice(symbol?: string): Promise<number | null> {
+    if (!symbol) return null;
     try {
-      const riskPerShare = Math.abs(dto.entryPrice - dto.stopLoss);
-      // Position size = Risk Amount / Risk Per Share
-      // This ensures we never lose more than 2% of capital on any single trade
-      const quantity =
-        riskPerShare > 0
-          ? Math.max(1, Math.floor(MAX_RISK_PER_TRADE / riskPerShare))
-          : 1;
-      const capitalUsed = quantity * dto.entryPrice;
-      const riskAmount = quantity * riskPerShare;
-
-      await this.prisma.trade.create({
-        data: {
-          signalId: signal.id,
-          stockId: dto.stockId,
-          symbol: signal.stock?.symbol || `STOCK_${dto.stockId}`,
-          strategyName: dto.strategyName,
-          signalType: dto.signalType,
-          holdDuration: dto.holdDuration || "UNKNOWN",
-          entryPrice: dto.entryPrice,
-          stopLoss: dto.stopLoss,
-          target: dto.target,
-          quantity,
-          capitalUsed,
-          riskAmount,
-          entryTime: signal.timestamp,
-          status: "OPEN",
-          originalStopLoss: dto.stopLoss,
-          trailingState: "INITIAL",
-          peakPrice: dto.entryPrice,
-          remainingQty: quantity,
+      const res = await axios.post(
+        `${this.engineUrl}/api/engine/live-prices`,
+        { symbols: [symbol] },
+        {
+          timeout: 8000,
+          headers: process.env.API_KEY ? { "x-api-key": process.env.API_KEY } : {},
         },
-      });
-      this.logger.log(
-        `Trade created: ${dto.signalType} ${signal.stock?.symbol} × ${quantity} shares (₹${capitalUsed.toFixed(0)} invested, ₹${riskAmount.toFixed(0)} at risk)`,
       );
-    } catch (err: unknown) {
-      if (err instanceof Error) {
-        this.logger.error(
-          `Failed to create trade for signal ${signal.id}: ${err.message}`,
-        );
-      } else {
-        this.logger.error(
-          `Failed to create trade for signal ${signal.id}: ${String(err)}`,
-        );
-      }
+      const entry = res.data?.[symbol];
+      const price = typeof entry === "object" ? entry?.price : entry;
+      return typeof price === "number" && Number.isFinite(price) ? price : null;
+    } catch {
+      return null;
     }
-
-    return { signal, isNew: true };
   }
 
-  async close(id: number) {
-    const signal = await this.prisma.liveSignal.update({
-      where: { id },
-      data: { status: "CLOSED" },
-      include: { stock: true, trade: true },
+  async create(dto: CreateSignalDto) {
+    // Fast-path idempotency check (the DB partial-unique index is the real guard).
+    const existing = await this.prisma.liveSignal.findFirst({
+      where: { stockId: dto.stockId, strategyName: dto.strategyName, status: "ACTIVE" },
+      include: { stock: true },
     });
+    if (existing) return { signal: existing, isNew: false, fundingStatus: undefined };
 
-    // Auto-close the associated trade and compute P&L
-    if (signal.trade && signal.trade.status === "OPEN") {
-      try {
-        // Default fallback if no price is provided (breakeven assumption)
-        const exitPrice = signal.trade.entryPrice;
+    // Equal-weight slot sizing, COMPOUNDING: each trade gets ~one slot's
+    // notional, where slot = CURRENT account equity ÷ slots. As realized P&L
+    // grows the account, slots (and positions) grow — gains snowball, the way
+    // real long-term trading compounds. No single stock takes more than a slot;
+    // a signal is SHADOW only when all slots are full. riskAmount is kept for
+    // R-multiple analytics, not sizing. leverage is 1× unless intraday.
+    const leverage = leverageFor(dto.holdDuration);
+    const riskPerShare = Math.abs(dto.entryPrice - dto.stopLoss);
 
-        // Determine if SL or TP was hit based on most recent signal context
-        // For a more accurate exit: check current price. For now, use SL/TP logic.
-        const trade = signal.trade;
-        const isBuy = trade.signalType === "BUY";
+    let quantity = 1;
+    let capitalUsed = 0;
+    let riskAmount = 0;
+    let marginRequired = 0;
+    let fundingStatus: "FUNDED" | "SHADOW" = "FUNDED";
+    let declineReason = "";
 
-        // Default: assume the signal was closed because price hit either SL or TP
-        // The live_scanner auto-close logic checks: BUY → price <= SL or price >= TP
-        // We'll use the target as exit if profit scenario, else SL
-        let computedExitPrice = exitPrice;
+    try {
+      // Signal + Trade are created atomically: a failure in either rolls back both.
+      const signal = await this.prisma.$transaction(async (tx) => {
+        // Current equity = ₹1L seed + realized P&L of all FUNDED closed trades.
+        // Sizing off REALIZED (not paper) equity is the conservative standard.
+        const closedFunded = await tx.trade.findMany({
+          where: { status: "CLOSED", fundingStatus: "FUNDED" },
+          select: { pnl: true },
+        });
+        const realizedPnl = closedFunded.reduce((s, t) => s + toNum(t.pnl), 0);
+        const currentEquity = INITIAL_CAPITAL + realizedPnl;
+        const slotCapital = currentEquity / MAX_CONCURRENT_POSITIONS;
 
-        const pnlPerShare = isBuy
-          ? computedExitPrice - trade.entryPrice
-          : trade.entryPrice - computedExitPrice;
-          
-        // Final lot P&L based ONLY on remaining quantity
-        const finalLotPnl = pnlPerShare * trade.remainingQty;
-        
-        // Total Trade P&L = Realized from partials + Final Lot P&L
-        const totalPnl = trade.realizedPnl + finalLotPnl;
-        const pnlPercent = (totalPnl / trade.capitalUsed) * 100;
+        // Size to one (compounding) slot's notional.
+        quantity = dto.entryPrice > 0 ? Math.max(1, Math.floor(slotCapital / dto.entryPrice)) : 1;
+        capitalUsed = round2(quantity * dto.entryPrice);
+        riskAmount = round2(quantity * riskPerShare);
+        marginRequired = round2(capitalUsed / leverage);
 
-        let outcome = "BREAKEVEN";
-        if (totalPnl > 0) outcome = "WIN";
-        else if (totalPnl < 0) outcome = "LOSS";
+        // Funding decision (inside the tx to limit double-funding races): FUNDED
+        // if a slot is free AND margin fits remaining cash; otherwise SHADOW —
+        // recorded for would-be P&L but excluded from portfolio ROI. With N slots,
+        // SHADOW only happens when the book is genuinely full.
+        const openFunded = await tx.trade.findMany({
+          where: { status: "OPEN", fundingStatus: "FUNDED" },
+        });
+        let committedMargin = 0; // cash locked up = Σ notional ÷ leverage
+        for (const t of openFunded) {
+          const qty = t.remainingQty ?? t.quantity;
+          const entry = toNum(t.entryPrice);
+          const notional = qty * entry;
+          committedMargin += notional / leverageFor(t.holdDuration);
+        }
+        const cashLeft = currentEquity - committedMargin;
+        const slotOk = openFunded.length < MAX_CONCURRENT_POSITIONS;
+        const fundsOk = marginRequired <= cashLeft;
+        if (!slotOk || !fundsOk) {
+          fundingStatus = "SHADOW";
+          declineReason = !slotOk
+            ? `all ${MAX_CONCURRENT_POSITIONS} slots in use`
+            : `margin ₹${marginRequired.toFixed(0)} > cash left ₹${round2(cashLeft).toFixed(0)}`;
+        }
 
-        await this.prisma.trade.update({
-          where: { id: trade.id },
+        const sig = await tx.liveSignal.create({
           data: {
-            exitPrice: computedExitPrice,
-            pnl: Math.round(totalPnl * 100) / 100,
-            pnlPercent: Math.round(pnlPercent * 100) / 100,
-            remainingQty: 0,
-            outcome,
-            exitTime: new Date(),
-            status: "CLOSED",
+            stockId: dto.stockId,
+            strategyName: dto.strategyName,
+            signalType: dto.signalType,
+            entryPrice: dto.entryPrice,
+            stopLoss: dto.stopLoss,
+            target: dto.target,
+            holdDuration: dto.holdDuration || null,
+          },
+          include: { stock: true },
+        });
+
+        await tx.trade.create({
+          data: {
+            signalId: sig.id,
+            stockId: dto.stockId,
+            symbol: sig.stock?.symbol || `STOCK_${dto.stockId}`,
+            strategyName: dto.strategyName,
+            signalType: dto.signalType,
+            holdDuration: dto.holdDuration || "UNKNOWN",
+            entryPrice: dto.entryPrice,
+            stopLoss: dto.stopLoss,
+            target: dto.target,
+            quantity,
+            capitalUsed,
+            riskAmount,
+            fundingStatus,
+            entryTime: sig.timestamp,
+            status: "OPEN",
+            originalStopLoss: dto.stopLoss,
+            trailingState: "INITIAL",
+            peakPrice: dto.entryPrice,
+            remainingQty: quantity,
           },
         });
-        this.logger.log(
-          `Trade closed: ${trade.symbol} ${outcome} P&L: ₹${totalPnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`,
-        );
-      } catch (err: unknown) {
-        if (err instanceof Error) {
-          this.logger.error(
-            `Failed to close trade for signal ${id}: ${err.message}`,
-          );
-        } else {
-          this.logger.error(
-            `Failed to close trade for signal ${id}: ${String(err)}`,
-          );
-        }
-      }
-    }
+        return sig;
+      });
 
-    return this.prisma.liveSignal.findUnique({
+      if (fundingStatus === "FUNDED") {
+        this.logger.log(
+          `Trade FUNDED: ${dto.signalType} ${signal.stock?.symbol} × ${quantity} shares (₹${capitalUsed.toFixed(0)} notional, ₹${marginRequired.toFixed(0)} margin, ₹${riskAmount.toFixed(0)} at risk)`,
+        );
+      } else {
+        this.logger.log(
+          `Trade SHADOW (research-only): ${dto.signalType} ${signal.stock?.symbol} × ${quantity} shares — ${declineReason}`,
+        );
+      }
+      return { signal, isNew: true, fundingStatus };
+    } catch (err: unknown) {
+      // P2002 = the partial-unique index rejected a concurrent duplicate active signal.
+      if (typeof err === "object" && err && (err as { code?: string }).code === "P2002") {
+        const dup = await this.prisma.liveSignal.findFirst({
+          where: { stockId: dto.stockId, strategyName: dto.strategyName, status: "ACTIVE" },
+          include: { stock: true },
+        });
+        if (dup) return { signal: dup, isNew: false, fundingStatus: undefined };
+      }
+      this.logger.error(
+        `Failed to create signal/trade: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * Close at the current market price. Previously this booked breakeven (exit =
+   * entry) whenever no price was supplied — silently corrupting P&L. Now it
+   * fetches the live price; only if that genuinely fails does it fall back to
+   * entry, and it says so loudly + records a note.
+   */
+  async close(id: number) {
+    const sig = await this.prisma.liveSignal.findUnique({
       where: { id },
       include: { stock: true, trade: true },
     });
+    if (!sig) return null;
+
+    const livePrice = await this.fetchLivePrice(sig.stock?.symbol);
+    if (livePrice != null) {
+      return this.closeWithPrice(id, livePrice);
+    }
+
+    // Fallback: cannot price the exit. Mark it, but do NOT pretend it's breakeven.
+    this.logger.warn(
+      `close(${id}): no live price for ${sig.stock?.symbol} — falling back to entry price; verify manually.`,
+    );
+    const entryFallback = toNum(sig.trade?.entryPrice ?? sig.entryPrice);
+    return this.closeWithPrice(id, entryFallback, "Closed without live price (fallback to entry)");
   }
 
   async partialClose(id: number, percentToClose: number, exitPrice: number, reason: string) {
@@ -182,158 +214,125 @@ export class SignalsService {
       where: { id },
       include: { trade: true, stock: true },
     });
-
     if (!signal || !signal.trade || signal.trade.status !== "OPEN") {
       this.logger.warn(`Cannot partial close signal ${id}: trade not found or already closed`);
       return null;
     }
 
-    const trade = signal.trade;
-    // Calculate how many shares to close based on the ORIGINAL quantity
-    const sharesToClose = Math.max(1, Math.floor(trade.quantity * percentToClose));
-    
-    // Safety check: ensure we don't close more than remaining
+    const trade = normalizeTradeMoney(signal.trade)!;
+    // Clamp percent to (0, 1].
+    const pct = Math.min(1, Math.max(0, percentToClose));
+    const sharesToClose = Math.max(1, Math.floor(trade.quantity * pct));
     const actualSharesToClose = Math.min(sharesToClose, trade.remainingQty);
-    
-    if (actualSharesToClose <= 0) {
-      return null;
-    }
+    if (actualSharesToClose <= 0) return null;
 
     if (actualSharesToClose === trade.remainingQty) {
-      // It's a full close of the remaining shares!
-      // Add the reason to notes first
+      // Full close of the remaining lot.
       await this.prisma.trade.update({
         where: { id: trade.id },
         data: {
-          notes: trade.notes 
+          notes: trade.notes
             ? `${trade.notes} | ${reason}: Closing final ${actualSharesToClose} @ ₹${exitPrice}`
-            : `${reason}: Closing final ${actualSharesToClose} @ ₹${exitPrice}`
-        }
+            : `${reason}: Closing final ${actualSharesToClose} @ ₹${exitPrice}`,
+        },
       });
-      
-      // Then fully close
       await this.closeWithPrice(id, exitPrice);
       this.logger.log(
-        `Partial Close triggered FULL close: ${trade.signalType} ${signal.stock?.symbol} - Closed final ${actualSharesToClose} shares @ ₹${exitPrice}.`
+        `Partial Close → FULL close: ${trade.signalType} ${signal.stock?.symbol} — final ${actualSharesToClose} @ ₹${exitPrice}.`,
       );
       return signal;
     }
 
     const isBuy = trade.signalType === "BUY";
-    const pnlPerShare = isBuy
-      ? exitPrice - trade.entryPrice
-      : trade.entryPrice - exitPrice;
-    
+    const pnlPerShare = isBuy ? exitPrice - trade.entryPrice : trade.entryPrice - exitPrice;
     const lotPnl = pnlPerShare * actualSharesToClose;
-    
     const newRemainingQty = trade.remainingQty - actualSharesToClose;
-    const newRealizedPnl = trade.realizedPnl + lotPnl;
-    
+    const newRealizedPnl = round2(trade.realizedPnl + lotPnl);
+
     await this.prisma.trade.update({
       where: { id: trade.id },
       data: {
         remainingQty: newRemainingQty,
-        realizedPnl: Math.round(newRealizedPnl * 100) / 100,
-        notes: trade.notes 
+        realizedPnl: newRealizedPnl,
+        notes: trade.notes
           ? `${trade.notes} | ${reason}: Closed ${actualSharesToClose} @ ₹${exitPrice} (P&L: ₹${lotPnl.toFixed(2)})`
-          : `${reason}: Closed ${actualSharesToClose} @ ₹${exitPrice} (P&L: ₹${lotPnl.toFixed(2)})`
-      }
+          : `${reason}: Closed ${actualSharesToClose} @ ₹${exitPrice} (P&L: ₹${lotPnl.toFixed(2)})`,
+      },
     });
 
     this.logger.log(
-      `Partial Close: ${trade.signalType} ${signal.stock?.symbol} - Closed ${actualSharesToClose} shares @ ₹${exitPrice}. Lot P&L: ₹${lotPnl.toFixed(2)}. Remaining: ${newRemainingQty}`
+      `Partial Close: ${trade.signalType} ${signal.stock?.symbol} — ${actualSharesToClose} @ ₹${exitPrice}. Lot P&L: ₹${lotPnl.toFixed(2)}. Remaining: ${newRemainingQty}`,
     );
-
-    return { id, actualSharesToClose, lotPnl, newRemainingQty, newRealizedPnl };
+    return { id, actualSharesToClose, lotPnl: round2(lotPnl), newRemainingQty, newRealizedPnl };
   }
 
-  async closeWithPrice(id: number, exitPrice: number) {
-    const signal = await this.prisma.liveSignal.update({
-      where: { id },
-      data: { status: "CLOSED" },
-      include: { stock: true, trade: true },
-    });
-
-    if (signal.trade && signal.trade.status === "OPEN") {
-      const trade = signal.trade;
-      const isBuy = trade.signalType === "BUY";
-      const pnlPerShare = isBuy
-        ? exitPrice - trade.entryPrice
-        : trade.entryPrice - exitPrice;
-        
-      // Final lot P&L based ONLY on remaining quantity
-      const finalLotPnl = pnlPerShare * trade.remainingQty;
-      
-      // Total Trade P&L = Realized from partials + Final Lot P&L
-      const totalPnl = trade.realizedPnl + finalLotPnl;
-      const pnlPercent = (totalPnl / trade.capitalUsed) * 100;
-
-      let outcome = "BREAKEVEN";
-      if (totalPnl > 0) outcome = "WIN";
-      else if (totalPnl < 0) outcome = "LOSS";
-
-      await this.prisma.trade.update({
-        where: { id: trade.id },
-        data: {
-          exitPrice,
-          pnl: Math.round(totalPnl * 100) / 100,
-          pnlPercent: Math.round(pnlPercent * 100) / 100,
-          remainingQty: 0,
-          outcome,
-          exitTime: new Date(),
-          status: "CLOSED",
-        },
+  async closeWithPrice(id: number, exitPrice: number, extraNote?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const signal = await tx.liveSignal.update({
+        where: { id },
+        data: { status: "CLOSED" },
+        include: { stock: true, trade: true },
       });
-    }
 
-    return this.prisma.liveSignal.findUnique({
-      where: { id },
-      include: { stock: true, trade: true },
+      if (signal.trade && signal.trade.status === "OPEN") {
+        const trade = normalizeTradeMoney(signal.trade)!;
+        const isBuy = trade.signalType === "BUY";
+        const pnlPerShare = isBuy ? exitPrice - trade.entryPrice : trade.entryPrice - exitPrice;
+        const finalLotPnl = pnlPerShare * trade.remainingQty;
+        const totalPnl = trade.realizedPnl + finalLotPnl;
+        // Consistent semantics everywhere: P&L as a % of capital deployed.
+        const pnlPercent = safePct(totalPnl, trade.capitalUsed);
+
+        const outcome = totalPnl > 0 ? "WIN" : totalPnl < 0 ? "LOSS" : "BREAKEVEN";
+
+        await tx.trade.update({
+          where: { id: trade.id },
+          data: {
+            exitPrice,
+            pnl: round2(totalPnl),
+            pnlPercent: round2(pnlPercent),
+            remainingQty: 0,
+            outcome,
+            exitTime: new Date(),
+            status: "CLOSED",
+            notes: extraNote
+              ? trade.notes
+                ? `${trade.notes} | ${extraNote}`
+                : extraNote
+              : trade.notes,
+          },
+        });
+      }
+
+      return tx.liveSignal.findUnique({
+        where: { id },
+        include: { stock: true, trade: true },
+      });
     });
   }
 
-  async updateStopLoss(
-    id: number,
-    newStopLoss: number,
-    trailingState: string,
-    peakPrice?: number,
-  ) {
+  async updateStopLoss(id: number, newStopLoss: number, trailingState: string, peakPrice?: number) {
     const signal = await this.prisma.liveSignal.findUnique({
       where: { id },
       include: { trade: true },
     });
-
-    if (!signal || signal.status !== 'ACTIVE') {
+    if (!signal || signal.status !== "ACTIVE") {
       this.logger.warn(`Cannot update SL for signal ${id}: not active`);
       return null;
     }
 
-    // Update signal's stop loss
-    await this.prisma.liveSignal.update({
-      where: { id },
-      data: { stopLoss: newStopLoss },
-    });
-
-    // Update associated trade's stop loss, trailing state, and peak price
-    if (signal.trade && signal.trade.status === 'OPEN') {
-      const updateData: Record<string, unknown> = {
-        stopLoss: newStopLoss,
-        trailingState,
-      };
-      if (peakPrice !== undefined) {
-        updateData.peakPrice = peakPrice;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.liveSignal.update({ where: { id }, data: { stopLoss: newStopLoss } });
+      if (signal.trade && signal.trade.status === "OPEN") {
+        const updateData: Record<string, unknown> = { stopLoss: newStopLoss, trailingState };
+        if (peakPrice !== undefined) updateData.peakPrice = peakPrice;
+        await tx.trade.update({ where: { id: signal.trade.id }, data: updateData });
       }
-
-      await this.prisma.trade.update({
-        where: { id: signal.trade.id },
-        data: updateData,
-      });
-    }
+    });
 
     this.logger.log(
       `Trailing SL updated: Signal #${id} → SL ₹${newStopLoss.toFixed(2)} (${trailingState})`,
     );
-
     return { id, newStopLoss, trailingState, peakPrice };
   }
 }

@@ -16,6 +16,13 @@ export function Toast({ alert, onDismiss }: ToastProps) {
 
   const isBuy = alert.signalType === 'BUY';
 
+  // Money fields may arrive as strings if the API serializes Prisma Decimals;
+  // coerce defensively so .toFixed() never blows up the whole app.
+  const entryPrice = Number(alert.entryPrice);
+  const stopLoss = Number(alert.stopLoss);
+  const target = Number(alert.target);
+  const rr = Math.abs((target - entryPrice) / (entryPrice - stopLoss));
+
   return (
     <div className={`toast ${isBuy ? 'buy' : 'sell'}`}>
       <div className="toast-header">
@@ -29,13 +36,13 @@ export function Toast({ alert, onDismiss }: ToastProps) {
       </div>
       <div className="toast-details">
         <span className="toast-detail-label">Entry</span>
-        <span className="toast-detail-value">₹{alert.entryPrice.toFixed(2)}</span>
+        <span className="toast-detail-value">₹{entryPrice.toFixed(2)}</span>
         <span className="toast-detail-label">Stop Loss</span>
-        <span className="toast-detail-value">₹{alert.stopLoss.toFixed(2)}</span>
+        <span className="toast-detail-value">₹{stopLoss.toFixed(2)}</span>
         <span className="toast-detail-label">Target</span>
-        <span className="toast-detail-value">₹{alert.target.toFixed(2)}</span>
+        <span className="toast-detail-value">₹{target.toFixed(2)}</span>
         <span className="toast-detail-label">R:R</span>
-        <span className="toast-detail-value">1 : {Math.abs((alert.target - alert.entryPrice) / (alert.entryPrice - alert.stopLoss)).toFixed(1)}</span>
+        <span className="toast-detail-value">1 : {Number.isFinite(rr) ? rr.toFixed(1) : '—'}</span>
       </div>
       <div className="toast-strategy">📊 {alert.strategyName}</div>
     </div>
