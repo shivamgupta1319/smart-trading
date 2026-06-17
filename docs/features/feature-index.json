@@ -1,12 +1,72 @@
 {
+  "updatedAt": "2026-06-17",
+  "legend": {
+    "priority": {
+      "P0": "Keystone — blocks trustworthy numbers for everything downstream; build first.",
+      "P1": "High — directly corrupts metrics the user reads daily; independent, cheap.",
+      "P2": "Medium — residual risk / hardening; smaller blast radius.",
+      "P3": "Low — analysis/validation; depends on an upstream fix landing first."
+    },
+    "status": {
+      "DOCS_DRAFTED": "Feature docs written, not yet reviewed (/review-docs pending).",
+      "DOCS_REVIEWED": "Docs reviewed and scope approved; ready to implement.",
+      "IN_PROGRESS": "At least one phase under implementation.",
+      "BLOCKED": "Cannot start until a dependency lands.",
+      "DONE": "All acceptance criteria verified; analyst re-run confirms fix."
+    },
+    "docsReviewed": "true when the docs passed /review-docs even if status is BLOCKED (impl can't start yet). See the feature's review-notes.md."
+  },
   "features": [
     {
       "id": "FEAT-001",
       "title": "Backtest Report Trust",
-      "status": "DOCS_REVIEWED",
-      "createdAt": "2026-06-12T07:21:30Z",
+      "slug": "backtest-report-trust",
       "path": "docs/features/backtest-report-trust",
-      "origin": "docs/agent-reports/2026-06-12-whats-not-working.md (findings F1, F2; sizing from F-notes)"
+      "priority": "P0",
+      "status": "DOCS_REVIEWED",
+      "dependsOn": [],
+      "origin": "2026-06-12 report F1/F2 + sizing note; reconfirmed 2026-06-16 F2/F3 (artifacts still live in DB)",
+      "summary": "Make BacktestReport latest-per-cell (UPSERT + unique key + engineVersion), dedup the leaderboard and exclude 0-trade rows, and enforce the dead max_position_value cap so single-cell ROI/DD stays within one ₹10k slot. Keystone: every downstream ranking depends on it.",
+      "createdAt": "2026-06-12T07:21:30Z"
+    },
+    {
+      "id": "FEAT-002",
+      "title": "Live Trade Bookkeeping Hygiene",
+      "slug": "live-trade-bookkeeping-hygiene",
+      "path": "docs/features/live-trade-bookkeeping-hygiene",
+      "priority": "P1",
+      "status": "DOCS_REVIEWED",
+      "docsReviewed": true,
+      "dependsOn": [],
+      "origin": "2026-06-12 F5 + 2026-06-16 F5 (firmed up on 40-trade sample)",
+      "summary": "Fix the live metrics the user actually reads: (a) add a BREAKEVEN band so sub-0.1R scratches stop inflating win-rate, and (b) write the final-leg P&L back to realizedPnl (or deprecate it) so SUM(realizedPnl) reconciles to SUM(pnl) — currently an ₹813 gap. Independent of FEAT-001.",
+      "createdAt": "2026-06-16T00:00:00Z"
+    },
+    {
+      "id": "FEAT-003",
+      "title": "Strategy-Level Selection Guard",
+      "slug": "strategy-selection-guard",
+      "path": "docs/features/strategy-selection-guard",
+      "priority": "P2",
+      "status": "BLOCKED",
+      "docsReviewed": true,
+      "dependsOn": ["FEAT-001"],
+      "origin": "2026-06-12 F4 + 2026-06-16 F4 (refined: broken cells already quarantined; risk is future re-promotion of a lucky cell)",
+      "summary": "Per-cell gates already quarantine negative cells, but a lucky positive cell of a structurally-broken strategy (e.g. Bollinger, whose reliable-sample average is -15% to -21%) can still be auto-selected. Add a strategy-level guard: block any cell whose strategy's deduped reliable-sample average ROI is negative. Needs FEAT-001's deduped table to compute a trustworthy strategy average.",
+      "createdAt": "2026-06-16T00:00:00Z"
+    },
+    {
+      "id": "FEAT-004",
+      "title": "Live-vs-Backtest Reconciliation",
+      "slug": "live-vs-backtest-reconciliation",
+      "path": "docs/features/live-vs-backtest-reconciliation",
+      "priority": "P3",
+      "status": "BLOCKED",
+      "docsReviewed": true,
+      "dependsOn": ["FEAT-001", "FEAT-002"],
+      "origin": "2026-06-12 F3 + 2026-06-16 F1/F3 (every big live loser cell backtested positive)",
+      "summary": "Every live-loss cell carries positive backtest expectancy — the system trades on numbers the market contradicts. This is a validation/reporting feature (walk-forward + Monte-Carlo bands per live-traded cell, surfaced so auto-select stops trusting inflated cells). BLOCKED until FEAT-001 makes backtest numbers trustworthy and FEAT-002 makes live numbers trustworthy.",
+      "createdAt": "2026-06-16T00:00:00Z"
     }
   ]
 }
