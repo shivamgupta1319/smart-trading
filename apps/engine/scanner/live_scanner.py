@@ -61,7 +61,8 @@ def get_active_configs():
 def fetch_live_candles(symbol: str, timeframe: str) -> pd.DataFrame:
     yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
     interval_map = {"1D": "1d", "15m": "15m", "5m": "5m"}
-    period_map = {"1D": "150d", "15m": "10d", "5m": "5d"}
+    # 1D needs >=200 bars for sma200/ema200 indicators; "1y" ≈ 250 trading days.
+    period_map = {"1D": "1y", "15m": "10d", "5m": "5d"}
 
     interval = interval_map.get(timeframe, "15m")
     period = period_map.get(timeframe, "10d")
