@@ -8,9 +8,17 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 
+const wsCorsOrigins = (
+  process.env.CORS_ORIGINS ||
+  'http://localhost:5173,http://localhost:4200,https://trading.pseo.cloud'
+)
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:5173', 'http://localhost:4200'],
+    origin: wsCorsOrigins,
     credentials: true,
   },
   transports: ['websocket', 'polling'],

@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api";
+const API_URL = import.meta.env.VITE_API_URL || "/api";
 
 interface StockData {
   id: number;

@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { createChart, ColorType, type IChartApi, AreaSeries } from 'lightweight-charts';
 
-const API = 'http://localhost:3000';
+const API = '';
 
 const HOLD_LABELS: Record<string, { label: string; color: string; icon: string }> = {
   INTRADAY: { label: 'Intraday', color: '#22d3ee', icon: '⏱' },

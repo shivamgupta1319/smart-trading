@@ -4,7 +4,7 @@ import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import { AddStockModal } from '../components/AddStockModal';
 
-const API = 'http://localhost:3000';
+const API = '';
 
 interface Stock {
   id: number;

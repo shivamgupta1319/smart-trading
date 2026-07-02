@@ -3,7 +3,7 @@ import axios from "axios";
 import { useSocket, TradeAlert } from "../hooks/useSocket";
 import { ToastContainer } from "../components/ToastNotification";
 
-const API = "http://localhost:3000";
+const API = '';
 
 interface Config {
   id: number;
