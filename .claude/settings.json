@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '/^Host work-pc/{f=1} f&&/^Host /&&!/work-pc/{f=0} f' ~/.ssh/config)",
+      "Bash(python3 - /tmp/claude-1000/-home-shivam-workspace-smart-trading-v2/00be896b-99ab-41a8-8dbd-4ae9cbe8b028/scratchpad/workpc.env /home/shivam/workspace/smart-trading-v2/.env)",
+      "Bash(git remote *)",
+      "Bash(timeout 30 scp /home/shivam/workspace/smart-trading-v2/infra/docker-compose.yml work-pc:/home/work/workspace/smart-trading-v2/infra/docker-compose.yml)"
+    ]
+  }
+}

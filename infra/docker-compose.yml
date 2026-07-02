@@ -1,16 +1,7 @@
-# ============================================================================
-#  ISOLATED v2 stack (project: smart-trading-v2).
-#  Runs in parallel with the live `smart-trading` stack — different project
-#  name, container names, host ports, and volume, so nothing collides.
-#
-#  Secrets are read from the gitignored root `.env` (see .env.example).
-#  Start:  docker compose up -d     Stop:  docker compose down
-#  (compose reads .env automatically). The whole stack — including the live
-#  `scanner` and `scheduler` — comes up and down as one unit.
-#  Note: the scanner posts signals + Telegram alerts, so don't run this stack
-#  against a cloned/shared DB while another scanner is live (set TELEGRAM_ENABLED
-#  =false in .env to silence alerts if you just want a local dry run).
-# ============================================================================
+# smart-trading-v2 — pull-based stack for work-pc (images from Docker Hub).
+# Engine code is baked into the image, so the dev bind-mount is dropped. All config from infra/.env.
+# Whole stack (incl. scanner + scheduler) starts/stops together:
+#   up:  docker compose up -d      down:  docker compose down
 name: smart-trading-v2
 
 services:
@@ -33,9 +24,8 @@ services:
       retries: 5
 
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
+    image: shivam13gupta/smart-trading-v2-api:latest
+    pull_policy: always
     container_name: smart-trading-v2-api
     restart: unless-stopped
     ports:
@@ -55,9 +45,8 @@ services:
         condition: service_healthy
 
   engine:
-    build:
-      context: apps/engine
-      dockerfile: Dockerfile
+    image: shivam13gupta/smart-trading-v2-engine:latest
+    pull_policy: always
     container_name: smart-trading-v2-engine
     restart: unless-stopped
     ports:
@@ -80,30 +69,23 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./apps/engine:/app
 
   frontend:
-    build:
-      context: .
-      dockerfile: apps/frontend/Dockerfile
-      args:
-        # Relative base ("/") => API_BASE="" in config.ts, so the SPA calls the SAME origin it is
-        # served from (works on LAN IP and the public subdomain); nginx proxies /api + /socket.io.
-        VITE_API_URL: "${VITE_API_URL:-/}"
-        # API key is NOT baked in — the browser gets it after entering the app PIN.
+    image: shivam13gupta/smart-trading-v2-frontend:latest
+    pull_policy: always
     container_name: smart-trading-v2-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-5174}:5173"
+      - "${FRONTEND_PORT:-5174}:5173"   # nginx: SPA + proxies /api + /socket.io to api
     depends_on:
       - api
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${HTPASSWD_FILE:-../../edge/.htpasswd}:/etc/nginx/.htpasswd:ro
 
-  # Live scanner — posts signals + Telegram alerts during NSE market hours.
   scanner:
-    build:
-      context: apps/engine
-      dockerfile: Dockerfile
+    image: shivam13gupta/smart-trading-v2-engine:latest
+    pull_policy: always
     container_name: smart-trading-v2-scanner
     restart: unless-stopped
     command: python scanner/live_scanner.py
@@ -122,15 +104,10 @@ services:
         condition: service_healthy
       api:
         condition: service_started
-    volumes:
-      - ./apps/engine:/app
 
-  # Historical-data fetch scheduler — runs a daily after-close fetch of all
-  # active stocks so the backtest dataset grows.
   scheduler:
-    build:
-      context: apps/engine
-      dockerfile: Dockerfile
+    image: shivam13gupta/smart-trading-v2-engine:latest
+    pull_policy: always
     container_name: smart-trading-v2-scheduler
     restart: unless-stopped
     command: python scheduler/fetch_scheduler.py
@@ -143,8 +120,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./apps/engine:/app
 
 volumes:
   postgres_data:
