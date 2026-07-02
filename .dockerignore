@@ -13,3 +13,8 @@ tmp
 docker-compose.yml
 Dockerfile
 .env
+
+# Exclude env files at every depth (nested apps/*/.env would otherwise be COPYed in)
+**/.env
+**/.env.*
+!**/.env.example
