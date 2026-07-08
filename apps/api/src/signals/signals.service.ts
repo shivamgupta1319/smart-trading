@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateSignalDto } from "./dto/create-signal.dto";
+import { DhanService } from "../dhan/dhan.service";
 
 // Professional risk management constants
 const INITIAL_CAPITAL = 100000; // ₹1,00,000
@@ -11,7 +12,10 @@ const MAX_RISK_PER_TRADE = INITIAL_CAPITAL * (RISK_PER_TRADE_PCT / 100); // ₹2
 export class SignalsService {
   private readonly logger = new Logger(SignalsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private dhan: DhanService,
+  ) {}
 
   async findAll() {
     return this.prisma.liveSignal.findMany({
@@ -90,6 +94,16 @@ export class SignalsService {
       this.logger.log(
         `Trade created: ${dto.signalType} ${signal.stock?.symbol} × ${quantity} shares (₹${capitalUsed.toFixed(0)} invested, ₹${riskAmount.toFixed(0)} at risk)`,
       );
+
+      // Real-money execution adapter (no-op unless DHAN_TRADING_MODE set + whitelisted).
+      // Quantity is computed independently inside DhanService — decoupled from the sim quantity above.
+      await this.dhan.placeEntry({
+        signalId: signal.id,
+        symbol: signal.stock?.symbol,
+        signalType: dto.signalType,
+        strategyName: dto.strategyName,
+        entryPrice: dto.entryPrice,
+      });
     } catch (err: unknown) {
       if (err instanceof Error) {
         this.logger.error(
@@ -158,6 +172,13 @@ export class SignalsService {
         this.logger.log(
           `Trade closed: ${trade.symbol} ${outcome} P&L: ₹${totalPnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`,
         );
+
+        // Square off the real Dhan position (no-op unless this signal is Dhan-managed).
+        await this.dhan.placeExit({
+          signalId: id,
+          symbol: signal.stock?.symbol,
+          exitPrice: computedExitPrice,
+        });
       } catch (err: unknown) {
         if (err instanceof Error) {
           this.logger.error(
@@ -283,6 +304,13 @@ export class SignalsService {
           exitTime: new Date(),
           status: "CLOSED",
         },
+      });
+
+      // Square off the real Dhan position (no-op unless this signal is Dhan-managed).
+      await this.dhan.placeExit({
+        signalId: id,
+        symbol: signal.stock?.symbol,
+        exitPrice,
       });
     }
 
