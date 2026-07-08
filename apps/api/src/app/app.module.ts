@@ -9,6 +9,7 @@ import { NseStocksModule } from '../nse-stocks/nse-stocks.module';
 import { TradesModule } from '../trades/trades.module';
 import { TelegramModule } from '../telegram/telegram.module';
 import { DhanModule } from '../dhan/dhan.module';
+import { ReportsModule } from '../reports/reports.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { DhanModule } from '../dhan/dhan.module';
     TradesModule,
     TelegramModule,
     DhanModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}

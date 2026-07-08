@@ -258,4 +258,82 @@ export class TelegramService {
       this.logger.error(`Failed to send partial close alert: ${err?.message || err}`);
     }
   }
+
+  async sendPerformanceDigest(data: {
+    period: 'DAILY' | 'WEEKLY';
+    stats: {
+      totalPnl: number;
+      winRate: number;
+      wins: number;
+      losses: number;
+      profitFactor: number;
+      openTrades: number;
+      currentCapital: number;
+      initialCapital: number;
+      bestStrategy: string;
+      strategyBreakdown: {
+        strategy: string;
+        totalPnl: number;
+        winRate: number;
+        trades: number;
+      }[];
+    };
+    staleOpens: number;
+  }) {
+    if (!this.enabled) return;
+
+    const s = data.stats;
+    const pnlEmoji = s.totalPnl >= 0 ? '📈' : '📉';
+    const top = (s.strategyBreakdown || [])
+      .slice(0, 3)
+      .map(
+        (x, i) =>
+          `${i + 1}. ${x.strategy}: ₹${x.totalPnl.toFixed(0)} (${x.winRate}% · ${x.trades}t)`,
+      )
+      .join('\n');
+
+    const message = [
+      `📊 <b>${data.period} PERFORMANCE DIGEST</b>`,
+      ``,
+      `${pnlEmoji} <b>Net P&L:</b> ₹${s.totalPnl.toFixed(0)}`,
+      `💼 <b>Capital:</b> ₹${s.currentCapital.toFixed(0)} / ₹${s.initialCapital.toFixed(0)}`,
+      `🎯 <b>Win Rate:</b> ${s.winRate}% (${s.wins}W / ${s.losses}L)`,
+      `📊 <b>Profit Factor:</b> ${s.profitFactor}`,
+      `📦 <b>Open Positions:</b> ${s.openTrades}`,
+      data.staleOpens > 0
+        ? `⚠️ <b>Stale opens (≥5d):</b> ${data.staleOpens}`
+        : null,
+      ``,
+      `🏆 <b>Top strategies:</b>`,
+      top || '—',
+      ``,
+      `⏰ ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+    ]
+      .filter((l) => l !== null)
+      .join('\n');
+
+    try {
+      await axios.post(
+        `https://api.telegram.org/bot${this.botToken}/sendMessage`,
+        {
+          chat_id: this.chatId,
+          text: message,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        },
+        { timeout: 10000, family: 4 },
+      );
+      this.logger.log(`Telegram ${data.period} digest sent`);
+    } catch (err: any) {
+      if (err.response && err.response.data) {
+        this.logger.error(
+          `Failed to send ${data.period} digest: ${JSON.stringify(err.response.data)}`,
+        );
+      } else {
+        this.logger.error(
+          `Failed to send ${data.period} digest: ${err?.message || err}`,
+        );
+      }
+    }
+  }
 }
