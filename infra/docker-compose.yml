@@ -36,6 +36,17 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,https://trading.pseo.cloud}
+      # Dhan real-money execution adapter (default off = pure sim). See docs/dhan-live-execution.md
+      DHAN_TRADING_MODE: ${DHAN_TRADING_MODE:-off}
+      DHAN_CLIENT_ID: ${DHAN_CLIENT_ID:-}
+      DHAN_PIN: ${DHAN_PIN:-}
+      DHAN_TOTP_SECRET: ${DHAN_TOTP_SECRET:-}
+      DHAN_ACCESS_TOKEN: ${DHAN_ACCESS_TOKEN:-}
+      DHAN_API_BASE: ${DHAN_API_BASE:-https://api.dhan.co/v2}
+      DHAN_MAX_NOTIONAL: ${DHAN_MAX_NOTIONAL:-12500}
+      DHAN_MAX_QTY: ${DHAN_MAX_QTY:-20}
+      DHAN_MAX_ORDERS_PER_DAY: ${DHAN_MAX_ORDERS_PER_DAY:-20}
+      DHAN_MAX_DAILY_LOSS: ${DHAN_MAX_DAILY_LOSS:-1000}
     depends_on:
       postgres:
         condition: service_healthy
