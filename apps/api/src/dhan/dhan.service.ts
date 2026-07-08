@@ -282,13 +282,17 @@ export class DhanService {
   }
 
   private async generateAccessToken(): Promise<string | undefined> {
-    // NOTE: exact param encoding to be confirmed against Dhan docs during Stage 2.
+    // Dhan expects dhanClientId/pin/totp as QUERY PARAMETERS (not a JSON body).
     try {
       const totp = totpCode(this.totpSecret as string);
+      const qs =
+        `dhanClientId=${encodeURIComponent(this.clientId as string)}` +
+        `&pin=${encodeURIComponent(this.pin as string)}` +
+        `&totp=${encodeURIComponent(totp)}`;
       const res = await axios.post(
-        'https://auth.dhan.co/app/generateAccessToken',
-        { dhanClientId: this.clientId, pin: this.pin, totp },
-        { headers: { 'Content-Type': 'application/json' }, timeout: 10000 },
+        `https://auth.dhan.co/app/generateAccessToken?${qs}`,
+        null,
+        { timeout: 10000 },
       );
       const token = res.data?.accessToken as string | undefined;
       const expiry = res.data?.expiryTime ? new Date(res.data.expiryTime).getTime() : Date.now() + 23 * 3600_000;
