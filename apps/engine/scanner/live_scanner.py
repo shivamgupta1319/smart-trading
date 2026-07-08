@@ -40,6 +40,19 @@ REVERSAL_ZONE_START = 0.80   # Start checking for reversals at 80% of target dis
 # {signal_id: "INITIAL" | "BREAKEVEN" | "PROFIT_LOCK"}
 trailing_state_cache = {}
 
+# ── Max-hold time-stop (calendar days) ──
+# Swings get a hard time-stop so positions can't drift open indefinitely;
+# INTRADAY/UNKNOWN get a safety net in case the 15:15 square-off was missed
+# (scanner down 15:15-15:30). Calendar-day based — weekends count, so limits
+# are a bit generous vs trading days. LONG_POSITIONAL is intentionally omitted
+# (no time-stop). Values chosen to flush the current stale opens immediately.
+MAX_HOLD_DAYS = {
+    "INTRADAY": 1,
+    "UNKNOWN": 1,
+    "SHORT_SWING": 5,
+    "MID_SWING": 20,
+}
+
 
 def is_market_open() -> bool:
     now = datetime.now(IST).time()
@@ -304,6 +317,19 @@ def update_trailing_sl(signal_id: int, new_sl: float, state: str, peak_price: fl
         print(f"    [ERROR] updating trailing SL: {e}")
 
 
+def trade_age_days(entry_raw):
+    """Calendar-day age of a trade from its ISO entryTime string. None if unparseable (fails safe)."""
+    if not entry_raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(entry_raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = pytz.utc.localize(dt)  # Prisma stores UTC
+        return (datetime.now(IST) - dt.astimezone(IST)).total_seconds() / 86400.0
+    except Exception:
+        return None
+
+
 def auto_close_signals(cache):
     """
     Smart 3-Phase exit system:
@@ -444,7 +470,17 @@ def auto_close_signals(cache):
                 should_close = True
                 exit_price = latest_price
                 close_reason = "INTRADAY auto square-off (>= 15:15 IST)"
-                    
+
+            # ── MAX-HOLD time-stop (swing enforcement + intraday safety net) ──
+            if not should_close:
+                hold = sig.get('holdDuration') or 'UNKNOWN'
+                age_days = trade_age_days(trade.get('entryTime'))
+                limit = MAX_HOLD_DAYS.get(hold)
+                if age_days is not None and limit is not None and age_days >= limit:
+                    should_close = True
+                    exit_price = latest_price
+                    close_reason = f"MAX_HOLD time-stop ({age_days:.1f}d >= {limit}d, {hold})"
+
             if should_close:
                 print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{exit_price} {close_reason} (progress: {progress*100:.0f}%)")
                 httpx.patch(
