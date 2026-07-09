@@ -106,6 +106,17 @@ then `docker compose up -d api`. First real order = 1 share (~₹150–200 risk/
 
 ---
 
+## ▶ FRIDAY 2026-07-10 RESUME (end of Thu 07-09)
+
+- **Live mode armed, but NO live order fired Thu** — EMA_RSI on HDFCBANK/ADANIENT only signalled in the early burst (09:31–10:17 IST), all *before* go-live (10:21 IST); quiet all afternoon. **Gate B static-IP test still unrun.**
+- **Friday is hands-off on tokens:** TOTP auto-refresh works (fixed Thu), so the app self-mints a fresh token on the first order — no manual rotation needed even though the manual token expires ~midday Fri.
+- **Friday first action:** re-arm the order watcher at/after 09:15 IST open:
+  ```
+  ssh work-pc 'timeout 21600 docker logs -f --since 1m smart-trading-api 2>&1 | grep -m1 -E "\[dhan:live\] (ENTRY|EXIT) (placed|FAILED)"'
+  ```
+  First EMA_RSI signal → real order. `ENTRY placed` = IP not enforced (we're good); `ENTRY FAILED` + IP error = need the VPS static IP (Gate B path A).
+- Backtest fixes (Track 4) done + committed (`826e95f`). Long-only swing fix (Track 3) done (`758f4a8`).
+
 ## ▶ STATUS (2026-07-09 ~09:20 IST) & NEXT
 
 1. ✅ **Time-stop verified** — see hygiene table. 0 stale opens remain.

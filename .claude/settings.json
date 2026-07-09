@@ -79,7 +79,11 @@
       "Bash(git commit *)",
       "Bash(./venv/bin/python -c ' *)",
       "Bash(node -e *)",
-      "Bash(node /tmp/claude-1000/-home-shivam-workspace-smart-trading/62d2f249-fd53-40cb-9919-13a731bdfa41/scratchpad/totp-retest.js)"
+      "Bash(node /tmp/claude-1000/-home-shivam-workspace-smart-trading/62d2f249-fd53-40cb-9919-13a731bdfa41/scratchpad/totp-retest.js)",
+      "WebFetch(domain:dhanhq.co)",
+      "WebFetch(domain:www.quotaguard.com)",
+      "Bash(./infra/scripts/build-and-push.sh engine *)",
+      "Bash(grep -vE \"node_modules|/venv/|/dist/|\\\\.map$\")"
     ]
   }
 }
