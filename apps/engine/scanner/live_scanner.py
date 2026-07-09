@@ -134,6 +134,13 @@ def check_and_fire_signal(config, cache, last_fired_times):
             return
 
         signal_type = "BUY" if latest['signal'] == 1 else "SELL"
+
+        # Cash-equity rule: no overnight shorts. Only INTRADAY strategies may go SELL
+        # (MIS, squared off same day); swing/positional strategies are long-only.
+        if signal_type == "SELL" and hold_duration != "INTRADAY":
+            print(f"  [SKIP] {symbol} ({strategy_name}): swing/positional SELL suppressed (cannot hold short overnight in cash equity)")
+            return
+
         payload = {
             "stockId": stock_id,
             "strategyName": strategy_name,

@@ -137,3 +137,16 @@ STRATEGY_HOLD_DURATIONS = {
     "MTF_Alignment": "LONG_POSITIONAL",
 }
 
+# Cash-equity execution rule: only INTRADAY strategies may take short (SELL) positions
+# (MIS, squared off same day). Swing/positional strategies are LONG-ONLY — a short equity
+# position cannot be carried overnight without F&O / stock-lending. Any short signal from a
+# swing/positional strategy is therefore not executable and must be suppressed.
+STRATEGY_LONG_ONLY = {
+    name: STRATEGY_HOLD_DURATIONS.get(name, "UNKNOWN") != "INTRADAY"
+    for name in STRATEGY_REGISTRY
+}
+
+# Tag each strategy instance so BaseStrategy.run_backtest can enforce the long-only rule.
+for _name, _inst in STRATEGY_REGISTRY.items():
+    _inst.long_only = STRATEGY_LONG_ONLY[_name]
+

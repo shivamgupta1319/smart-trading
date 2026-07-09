@@ -59,7 +59,11 @@ Chosen path **(b)**. Log mode already validated order construction (#599: sim 15
 
 **Gates:**
 - **Gate A — valid token + funds. ✅ CLEARED 2026-07-09.** `fundlimit` → HTTP 200, `availabelBalance:10000`. Token auto-refreshes via TOTP (no manual rotation); manual token is fallback only.
-- **Gate B — SEBI algo tagging. ⏳ NOT formally confirmed — proceeded anyway.** Judged low-risk at this scale (own account, official personal DhanHQ API, few orders/day; tagging is largely broker-side). Confirm with Dhan as a follow-up; revisit before scaling frequency/size.
+- **Gate B — researched 2026-07-09. Tagging = non-issue; STATIC IP = real blocker.**
+  - *Tagging:* we run ~2–4 orders/**day**; SEBI threshold is 10 orders/**second**. Below-threshold → no algo registration, orders auto-tagged with a generic Algo-ID exchange/broker-side. No payload change. ✅
+  - *Static IP:* 🔴 Dhan v2.4 (SEBI, in force since Apr 1 2026): **"Static IP is required for all Order APIs."** `getIP` → error (none configured). work-pc egress = **103.59.75.14 (TATA Play consumer broadband → dynamic)**. `POST /v2/ip/setIP` **locks the IP for 7 days** → do NOT set a dynamic IP. IP APIs: `GET/POST /v2/ip/getIP|setIP|modifyIP`.
+  - *Also:* container→Dhan calls intermittently time out (flaky broadband) — reliability concern.
+  - **Plan:** (1) verify enforcement empirically — next live signal either rejects for IP (→ need static IP) or fills. (2) If reject → route order egress via a **VPS static IP** and `setIP` that. Chosen because robust + fixes flaky link; need to know user's cloud provider.
 
 **Sizing decision (2026-07-09):** validate Thu+Fri at the EXISTING `maxNotional=₹12,500/order` (~2.5x, half/half: ~15 HDFC + ~4 ADANIENT ≈ ₹24.5k both legs). Scale toward full ~5x Monday if clean. Drop the `DHAN_MAX_QTY=1` idea — the current config is already the right validation size. Pre-flight helper: `scratchpad/dhan-preflight.js` (one-shot token+fundlimit check inside the api container).
 
@@ -73,6 +77,23 @@ then `docker compose up -d api`. First real order = 1 share (~₹150–200 risk/
 **Residual risk accepted at 1-share scale:** `openPositions` is in-memory → api restart between entry & exit orphans the position (no exit order). Mitigant: MIS auto-squares at EOD (~15:20 IST); worst case ~₹200. **Defer DB persistence until qty > 1.**
 
 ---
+
+## Track 3 — Long-only swing rule (fixed 2026-07-09)
+
+**Bug:** hold duration was assigned per-strategy, direction-blind → a swing strategy (e.g. `Bollinger_Mean_Reversion`) could emit a SELL and get stamped MID_SWING = an overnight short, which is **not executable in cash equity**. Found via open trade #581 (HDFCBANK SELL/MID_SWING). Scope was tiny (1 such trade ever, ₹0 realized) and **never touched real money** (Dhan whitelist = EMA_RSI intraday only).
+
+**Rule enforced:** only INTRADAY strategies may short; swing/positional are **long-only**.
+- `strategies/__init__.py`: `STRATEGY_LONG_ONLY[name] = holdDuration != "INTRADAY"`; sets `inst.long_only` on each registry instance.
+- `strategies/base.py`: `run_backtest` drops `signal==-1` when `long_only` (metrics stay executable). Verified: short-emitting strategy 1 trade → 0.
+- `scanner/live_scanner.py`: suppresses SELL when `hold_duration != "INTRADAY"`.
+- Deployed: rebuilt+pushed engine image, `docker compose up -d engine scanner`. Containers healthy.
+- Cleanup: #581 closed at entry (₹0 P&L) with audit note.
+
+**Deferred (Slice 2, dormant):** Dhan CNC (delivery, no leverage) vs MIS (intraday) product selection. Not needed yet — sim has no leverage; swing not whitelisted for live. When a swing strategy IS whitelisted: pass `holdDuration` to `dhan.placeEntry` (available at `signals.service.ts:105`) and set `productType='CNC'` for non-INTRADAY (currently hardcoded `'INTRADAY'` in `dhan.service.ts` postOrder).
+
+**Follow-up (optional):** stored `BacktestReport` metrics for swing strategies were computed with phantom shorts — re-run backtests to refresh (likely small effect).
+
+**Uncommitted:** engine code changes are deployed (built from working tree) but not yet git-committed on `roadmap-v1`.
 
 ## Track 2 — v1 hygiene (DONE)
 
