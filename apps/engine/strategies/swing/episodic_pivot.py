@@ -62,30 +62,33 @@ class EpisodicPivotStrategy(BaseStrategy):
             # If we have an active gap, check consolidation
             if active_gap_idx != -1:
                 days_since_gap = i - active_gap_idx
-                
-                # Update consolidation high
-                if high > consolidation_high:
-                    consolidation_high = high
-                    
+
+                # Consolidation high from PRIOR bars only — exclude the current bar,
+                # otherwise close can never exceed it and no breakout can ever fire.
+                prior_high = consolidation_high
+
                 # If gap is filled (price drops below the gap day's low), invalidate
                 if close < consolidation_low:
                     active_gap_idx = -1
                     continue
-                    
-                # 2. Wait 3-5 days for consolidation, then look for breakout
-                if 3 <= days_since_gap <= 8:
-                    # Breakout above consolidation high
-                    if close > consolidation_high and closes[i-1] <= consolidation_high:
-                        signals[i] = 1
-                        # Stop loss at the bottom of the gap day or a 5% stop
-                        sl = max(consolidation_low, close * 0.95)
-                        stop_losses[i] = sl
-                        targets[i] = close + (close - sl) * 3
-                        # Reset
-                        active_gap_idx = -1
-                
-                # If too many days pass, invalidate
-                elif days_since_gap > 8:
+
+                # 2. Wait 3-8 days for consolidation, then look for a breakout
+                #    close above the prior consolidation high.
+                if 3 <= days_since_gap <= 8 and close > prior_high and closes[i-1] <= prior_high:
+                    signals[i] = 1
+                    # Stop loss at the bottom of the gap day or a 5% stop
+                    sl = max(consolidation_low, close * 0.95)
+                    stop_losses[i] = sl
+                    targets[i] = close + (close - sl) * 3
+                    active_gap_idx = -1  # Reset
+                    continue
+
+                # Otherwise keep tracking: extend the consolidation high with this bar.
+                if high > consolidation_high:
+                    consolidation_high = high
+
+                # If too many days pass without a breakout, invalidate
+                if days_since_gap > 8:
                     active_gap_idx = -1
 
         df['signal'] = signals

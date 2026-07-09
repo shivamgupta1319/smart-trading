@@ -119,8 +119,9 @@ def run_all_strategies(req: RunAllStrategiesRequest):
                 "metrics": metrics
             })
         except Exception as e:
-            # Skip if no history for that timeframe or other error
-            pass
+            # Skip if no history for that timeframe or other error — but LOG it so a
+            # broken strategy surfaces instead of silently showing fewer stocks.
+            print(f"  [BACKTEST-SKIP] {strategy_name} on stockId={stock_id}: {type(e).__name__}: {e}")
 
     return {
         "symbol": symbol,
@@ -160,8 +161,10 @@ def run_strategy_all_stocks(req: RunStrategyAllStocksRequest):
                 "symbol": symbol,
                 "metrics": metrics
             })
-        except Exception:
-            pass
+        except Exception as e:
+            # LOG instead of silently swallowing — a crashing strategy should be
+            # visible, not just missing from the results.
+            print(f"  [BACKTEST-SKIP] {req.strategy} on {symbol}: {type(e).__name__}: {e}")
 
     # Sort results by roiPercentage descending
     results.sort(key=lambda x: x['metrics']['roiPercentage'], reverse=True)

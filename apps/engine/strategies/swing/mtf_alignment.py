@@ -33,7 +33,16 @@ class MTFAlignmentStrategy(BaseStrategy):
             'Volume': 'sum'
         })
         
-        weekly_df['SMA_50_W'] = ta.sma(weekly_df['Close'], length=50)
+        weekly_sma = ta.sma(weekly_df['Close'], length=50)
+        # pandas_ta returns None when there aren't 50 weekly bars — degrade to no-signal
+        # instead of crashing on comparisons against None downstream.
+        if weekly_sma is None:
+            df = df.copy()
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
+            return df
+        weekly_df['SMA_50_W'] = weekly_sma
         weekly_df['SMA_50_W_Prev'] = weekly_df['SMA_50_W'].shift(1)
 
         weekly_mapping = weekly_df[['SMA_50_W_Prev']].copy()
@@ -42,13 +51,13 @@ class MTFAlignmentStrategy(BaseStrategy):
         weekly_reset = weekly_mapping.reset_index()
         
         merged = pd.merge_asof(
-            df_reset.sort_values('Date'),
-            weekly_reset.sort_values('Date'),
-            on='Date',
+            df_reset.sort_values('timestamp'),
+            weekly_reset.sort_values('timestamp'),
+            on='timestamp',
             direction='backward'
         )
-        
-        merged.set_index('Date', inplace=True)
+
+        merged.set_index('timestamp', inplace=True)
         df['SMA_50_W'] = merged['SMA_50_W_Prev']
 
         df['High_20'] = df['High'].rolling(window=20).max().shift(1)
