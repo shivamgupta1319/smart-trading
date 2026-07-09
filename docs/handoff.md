@@ -1,6 +1,6 @@
 # Handoff / Resume Doc — Dhan Live Execution + v1 Hygiene
 
-**Last updated:** 2026-07-08 (end of session, market closed)
+**Last updated:** 2026-07-09 (market open ~09:20 IST)
 **Branch:** `roadmap-v1` (all work committed here; not pushed to origin unless you push)
 **Design reference:** [dhan-live-execution.md](dhan-live-execution.md) · [performance-review-2026-07.md](performance-review-2026-07.md)
 
@@ -12,7 +12,7 @@ Two tracks in flight:
 1. **Dhan real-money execution** — Stage 1 (**log mode**) is **live on work-pc and validated**. It logs the exact real orders it *would* place for EMA_RSI on HDFCBANK/ADANIENT, without touching money. Stages remaining: sandbox → live.
 2. **v1 hygiene** — all 4 tasks (prune losers, symbol filter, swing time-stop, Telegram digest) are **done, deployed, and committed**. Prune + digest are verified live; the time-stop verifies at next market open.
 
-**Nothing is trading real money.** `DHAN_TRADING_MODE=log` (no orders placed).
+**🟢 LIVE (real money) since 2026-07-09 ~10:21 IST.** `DHAN_TRADING_MODE=live`, ₹10k funded (`availabelBalance:10000` confirmed), validating at ₹12,500/order (~2.5x, half/half). **Token auto-refresh WORKS** — TOTP seed was correct all along; the earlier "Invalid TOTP" was a stale 17h-old container holding the pre-update secret. App auto-mints a 24h token via TOTP + caches ~24h (**no daily manual rotation**); manual `DHAN_ACCESS_TOKEN` remains as fallback. Note: Dhan throttles token gen to once/2min (fine — cached 24h). Instant kill: set `DHAN_TRADING_MODE=off` + `docker compose up -d api`.
 
 ---
 
@@ -50,8 +50,27 @@ Two tracks in flight:
 - **Stage 3 (live):** fund ₹10–15K; confirm SEBI algo tagging w/ Dhan; flip `DHAN_TRADING_MODE=live`; reconcile fills vs sim ~1–2 weeks.
 - **Hardening before live:** persist `openPositions` (currently in-memory → lost on api restart); poll exit fills; store actual fill prices.
 
-### OPEN DECISION (for you)
-Stage 2 path: **(a)** full sandbox (needs developer.dhanhq.co signup), or **(b)** skip sandbox → log → **live at 1-share min** once funded.
+### DECISION MADE (2026-07-09): skip sandbox → live @ 1 share
+Chosen path **(b)**. Log mode already validated order construction (#599: sim 1538 → capped 15 ✅); sandbox only gives mock fills, so it's low added value. Go live at **1-share min qty** once funded.
+
+**No code change needed for 1-share:** `computeQty()` = `min(floor(maxNotional/price), maxQty)`, so `DHAN_MAX_QTY=1` caps every order at 1 share.
+
+**✅ TOTP AUTO-REFRESH FIXED (2026-07-09).** Initial "Invalid TOTP" was a red herring: the seed was correct (confirmed — our computed code matched the user's authenticator app), but the 17h-old container held the *pre-update* secret in memory. Re-testing `generateAccessToken` with the seed read straight from `.env` → HTTP 200, token minted (len 280). Restarted the container so it loads the correct seed; in-container gen now returns rate-limit ("once every 2 minutes"), i.e. TOTP accepted. **No daily token rotation needed.** `getToken()` order: cached (24h) → TOTP-generate → manual `DHAN_ACCESS_TOKEN` fallback. Our TOTP math verified vs RFC 6238 vector (287082); clock NTP-synced.
+
+**Gates:**
+- **Gate A — valid token + funds. ✅ CLEARED 2026-07-09.** `fundlimit` → HTTP 200, `availabelBalance:10000`. Token auto-refreshes via TOTP (no manual rotation); manual token is fallback only.
+- **Gate B — SEBI algo tagging. ⏳ NOT formally confirmed — proceeded anyway.** Judged low-risk at this scale (own account, official personal DhanHQ API, few orders/day; tagging is largely broker-side). Confirm with Dhan as a follow-up; revisit before scaling frequency/size.
+
+**Sizing decision (2026-07-09):** validate Thu+Fri at the EXISTING `maxNotional=₹12,500/order` (~2.5x, half/half: ~15 HDFC + ~4 ADANIENT ≈ ₹24.5k both legs). Scale toward full ~5x Monday if clean. Drop the `DHAN_MAX_QTY=1` idea — the current config is already the right validation size. Pre-flight helper: `scratchpad/dhan-preflight.js` (one-shot token+fundlimit check inside the api container).
+
+**Go-live runbook (once A+B clear).** On work-pc `infra/.env`:
+```
+DHAN_MAX_QTY=1
+DHAN_TRADING_MODE=live
+```
+then `docker compose up -d api`. First real order = 1 share (~₹150–200 risk/order), MIS/MARKET, EMA_RSI on HDFCBANK/ADANIENT only. Kill-switch at −₹1,000/day → auto-reverts to `off` + Telegram.
+
+**Residual risk accepted at 1-share scale:** `openPositions` is in-memory → api restart between entry & exit orphans the position (no exit order). Mitigant: MIS auto-squares at EOD (~15:20 IST); worst case ~₹200. **Defer DB persistence until qty > 1.**
 
 ---
 
@@ -61,26 +80,21 @@ Stage 2 path: **(a)** full sandbox (needs developer.dhanhq.co signup), or **(b)*
 |---|---|---|
 | Prune losers | Removed `Volume_Profile_POC`/`Fibonacci_Golden_Zone`/`VWAP_Supertrend` configs | **Live** (SQL applied; `infra/scripts/hygiene-prune-losers.sql`) |
 | Symbol filter | `ADANIPOWER` `isActive=false` (scanner filters on it) | **Live** |
-| Swing time-stop | `live_scanner.py` max-hold: SHORT_SWING 5d, MID_SWING 20d, INTRADAY/UNKNOWN 1d net | **Deployed** (verifies at open) |
+| Swing time-stop | `live_scanner.py` max-hold: SHORT_SWING 5d, MID_SWING 20d, INTRADAY/UNKNOWN 1d net | **✅ VERIFIED LIVE 2026-07-09** — flushed VEDL (26.9d, −₹1,452), 2× ADANIPOWER (15/16d, −₹905/−₹1,291) at 09:15 IST; 0 stale opens remain. (reason logged, not persisted to `Trade.notes`) |
 | Telegram digest | Daily 15:45 IST + weekly Fri 15:50; dependency-free scheduler | **Deployed + verified** (message sent) |
 
 ---
 
-## ▶ RESUME TOMORROW (2026-07-09, after 09:15 IST open)
+## ▶ STATUS (2026-07-09 ~09:20 IST) & NEXT
 
-1. **Confirm time-stop flushed the stale opens** (should auto-close on first cycle):
-   ```
-   ssh work-pc 'docker logs smart-trading-scanner 2>&1 | grep MAX_HOLD | tail'
-   ssh work-pc 'docker exec smart-trading-db psql -U trader -d smart_trading -c "SELECT symbol,\"holdDuration\",\"entryTime\"::date FROM \"Trade\" WHERE status='"'"'OPEN'"'"' AND \"entryTime\" < CURRENT_DATE - 3;"'
-   ```
-   Expect VEDL (26d) + 2× ADANIPOWER (14–15d) → CLOSED with reason `MAX_HOLD time-stop`.
-2. **Stage 1 Dhan — full entry+exit cycles** (log mode):
+1. ✅ **Time-stop verified** — see hygiene table. 0 stale opens remain.
+2. ⏳ **Stage-1 Dhan reconciliation — awaiting today's first whitelisted signal.** No `[dhan:LOG]` entries yet because no EMA_RSI HDFCBANK/ADANIENT signal has fired since the api restarted (~16:18 IST 2026-07-08, post-close). Those symbols fire ~2–4 signals/day, so data should accumulate today. Check:
    ```
    ssh work-pc 'docker logs smart-trading-api 2>&1 | grep "\[dhan:LOG\]" | tail -30'
    ```
-   Reconcile each `INTENDED ENTRY/EXIT` vs the sim `Trade` (side, symbol, qty=capped). This is the Stage-1 exit criterion.
-3. **Digest** — confirm the daily digest lands ~15:45 IST (verify it fires at the scheduled time, not just on restart).
-4. Then **decide Stage 2 path** (see OPEN DECISION above) and proceed.
+   Reconcile each `INTENDED ENTRY/EXIT` vs the sim `Trade` (side, symbol, qty=capped). Full entry+exit pair = Stage-1 exit criterion.
+3. ⏳ **Digest** — confirm daily digest lands ~15:45 IST (fires at scheduled time, not just on restart).
+4. ⛳ **Go live (decided: skip sandbox → live @ 1 share)** — blocked on **Gate A (fund ₹10–15K, balance=₹0)** + **Gate B (SEBI algo tagging w/ Dhan)**. Then run the go-live runbook above. Both gates are user actions.
 
 ---
 
