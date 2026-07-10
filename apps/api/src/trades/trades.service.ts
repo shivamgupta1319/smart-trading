@@ -31,13 +31,33 @@ export class TradesService {
     });
   }
 
-  async getPortfolioStats() {
+  /**
+   * Portfolio stats. When `range` is given, the P&L-derived metrics (totalPnl,
+   * win rate, profit factor, strategy breakdowns, trade counts) are scoped to
+   * trades CLOSED within [range.from, range.to) by exitTime — used by the daily/
+   * weekly Telegram digests. Account-level fields (openTrades, currentCapital,
+   * initialCapital) always reflect the full all-time state regardless of range.
+   * With no range, output is identical to the all-time behaviour (used by /stats).
+   */
+  async getPortfolioStats(range?: { from: Date; to: Date }) {
     const allTrades = await this.prisma.trade.findMany({
       orderBy: { entryTime: 'asc' },
     });
 
-    const closedTrades = allTrades.filter((t) => t.status === 'CLOSED');
+    const allClosed = allTrades.filter((t) => t.status === 'CLOSED');
     const openTrades = allTrades.filter((t) => t.status === 'OPEN');
+
+    // All-time realized P&L drives current capital (account-level, never scoped).
+    const allTimePnl = allClosed.reduce((sum, t) => sum + (t.pnl || 0), 0);
+
+    // Period-scoped set: trades closed within the range (by exitTime). No range → all closed.
+    const closedTrades = range
+      ? allClosed.filter((t) => {
+          if (!t.exitTime) return false;
+          const et = new Date(t.exitTime).getTime();
+          return et >= range.from.getTime() && et < range.to.getTime();
+        })
+      : allClosed;
 
     const totalPnl = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
     const wins = closedTrades.filter((t) => t.outcome === 'WIN');
@@ -146,8 +166,9 @@ export class TradesService {
 
     return {
       totalTrades: allTrades.length,
-      openTrades: openTrades.length,
+      openTrades: openTrades.length, // all-time (account-level)
       closedTrades: closedTrades.length,
+      periodTradeCount: closedTrades.length, // # closed trades in range (all closed when no range)
       totalPnl: Math.round(totalPnl * 100) / 100,
       winRate: Math.round(winRate * 100) / 100,
       wins: wins.length,
@@ -161,7 +182,7 @@ export class TradesService {
       equityCurve,
       holdDurationStats,
       initialCapital: 100000,
-      currentCapital: Math.round((100000 + totalPnl) * 100) / 100,
+      currentCapital: Math.round((100000 + allTimePnl) * 100) / 100, // all-time (account-level)
     };
   }
 

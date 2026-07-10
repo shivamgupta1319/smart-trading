@@ -260,7 +260,7 @@ export class TelegramService {
   }
 
   async sendPerformanceDigest(data: {
-    period: 'DAILY' | 'WEEKLY';
+    period: 'DAILY' | 'WEEKLY' | 'OVERALL';
     stats: {
       totalPnl: number;
       winRate: number;
@@ -279,6 +279,8 @@ export class TelegramService {
       }[];
     };
     staleOpens: number;
+    tradeCount?: number; // # closed trades in the period; 0 → no-activity message
+    rangeLabel?: string; // e.g. "10 Jul 2026" or "06 Jul 2026 – 10 Jul 2026"
   }) {
     if (!this.enabled) return;
 
@@ -292,20 +294,44 @@ export class TelegramService {
       )
       .join('\n');
 
+    const headers: Record<string, string> = {
+      DAILY: '📊 <b>DAILY DIGEST — Today</b>',
+      WEEKLY: '📊 <b>WEEKLY DIGEST — This Week</b>',
+      OVERALL: '📊 <b>OVERALL DIGEST — All-Time</b>',
+    };
+    // Period performance block (or a friendly note on a flat period).
+    const noActivity = data.tradeCount === 0;
+    const perfBlock = noActivity
+      ? [
+          `😴 <b>No closed trades ${
+            data.period === 'WEEKLY'
+              ? 'this week'
+              : data.period === 'DAILY'
+                ? 'today'
+                : 'yet'
+          }.</b>`,
+        ]
+      : [
+          `${pnlEmoji} <b>Net P&L:</b> ₹${s.totalPnl.toFixed(0)}`,
+          `🎯 <b>Win Rate:</b> ${s.winRate}% (${s.wins}W / ${s.losses}L)`,
+          `📊 <b>Profit Factor:</b> ${s.profitFactor}`,
+          ``,
+          `🏆 <b>Top strategies:</b>`,
+          top || '—',
+        ];
+
     const message = [
-      `📊 <b>${data.period} PERFORMANCE DIGEST</b>`,
+      headers[data.period] || `📊 <b>${data.period} PERFORMANCE DIGEST</b>`,
+      data.rangeLabel ? `🗓 <i>${data.rangeLabel}</i>` : null,
       ``,
-      `${pnlEmoji} <b>Net P&L:</b> ₹${s.totalPnl.toFixed(0)}`,
+      ...perfBlock,
+      ``,
+      // Account snapshot — always current/all-time regardless of period.
       `💼 <b>Capital:</b> ₹${s.currentCapital.toFixed(0)} / ₹${s.initialCapital.toFixed(0)}`,
-      `🎯 <b>Win Rate:</b> ${s.winRate}% (${s.wins}W / ${s.losses}L)`,
-      `📊 <b>Profit Factor:</b> ${s.profitFactor}`,
       `📦 <b>Open Positions:</b> ${s.openTrades}`,
       data.staleOpens > 0
         ? `⚠️ <b>Stale opens (≥5d):</b> ${data.staleOpens}`
         : null,
-      ``,
-      `🏆 <b>Top strategies:</b>`,
-      top || '—',
       ``,
       `⏰ ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
     ]

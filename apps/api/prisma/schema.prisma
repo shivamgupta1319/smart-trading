@@ -131,3 +131,15 @@ model Trade {
   @@index([status])
   @@index([strategyName])
 }
+
+// Restart-safe idempotency for scheduled Telegram digests. One row = one digest
+// already sent for a given period + IST bucket key; the unique constraint is the
+// atomic "already sent" lock (survives container restarts, unlike in-memory guards).
+model SentDigest {
+  id        Int      @id @default(autoincrement())
+  period    String   // "DAILY" | "WEEKLY" | "OVERALL"
+  periodKey String   // IST bucket: DAILY=YYYY-MM-DD, WEEKLY=Monday date, OVERALL=Friday date
+  sentAt    DateTime @default(now())
+
+  @@unique([period, periodKey])
+}
