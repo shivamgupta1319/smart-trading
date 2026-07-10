@@ -59,7 +59,7 @@ Chosen path **(b)**. Log mode already validated order construction (#599: sim 15
 
 **Gates:**
 - **Gate A — valid token + funds. ✅ CLEARED 2026-07-09.** `fundlimit` → HTTP 200, `availabelBalance:10000`. Token auto-refreshes via TOTP (no manual rotation); manual token is fallback only.
-- **Gate B — researched 2026-07-09. Tagging = non-issue; STATIC IP = real blocker.**
+- **Gate B — 🟢 RESOLVED 2026-07-10 (~16:10 IST) via TrueIP static IPv6.** Was confirmed-failed at 12:27 IST (signal #622 HDFCBANK SELL rejected `DH-905 Invalid IP`, clean — no fill/position/P&L). Fixed by routing the api's Dhan egress through **TrueIP.in** (free dedicated static IPv6 `2600:3c16:e001:3d::2a8`, Mumbai). `setIP` PRIMARY done; `getIP` → `detectedIP==primaryIP`, `ipMatchStatus=PRIMARY_MATCH`, **`ordersAllowed:true`**. IP locked until 2026-07-16. Details ↓
   - *Tagging:* we run ~2–4 orders/**day**; SEBI threshold is 10 orders/**second**. Below-threshold → no algo registration, orders auto-tagged with a generic Algo-ID exchange/broker-side. No payload change. ✅
   - *Static IP:* 🔴 Dhan v2.4 (SEBI, in force since Apr 1 2026): **"Static IP is required for all Order APIs."** `getIP` → error (none configured). work-pc egress = **103.59.75.14 (TATA Play consumer broadband → dynamic)**. `POST /v2/ip/setIP` **locks the IP for 7 days** → do NOT set a dynamic IP. IP APIs: `GET/POST /v2/ip/getIP|setIP|modifyIP`.
   - *Also:* container→Dhan calls intermittently time out (flaky broadband) — reliability concern.
@@ -105,6 +105,25 @@ then `docker compose up -d api`. First real order = 1 share (~₹150–200 risk/
 | Telegram digest | Daily 15:45 IST + weekly Fri 15:50; dependency-free scheduler | **Deployed + verified** (message sent) |
 
 ---
+
+## ▶ FRIDAY 2026-07-10 CLOSE — Gate B RESOLVED via TrueIP static IPv6 🟢
+
+**Arc of the day:** live mode fired its first real order at **12:27 IST** (signal #622, HDFCBANK EMA_RSI SELL; sim #619, sim qty 930 → Dhan-capped 15 ✅) → Dhan **rejected `DH-905 Invalid IP`** (benign: no fill/position/P&L). Confirmed Gate B (SEBI static-IP mandate, all brokers, since Apr 1 2026 — switching broker does NOT help). Solved same day.
+
+**Solution shipped: static-IP egress via TrueIP.in (free dedicated static IPv6).**
+- **Why TrueIP:** ruled out company boxes (off-limits), router/ISP static IP (TATA Play consumer = dynamic public IP; router only sets LAN), paid UPI VPS (₹700/mo too heavy vs ₹10k), Cloudflare (dedicated egress = Enterprise-paid; WARP rotates), **Oracle Free Tier (blocked on card-AVS "max attempts" lock)**. Discovery: Dhan whitelists **IPv6** + its endpoints are dual-stack → TrueIP gives a free dedicated static IPv6 in Mumbai as an HTTP CONNECT proxy.
+- **TrueIP acct (Shivam):** portal.trueip.in · egress IPv6 **`2600:3c16:e001:3d::2a8`** · proxy `ipv6-mumbai.trueip.in:10680` · free, "never rotated", valid to 2126.
+- **Code (committed? NO — uncommitted on roadmap-v1):** `apps/api/src/dhan/dhan.service.ts` now routes ALL Dhan calls (token-gen + order + fill-read) through a shared axios instance bound to `HttpsProxyAgent` when **`DHAN_HTTP_PROXY`** is set (gated; no-op if unset). Added dep `https-proxy-agent@^7`. Added `DHAN_HTTP_PROXY` passthrough to `infra/docker-compose.yml` (repo + work-pc, `.bak` saved).
+- **Secret:** `DHAN_HTTP_PROXY=http://u680_b1eaa181:<pass>@ipv6-mumbai.trueip.in:10680` set in work-pc `infra/.env` (and local `.env`). NOT committed.
+- **Deployed & verified 16:04 IST:** boot log `[dhan] egress via static-IP proxy → …trueip.in:10680`; in-container egress test → `EGRESS_IP 2600:3c16:e001:3d::2a8`; **`setIP` PRIMARY = SUCCESS**; `getIP` → `ordersAllowed:true`, `PRIMARY_MATCH`, IP locked until **2026-07-16**.
+
+**▶ NEXT ACTION (Monday 07-13):** re-arm the order watcher at 09:15 IST open — the first EMA_RSI HDFCBANK/ADANIENT signal is now the **first real fill** (no more DH-905):
+```
+ssh work-pc 'timeout 21600 docker logs -f --since 1m smart-trading-api 2>&1 | grep -m1 -E "\[dhan:live\] (ENTRY|EXIT) (placed|FAILED)"'
+```
+`ENTRY placed` = 🎉 first real trade → reconcile fill vs sim. `ENTRY FAILED` → read error (if TrueIP proxy down: orders fail *safe*, no bypass; check TrueIP dashboard / `docker logs` for proxy errors). Watch kill-switch (−₹1,000/day → auto-off + Telegram).
+
+**Resilience notes:** if TrueIP dies, orders fail safe (app only egresses via proxy — no silent bypass). Recovery options: (a) fix/replace proxy creds in `.env`; (b) after 2026-07-16, `setIP` a new IP. SECONDARY slot is free — could later register a fallback IP. `openPositions` still in-memory (api restart between entry/exit orphans a position; MIS auto-squares EOD; defer DB persistence until qty>1). [dhan-static-ip-oracle-runbook.md](dhan-static-ip-oracle-runbook.md) is now SUPERSEDED (Oracle abandoned).
 
 ## ▶ FRIDAY 2026-07-10 RESUME (end of Thu 07-09)
 

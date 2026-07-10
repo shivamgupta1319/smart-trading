@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TelegramService } from '../telegram/telegram.service';
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import * as crypto from 'crypto';
 
 /**
@@ -54,6 +55,11 @@ export class DhanService {
   private readonly maxOrdersPerDay: number;
   private readonly maxDailyLoss: number; // rupees; trips kill-switch
 
+  // Shared HTTP client for ALL Dhan calls. When DHAN_HTTP_PROXY is set, every request
+  // (token generation AND order placement) egresses through the static-IP proxy — Dhan
+  // requires the session/token to originate from the same whitelisted IP as the order.
+  private readonly http: AxiosInstance;
+
   // runtime state
   private readonly openPositions = new Map<number, OpenPosition>(); // key = signalId
   private cachedToken?: { token: string; expiresAtMs: number };
@@ -77,6 +83,16 @@ export class DhanService {
     this.maxQty = Number(this.config.get('DHAN_MAX_QTY') ?? 20);
     this.maxOrdersPerDay = Number(this.config.get('DHAN_MAX_ORDERS_PER_DAY') ?? 20);
     this.maxDailyLoss = Number(this.config.get('DHAN_MAX_DAILY_LOSS') ?? 1000);
+
+    // Static-IP egress: route every Dhan request through the proxy when configured.
+    const proxyUrl = this.config.get<string>('DHAN_HTTP_PROXY');
+    if (proxyUrl) {
+      this.http = axios.create({ httpsAgent: new HttpsProxyAgent(proxyUrl), proxy: false });
+      const masked = proxyUrl.replace(/\/\/[^@]*@/, '//***@'); // never log credentials
+      this.logger.log(`[dhan] egress via static-IP proxy → ${masked}`);
+    } else {
+      this.http = axios.create();
+    }
 
     this.logger.log(
       `DhanService mode=${this.mode} | whitelist=${ALLOWED_STRATEGY}:{${Object.keys(
@@ -241,7 +257,7 @@ export class DhanService {
       securityId: SECURITY_IDS[o.symbol],
       quantity: String(o.qty),
     };
-    const res = await axios.post(`${this.baseUrl}/orders`, body, {
+    const res = await this.http.post(`${this.baseUrl}/orders`, body, {
       headers: { 'access-token': token, 'Content-Type': 'application/json' },
       timeout: 10000,
     });
@@ -252,7 +268,7 @@ export class DhanService {
   private async getFillPrice(orderId: string): Promise<number | undefined> {
     try {
       const token = await this.getToken();
-      const res = await axios.get(`${this.baseUrl}/orders/${orderId}`, {
+      const res = await this.http.get(`${this.baseUrl}/orders/${orderId}`, {
         headers: { 'access-token': token },
         timeout: 10000,
       });
@@ -289,7 +305,7 @@ export class DhanService {
         `dhanClientId=${encodeURIComponent(this.clientId as string)}` +
         `&pin=${encodeURIComponent(this.pin as string)}` +
         `&totp=${encodeURIComponent(totp)}`;
-      const res = await axios.post(
+      const res = await this.http.post(
         `https://auth.dhan.co/app/generateAccessToken?${qs}`,
         null,
         { timeout: 10000 },
