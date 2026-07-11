@@ -85,10 +85,13 @@ interface PortfolioStats {
   avgLoss: number;
   profitFactor: number;
   bestStrategy: string;
+  bestCell: ({ symbol: string; strategy: string } & EdgeMetrics) | null;
+  leaderboard: ({ symbol: string; strategy: string } & EdgeMetrics)[];
   strategyBreakdown: ({ strategy: string } & EdgeMetrics)[];
   stockWiseStrategyBreakdown: ({ symbol: string; strategy: string } & EdgeMetrics)[];
   equityCurve: { time: number; value: number }[];
   holdDurationStats: Record<string, { trades: number; pnl: number }>;
+  windowDays: number | null;
 }
 
 export function Portfolio() {
@@ -99,6 +102,7 @@ export function Portfolio() {
   const [holdFilter, setHoldFilter] = useState<string>('ALL');
   const [livePrices, setLivePrices] = useState<Record<string, number | null>>({});
   const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'ANALYSIS' | 'RISK'>('PORTFOLIO');
+  const [windowDays, setWindowDays] = useState<number | null>(null);
   const [risk, setRisk] = useState<any | null>(null);
   const [riskLoading, setRiskLoading] = useState(false);
 
@@ -161,8 +165,11 @@ export function Portfolio() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const statsUrl = windowDays
+        ? `${API}/api/trades/stats?window=${windowDays}`
+        : `${API}/api/trades/stats`;
       const [statsRes, tradesRes] = await Promise.all([
-        axios.get(`${API}/api/trades/stats`),
+        axios.get(statsUrl),
         axios.get(`${API}/api/trades`),
       ]);
       setStats(statsRes.data);
@@ -173,7 +180,7 @@ export function Portfolio() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [windowDays]);
 
   useEffect(() => {
     fetchData();
@@ -589,6 +596,70 @@ export function Portfolio() {
               </div>
             </div>
           )}
+
+          {/* Leaderboard — best (stock × strategy) cells by fund growth */}
+          <div className="card" style={{ marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <h3 className="card-title" style={{ margin: 0 }}>🏆 Leaderboard — best stock × strategy</h3>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                {([['All', null], ['90d', 90], ['30d', 30]] as const).map(([label, days]) => (
+                  <button
+                    key={label}
+                    onClick={() => setWindowDays(days)}
+                    className="tab-btn"
+                    style={{
+                      padding: '0.3rem 0.7rem', borderRadius: '6px', cursor: 'pointer',
+                      border: '1px solid var(--border-light)', fontSize: '0.8rem',
+                      background: windowDays === days ? 'var(--cyan)' : 'transparent',
+                      color: windowDays === days ? '#000' : 'var(--text-muted)',
+                    }}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+            <p className="page-subtitle" style={{ marginTop: 0, marginBottom: '1rem', fontSize: '0.8rem' }}>
+              Each cell trades its own ₹10k fund (compounding). Ranked by fund growth among reliable
+              pairs (≥ {CONFIDENCE_MIN_TRADES} trades){windowDays ? ` over the last ${windowDays} days` : ''}.
+            </p>
+            {stats.leaderboard && stats.leaderboard.length > 0 ? (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th><th>Symbol</th><th>Strategy</th>
+                      <th style={{ textAlign: 'right' }}>Fund (₹10k →)</th>
+                      <th style={{ textAlign: 'right' }}>Growth</th>
+                      <th style={{ textAlign: 'right' }}>Avg R</th>
+                      <th style={{ textAlign: 'right' }}>Win Rate</th>
+                      <th style={{ textAlign: 'right' }}>Trades</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.leaderboard.slice(0, 15).map((s, i) => (
+                      <tr key={`lb-${s.symbol}-${s.strategy}`}>
+                        <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                        <td><span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{s.symbol}</span></td>
+                        <td><span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)' }}>{s.strategy}</span></td>
+                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>₹{s.cellCapital.toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign: 'right', color: s.cellRoiPct >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                          {s.cellRoiPct >= 0 ? '+' : ''}{s.cellRoiPct}%
+                        </td>
+                        <td style={{ textAlign: 'right', color: s.avgRMultiple >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>
+                          {s.avgRMultiple >= 0 ? '+' : ''}{s.avgRMultiple}R
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{s.winRate}%</td>
+                        <td style={{ textAlign: 'right' }}>{s.trades}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="page-subtitle" style={{ margin: 0 }}>
+                No reliable cells yet — need ≥ {CONFIDENCE_MIN_TRADES} closed trades per pair. Keep forward-testing.
+              </p>
+            )}
+          </div>
 
           {/* Stock-wise Strategy Performance — decision-grade edge metrics */}
           {stats.stockWiseStrategyBreakdown && stats.stockWiseStrategyBreakdown.length > 0 && (

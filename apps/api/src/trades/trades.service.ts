@@ -38,16 +38,22 @@ export class TradesService {
     });
   }
 
-  async getPortfolioStats() {
+  async getPortfolioStats(windowDays?: number) {
     const allTrades = await this.prisma.trade.findMany({
       orderBy: { entryTime: 'asc' },
     });
 
     type AnyTrade = (typeof allTrades)[number];
-    const closedTrades = allTrades.filter((t) => t.status === 'CLOSED');
+    // Optional rolling window (e.g. last 90 days) — filter CLOSED trades by exit time so
+    // the testing-lab leaderboard can be judged over a recent period. Open positions
+    // always reflect the current live book regardless of window.
+    const cutoff = windowDays && windowDays > 0 ? Date.now() - windowDays * 86400000 : null;
+    const inWindow = (t: AnyTrade) =>
+      !cutoff || new Date(t.exitTime || t.entryTime).getTime() >= cutoff;
+    const closedTrades = allTrades.filter((t) => t.status === 'CLOSED' && inWindow(t));
     const openTrades = allTrades.filter((t) => t.status === 'OPEN');
     // No funding gate anymore — every trade is real, so portfolio metrics AND the
-    // per-cell edge breakdowns are computed over ALL closed trades.
+    // per-cell edge breakdowns are computed over ALL closed trades (in the window).
 
     const pnlOf = (t: { pnl: unknown }) => toNum(t.pnl as never);
     const riskOf = (t: { riskAmount: unknown }) => toNum(t.riskAmount as never);
@@ -175,6 +181,14 @@ export class TradesService {
       })
       .sort((a, b) => b.totalPnl - a.totalPnl);
 
+    // Leaderboard: rank RELIABLE (≥ MIN_TRADES) cells by how much their ₹10k fund grew
+    // (cellRoiPct), tie-broken by risk-adjusted edge (avgRMultiple). This is the list the
+    // user picks the single best stock+strategy from after the forward-test.
+    const leaderboard = stockWiseStrategyBreakdown
+      .filter((c) => c.reliable)
+      .sort((a, b) => b.cellRoiPct - a.cellRoiPct || b.avgRMultiple - a.avgRMultiple);
+    const bestCell = leaderboard[0] || null;
+
     // Hold duration breakdown (all closed)
     const holdDurationStats: Record<string, { trades: number; pnl: number }> = {};
     for (const t of closedTrades) {
@@ -203,10 +217,13 @@ export class TradesService {
       avgLoss: round2(avgLoss),
       profitFactor: round2(profitFactor),
       bestStrategy,
+      bestCell,
+      leaderboard,
       strategyBreakdown,
       stockWiseStrategyBreakdown,
       equityCurve,
       holdDurationStats,
+      windowDays: windowDays || null,
     };
   }
 

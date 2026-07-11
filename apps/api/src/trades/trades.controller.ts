@@ -30,8 +30,11 @@ export class TradesController {
   }
 
   @Get('stats')
-  getStats() {
-    return this.tradesService.getPortfolioStats();
+  getStats(@Query('window') window?: string) {
+    const windowDays = window ? parseInt(window) : undefined;
+    return this.tradesService.getPortfolioStats(
+      windowDays && windowDays > 0 ? windowDays : undefined,
+    );
   }
 
   @Get('risk')
