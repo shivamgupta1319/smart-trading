@@ -214,10 +214,23 @@ function RegimeChip() {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    axios
-      .get(`${API}/api/engine/regime`)
-      .then((r) => setRegime(r.data))
-      .catch(() => setRegime(null));
+    let alive = true;
+    const load = () =>
+      axios
+        .get(`${API}/api/engine/regime`)
+        .then((r) => alive && setRegime(r.data))
+        .catch(() => alive && setRegime(null));
+    load();
+    // Refresh so the chip isn't frozen on the value from page-load: poll every 5 min
+    // and whenever the tab regains focus.
+    const id = setInterval(load, 5 * 60 * 1000);
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
 
   if (!regime) return null;

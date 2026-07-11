@@ -54,8 +54,15 @@ def _classify(df: pd.DataFrame) -> dict:
     e50 = float(ema50.iloc[-1]) if ema50 is not None and not np.isnan(ema50.iloc[-1]) else last
     e200 = float(ema200.iloc[-1]) if ema200 is not None and not np.isnan(ema200.iloc[-1]) else last
 
+    # Volatility is RELATIVE to the instrument's own year, not a fixed 3% that a slow
+    # index never reaches (which pinned the label to TRENDING_UP forever). VOLATILE fires
+    # when ATR% is in the top 15% of its 1-year range (and above a 1.5% floor), or on an
+    # absolute violent-tape threshold.
+    atr_pct_series = (atr / close * 100).dropna()
+    atr_hi = float(atr_pct_series.quantile(0.85)) if len(atr_pct_series) > 20 else 3.0
+
     # Volatility takes precedence — a violent tape overrides trend/range labels.
-    if atr_pct >= 3.0:
+    if atr_pct >= 3.0 or (atr_pct >= atr_hi and atr_pct >= 1.5):
         regime = "VOLATILE"
     elif adx >= 25:
         regime = "TRENDING_UP" if dmp >= dmn and last >= e50 else "TRENDING_DOWN"
