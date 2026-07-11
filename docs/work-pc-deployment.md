@@ -27,7 +27,7 @@ source, it only pulls prebuilt images.
 | Container | Image | Host port | Role |
 |---|---|---|---|
 | `smart-trading-v2-db` | `postgres:16-alpine` | `5471` → 5432 | Postgres (`trader`/`trader`/`smart_trading`), volume `postgres_data` |
-| `smart-trading-v2-api` | `…/smart-trading-v2-api` | `3001` → 3000 | NestJS API + WebSocket + Telegram + funding/slot bookkeeping |
+| `smart-trading-v2-api` | `…/smart-trading-v2-api` | `3001` → 3000 | NestJS API + WebSocket + Telegram + per-cell fund bookkeeping |
 | `smart-trading-v2-engine` | `…/smart-trading-v2-engine` | `8001` → 8000 | Python backtest / auto-select engine |
 | `smart-trading-v2-scanner` | `…/smart-trading-v2-engine` (`python scanner/live_scanner.py`) | — | Live signal generator during NSE hours |
 | `smart-trading-v2-scheduler` | `…/smart-trading-v2-engine` (`python scheduler/fetch_scheduler.py`) | — | Daily after-close yfinance data fetch (16:00 IST) + on-start backfill |
@@ -93,8 +93,10 @@ everything via `${VAR}` with safe defaults. After editing `.env`, apply with
 
 - **Data source** — `DATA_SOURCE=yfinance` on this deploy, so scanner + scheduler pull candles
   from yfinance; the `DHAN_*`/`UPSTOX_*` vars are dormant (v2 is pure paper-trading).
-- **Capital model** — `INITIAL_CAPITAL=100000`, 10 equal-weight ₹10k slots
-  (`MAX_CONCURRENT_POSITIONS=10`). FUNDED iff a free slot exists; else SHADOW.
+- **Capital model** — strategy-testing lab: each (stock × strategy) cell owns its own
+  ₹10k fund (`BASE_CELL_CAPITAL=10000`) that compounds with that cell's realized P&L.
+  A trade deploys cellCapital × leverage of notional (intraday 5×, swing/delivery 1×).
+  No funding gate — every selected-strategy signal is a real mock-money trade.
 - **Telegram / LLM / CORS** — `TELEGRAM_*`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `CORS_ORIGINS`.
 
 ---
@@ -106,14 +108,38 @@ everything via `${VAR}` with safe defaults. After editing `.env`, apply with
 ssh work-pc 'cd /home/work/workspace/smart-trading-v2/infra && docker compose ps'
 ssh work-pc 'docker logs -f --since 1m smart-trading-v2-scanner'
 
-# DB query (funded closed net P&L this month)
+# DB query (closed net P&L)
 ssh work-pc 'docker exec smart-trading-v2-db psql -U trader -d smart_trading -c \
-  "SELECT count(*), round(sum(pnl),2) FROM \"Trade\" WHERE status='"'"'CLOSED'"'"' AND \"fundingStatus\"='"'"'FUNDED'"'"';"'
+  "SELECT count(*), round(sum(pnl),2) FROM \"Trade\" WHERE status='"'"'CLOSED'"'"';"'
 
 # Prune chronically-losing strategies from live scanning (review first — see the SQL header)
 ssh work-pc 'docker exec -i smart-trading-v2-db psql -U trader -d smart_trading' \
   < infra/scripts/hygiene-prune-losers.sql
 ```
+
+---
+
+## One-time: deploying the strategy-testing-lab redesign
+
+The per-cell ₹10k model, long-only-swing, dropped `fundingStatus`, and `Stock.sector`
+ship together. Deploy order (after `build-and-push.sh` for all three images + `deploy.sh`):
+
+```bash
+# 1. Apply the new Prisma migrations (drop fundingStatus, add Stock.sector) inside the api container
+ssh work-pc 'docker exec smart-trading-v2-api npx prisma migrate deploy'
+
+# 2. Start clean — old trades used the old sizing/funding, so the per-cell leaderboard
+#    is only meaningful from a fresh book. Wipes Trade+LiveSignal+ActiveConfiguration.
+curl -X POST http://<work-pc>:3001/api/admin/reset -H "x-api-key: $API_KEY"
+
+# 3. Repopulate ActiveConfiguration (now long-only) so the scanner has cells to trade
+curl -X POST http://<work-pc>:8001/api/engine/auto-select -H "x-api-key: $API_KEY"
+
+# 4. Backfill sector tags on the tradeable universe (fixes risk-engine "Unknown")
+ssh work-pc 'docker exec smart-trading-v2-engine python populate_stock_sectors.py'
+```
+
+Then forward-test ~3 months and pick the top cell from the Portfolio → Leaderboard.
 
 ---
 

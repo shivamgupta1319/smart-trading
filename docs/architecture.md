@@ -119,18 +119,20 @@ POST  /api/engine/run-monte-carlo      # bootstrapped ROI/drawdown distribution
 WS    TRADE_UPDATE                      # CLOSED / PARTIAL / SL_UPDATED
 ```
 
-**Capital model (authentic ₹1L account).** Sizing is 2%-risk per trade, capped to the
-trade's buying power (`INITIAL_CAPITAL × leverage`; INTRADAY 5×, delivery 1×) so a tight-stop
-stock can't size into an un-fundable notional. At entry a trade is **FUNDED** only if its
-margin (`notional ÷ leverage`) fits remaining cash **and** total open risk (heat) stays ≤ 6%
-(`MAX_HEAT_PCT`); otherwise it's a **SHADOW** trade — recorded and tracked for would-be P&L
-but excluded from portfolio ROI (`Trade.fundingStatus`). Leverage never changes the per-trade
-loss (the stop does) — only how much cash a position locks up. `GET /api/trades/risk` reports
-`marginUsed / marginUsedPct / availableCash / notional / shadowPositions`;
-`GET /api/trades/stats` returns `roiPct` (funded only) plus, per (stock×strategy) cell,
-`expectancy / avgRMultiple / profitFactor / maxDrawdown / confidence / reliable` (research
-uses funded+shadow). Constants live in `apps/api/src/common/risk.ts`
-(`LEVERAGE_INTRADAY`, `LEVERAGE_DELIVERY`, `MAX_HEAT_PCT`, `MIN_TRADES_FOR_CONFIDENCE`).
+**Capital model (per-cell testing lab).** Each (stock × strategy) cell owns its own ₹10k
+fund (`BASE_CELL_CAPITAL`) that COMPOUNDS with that cell's realized P&L. A trade deploys
+`cellCapital × leverage` of notional (INTRADAY 5×, delivery/swing 1×), sized
+`qty = floor(cellCapital × leverage / entry)`. There is **no funding gate** — every
+selected-strategy signal is a real mock-money trade (the old FUNDED/SHADOW split and
+`Trade.fundingStatus` were removed). Leverage never changes the per-trade loss (the stop
+does) — only the deployed notional. `GET /api/trades/risk` reports
+`marginUsed / marginUsedPct / notional / totalHeat / heatPct` against the deployed base
+(₹10k × open cells); `GET /api/trades/stats?window=<days>` returns `netPnl / investedNow /
+roiPct` plus, per (stock×strategy) cell, `cellCapital / cellRoiPct / expectancy /
+avgRMultiple / profitFactor / maxDrawdown / confidence / reliable`, and a `leaderboard` /
+`bestCell` ranked by fund growth. Constants live in `apps/api/src/common/risk.ts`
+(`BASE_CELL_CAPITAL`, `LEVERAGE_INTRADAY`, `LEVERAGE_DELIVERY`, `MAX_HEAT_PCT`,
+`MIN_TRADES_FOR_CONFIDENCE`).
 
 **Scanner UX.** `/scanner` is split into two tabs: **Live Scanner** (connection status +
 active signals) and **Monitored Stocks** (a table of each monitored stock×strategy with its
