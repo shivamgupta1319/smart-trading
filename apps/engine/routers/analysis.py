@@ -1,4 +1,8 @@
 import os
+import asyncio
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
+
 import httpx
 import yfinance as yf
 from fastapi import APIRouter, HTTPException
@@ -6,6 +10,53 @@ from pydantic import BaseModel
 from datetime import datetime
 
 router = APIRouter()
+
+# Indian market RSS feeds — free, no API key. yfinance's .news is thin/stale for India
+# (~1 item/day over 5 tickers), so we aggregate several publishers instead. Env-tunable.
+NEWS_RSS_FEEDS = [
+    ("Moneycontrol", "https://www.moneycontrol.com/rss/latestnews.xml"),
+    ("Moneycontrol Markets", "https://www.moneycontrol.com/rss/marketreports.xml"),
+    ("Economic Times", "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"),
+    ("Business Standard", "https://www.business-standard.com/rss/markets-106.rss"),
+    ("Livemint", "https://www.livemint.com/rss/markets"),
+]
+if os.getenv("NEWS_RSS_FEEDS"):
+    # "Name|url,Name|url" override.
+    NEWS_RSS_FEEDS = [
+        (p.split("|", 1)[0], p.split("|", 1)[1])
+        for p in os.getenv("NEWS_RSS_FEEDS", "").split(",")
+        if "|" in p
+    ]
+NEWS_MAX_ITEMS = int(os.getenv("NEWS_MAX_ITEMS", "36"))
+
+
+async def _fetch_rss(client: httpx.AsyncClient, source: str, url: str):
+    """Fetch one RSS feed and return a list of parsed article dicts (best-effort)."""
+    items = []
+    try:
+        resp = await client.get(url, timeout=8, follow_redirects=True)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        for it in root.iter("item"):
+            title = (it.findtext("title") or "").strip()
+            if not title:
+                continue
+            link = (it.findtext("link") or "").strip()
+            pub_raw = (it.findtext("pubDate") or "").strip()
+            try:
+                ts = int(parsedate_to_datetime(pub_raw).timestamp()) if pub_raw else 0
+            except (TypeError, ValueError):
+                ts = 0
+            items.append({
+                "title": title,
+                "publisher": source,
+                "source": source,
+                "link": link,
+                "providerPublishTime": ts,
+            })
+    except Exception as e:  # noqa: BLE001 — a single dead feed must not sink the rest
+        print(f"  [news] feed failed ({source}): {e}")
+    return items
 
 def parse_news_item(item):
     if not isinstance(item, dict):
@@ -154,34 +205,28 @@ async def get_dashboard_analysis():
 @router.get("/news")
 async def get_market_news():
     try:
-        nifty = yf.Ticker("^NSEI")
-        sensex = yf.Ticker("^BSESN")
-        
-        nifty_news = nifty.news or []
-        sensex_news = sensex.news or []
-        
-        # Also fetch news for top constituents to ensure we have enough data
-        reliance = yf.Ticker("RELIANCE.NS").news or []
-        hdfc = yf.Ticker("HDFCBANK.NS").news or []
-        tcs = yf.Ticker("TCS.NS").news or []
-        
-        # Combine and deduplicate based on title, limit to top 10 recent
+        # Fetch all RSS feeds concurrently.
+        async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0 (SmartTrader)"}) as client:
+            results = await asyncio.gather(
+                *[_fetch_rss(client, name, url) for name, url in NEWS_RSS_FEEDS]
+            )
+        combined = [a for feed in results for a in feed]
+
+        # Sort newest-first FIRST, then dedup by title keeping the newest, then cap.
+        combined.sort(key=lambda x: x["providerPublishTime"], reverse=True)
         seen_titles = set()
         all_news = []
-        raw_news_combined = nifty_news + sensex_news + reliance + hdfc + tcs
-        
-        for item in raw_news_combined:
-            parsed = parse_news_item(item)
-            title = parsed["title"]
-            if title and title not in seen_titles:
-                seen_titles.add(title)
-                all_news.append(parsed)
-                if len(all_news) >= 10:
-                    break
+        for a in combined:
+            key = a["title"].strip().lower()
+            if key in seen_titles:
+                continue
+            seen_titles.add(key)
+            all_news.append(a)
+            if len(all_news) >= NEWS_MAX_ITEMS:
+                break
 
-        all_news.sort(key=lambda x: x["providerPublishTime"], reverse=True)
         news_titles = [item["title"] for item in all_news]
-        
+
         if not news_titles:
             return {"status": "success", "analysis": "No recent news found for the Indian Stock Market.", "articles": []}
 
@@ -189,7 +234,7 @@ async def get_market_news():
         You are an expert Indian Stock Market Quantitative Analyst.
         
         Here are the latest breaking news headlines affecting the Indian Stock Market:
-        {chr(10).join(news_titles)}
+        {chr(10).join(news_titles[:15])}
         
         Provide a concise, 3-paragraph summary of how these news events might impact the overall market sentiment today. Format as markdown. Use bullet points if discussing specific sectors.
         """

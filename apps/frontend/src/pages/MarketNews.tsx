@@ -16,15 +16,23 @@ export function MarketNews() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const NEWS_TTL_MS = 30 * 60 * 1000; // refresh news at most every 30 min
+
   const fetchNews = async (force = false) => {
     if (!force) {
       const cached = localStorage.getItem('market_news_data');
       if (cached) {
         const parsed = JSON.parse(cached);
-        setAnalysis(parsed.analysis);
-        setArticles(parsed.articles || []);
-        setLoading(false);
-        return;
+        // Render cache immediately, but if it's stale fall through to a live refetch.
+        if (parsed.analysis || (parsed.articles || []).length) {
+          setAnalysis(parsed.analysis);
+          setArticles(parsed.articles || []);
+        }
+        const fresh = parsed.ts && Date.now() - parsed.ts < NEWS_TTL_MS;
+        if (fresh) {
+          setLoading(false);
+          return;
+        }
       }
     }
 
@@ -37,7 +45,8 @@ export function MarketNews() {
         setArticles(res.data.articles || []);
         localStorage.setItem('market_news_data', JSON.stringify({
           analysis: res.data.analysis,
-          articles: res.data.articles || []
+          articles: res.data.articles || [],
+          ts: Date.now(),
         }));
       } else {
         setError(res.data.message || 'Failed to fetch news analysis.');
@@ -58,7 +67,7 @@ export function MarketNews() {
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
           <h1 className="page-title">Indian Market <span>News</span></h1>
-          <p className="page-subtitle">AI-driven analysis of breaking news affecting Nifty 50 and Sensex</p>
+          <p className="page-subtitle">Breaking headlines from Moneycontrol, ET, Business Standard &amp; more, with an AI impact summary</p>
         </div>
         <button 
           onClick={() => fetchNews(true)} 
@@ -111,7 +120,9 @@ export function MarketNews() {
                         {article.publisher}
                       </span>
                       <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                        {new Date(article.providerPublishTime * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                        {article.providerPublishTime > 0
+                          ? new Date(article.providerPublishTime * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                          : ''}
                       </span>
                     </div>
                   </a>
