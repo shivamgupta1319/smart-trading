@@ -48,9 +48,17 @@ class BaseStrategy(ABC):
         Applied in BOTH the backtest (via simulate) and live signals (via the
         scanner), so the two never diverge. Reward is measured from the signal
         bar's Close, the same reference each strategy uses for its own target.
+
+        Also enforces LONG-ONLY for non-intraday buckets: swing/positional trades are
+        equity delivery (CNC) and can't be held short overnight in the cash segment,
+        so any SELL (signal == -1) is dropped. Intraday (MIS) may still short.
         """
         from backtest_config import target_r_for_bucket
-        r = target_r_for_bucket(self._hold_bucket())
+        bucket = self._hold_bucket()
+        if bucket != "INTRADAY" and "signal" in df.columns and (df["signal"].to_numpy() < 0).any():
+            df = df.copy()
+            df.loc[df["signal"] < 0, "signal"] = 0
+        r = target_r_for_bucket(bucket)
         if r is None or "signal" not in df.columns or "stop_loss" not in df.columns:
             return df
 

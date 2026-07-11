@@ -162,6 +162,11 @@ def check_and_fire_signal(config, cache, last_fired_times):
             return
 
         signal_type = "BUY" if latest['signal'] == 1 else "SELL"
+        # Long-only for swing/positional (equity delivery can't hold shorts overnight).
+        # base._apply_bucket_target already zeroes these, but guard here too.
+        if signal_type == "SELL" and hold_duration != "INTRADAY":
+            print(f"  [INFO] {symbol} ({strategy_name}): Dropped SELL for non-intraday ({hold_duration}) — long-only")
+            return
         payload = {
             "stockId": stock_id,
             "strategyName": strategy_name,

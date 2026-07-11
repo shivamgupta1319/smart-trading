@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, BadRequestException } from "@nestjs/common";
 import axios from "axios";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateSignalDto } from "./dto/create-signal.dto";
@@ -58,6 +58,15 @@ export class SignalsService {
       include: { stock: true },
     });
     if (existing) return { signal: existing, isNew: false };
+
+    // Long-only for swing/positional: equity delivery (CNC) can't hold shorts overnight.
+    // The engine already blocks these; guard here too so a stray SELL is never recorded.
+    if (dto.signalType === "SELL" && dto.holdDuration && dto.holdDuration !== "INTRADAY") {
+      this.logger.warn(
+        `Rejected SELL for ${dto.strategyName} (${dto.holdDuration}) — swing is long-only.`,
+      );
+      throw new BadRequestException("Swing/positional signals are long-only (equity delivery).");
+    }
 
     // Per-cell fund sizing, COMPOUNDING: each (stock × strategy) cell owns its own
     // ₹10k fund. cellCapital = ₹10k seed + realized P&L of THIS cell's closed trades,
