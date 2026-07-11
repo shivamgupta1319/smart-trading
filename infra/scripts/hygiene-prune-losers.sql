@@ -9,28 +9,23 @@
 -- │       -d smart_trading' < infra/scripts/hygiene-prune-losers.sql              │
 -- └──────────────────────────────────────────────────────────────────────────────┘
 --
--- v2 FUNDED closed P&L, 2026-06-09 → 2026-07-10 (113 trades, net -Rs 2,704).
--- Pruned strategies (negative in BOTH v1 and v2 live — consistent with the v1 cut):
---   Fibonacci_Golden_Zone   -Rs 2,619   0W / 4L   (~97% of the whole book's net loss;
---                                                   every big loser -1.00R; analyst F3
---                                                   offender: backtest +151% vs live 0/4)
---   VWAP_Supertrend          -Rs  292   5W / 6L
---   Volume_Profile_POC       -Rs  170  11W / 13L
+-- APPLIED 2026-07-11 (per-cell ₹10k + leverage model, after the in-place migration).
+-- Net P&L by strategy over ALL closed trades at that time:
+--   Volume_Profile_POC     -Rs 3,696   23W / 28L   (5 cells removed)
+--   Fibonacci_Golden_Zone  -Rs 2,619    0W /  4L   (6 cells removed; analyst F3 offender,
+--                                                    wide 11% stops = top risk-engine heat)
 --
--- WATCH (negative but thin sample or near-breakeven — NOT cut yet, revisit next review):
---   DMA20_Pullback           -Rs  908   1W / 2L   (n=3, too thin to trust either way)
---   MACD_Stoch_Confluence    -Rs  472   1W / 1L   (n=2)
---   15m_ORB                  -Rs  267   9W / 13L  (n=22, near-breakeven; watch)
+-- KEPT (was on the old cut list, but PROFITABLE under the new leverage sizing — do NOT prune):
+--   VWAP_Supertrend        +Rs   768   11W /  6L
 --
--- NOTE: the scanner reads ActiveConfiguration (joined to Stock.isActive) to decide what
--- to scan, so deleting these cells stops new signals immediately. Existing OPEN positions
--- are unaffected — they exit via normal stop/target/time-stop rules.
--- Currently active cells being removed: Fibonacci_Golden_Zone=6, VWAP_Supertrend=2,
--- Volume_Profile_POC=5 (as of 2026-07-10).
+-- NOTE: the scanner reads ActiveConfiguration (joined to Stock.isActive) to decide what to
+-- scan, so deleting these cells stops NEW signals immediately. Existing OPEN positions are
+-- unaffected — they exit via normal stop/target/time-stop rules (e.g. the open IFCI
+-- Fibonacci_Golden_Zone position remains until it hits its stop/target).
 
 BEGIN;
 
 DELETE FROM "ActiveConfiguration"
-WHERE "strategyName" IN ('Fibonacci_Golden_Zone', 'VWAP_Supertrend', 'Volume_Profile_POC');
+WHERE "strategyName" IN ('Fibonacci_Golden_Zone', 'Volume_Profile_POC');
 
 COMMIT;
