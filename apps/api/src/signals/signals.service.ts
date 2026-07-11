@@ -3,8 +3,8 @@ import axios from "axios";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateSignalDto } from "./dto/create-signal.dto";
 import {
-  INITIAL_CAPITAL,
-  MAX_CONCURRENT_POSITIONS,
+  BASE_CELL_CAPITAL,
+  MIN_CELL_CAPITAL,
   leverageFor,
 } from "../common/risk";
 import { toNum, round2, safePct, normalizeTradeMoney } from "../common/money";
@@ -57,66 +57,43 @@ export class SignalsService {
       where: { stockId: dto.stockId, strategyName: dto.strategyName, status: "ACTIVE" },
       include: { stock: true },
     });
-    if (existing) return { signal: existing, isNew: false, fundingStatus: undefined };
+    if (existing) return { signal: existing, isNew: false };
 
-    // Equal-weight slot sizing, COMPOUNDING: each trade gets ~one slot's
-    // notional, where slot = CURRENT account equity ÷ slots. As realized P&L
-    // grows the account, slots (and positions) grow — gains snowball, the way
-    // real long-term trading compounds. No single stock takes more than a slot;
-    // a signal is SHADOW only when all slots are full. riskAmount is kept for
-    // R-multiple analytics, not sizing. leverage is 1× unless intraday.
+    // Per-cell fund sizing, COMPOUNDING: each (stock × strategy) cell owns its own
+    // ₹10k fund. cellCapital = ₹10k seed + realized P&L of THIS cell's closed trades,
+    // and a new trade deploys cellCapital × leverage of notional (intraday 5× ≈ ₹50k,
+    // swing/delivery 1× ≈ ₹10k). No shared bankroll, no funding gate — every signal is
+    // a real trade. The LiveSignal partial-unique index guarantees ≤1 open position per
+    // cell, so compounding off CLOSED trades is unambiguous. riskAmount is kept for
+    // R-multiple analytics, not sizing.
     const leverage = leverageFor(dto.holdDuration);
     const riskPerShare = Math.abs(dto.entryPrice - dto.stopLoss);
 
     let quantity = 1;
     let capitalUsed = 0;
     let riskAmount = 0;
-    let marginRequired = 0;
-    let fundingStatus: "FUNDED" | "SHADOW" = "FUNDED";
-    let declineReason = "";
+    let cellCapital = BASE_CELL_CAPITAL;
 
     try {
       // Signal + Trade are created atomically: a failure in either rolls back both.
       const signal = await this.prisma.$transaction(async (tx) => {
-        // Current equity = ₹1L seed + realized P&L of all FUNDED closed trades.
-        // Sizing off REALIZED (not paper) equity is the conservative standard.
-        const closedFunded = await tx.trade.findMany({
-          where: { status: "CLOSED", fundingStatus: "FUNDED" },
+        // This cell's fund = ₹10k seed + realized P&L of its own closed trades.
+        const cellClosed = await tx.trade.findMany({
+          where: {
+            stockId: dto.stockId,
+            strategyName: dto.strategyName,
+            status: "CLOSED",
+          },
           select: { pnl: true },
         });
-        const realizedPnl = closedFunded.reduce((s, t) => s + toNum(t.pnl), 0);
-        const currentEquity = INITIAL_CAPITAL + realizedPnl;
-        const slotCapital = currentEquity / MAX_CONCURRENT_POSITIONS;
+        const cellRealized = cellClosed.reduce((s, t) => s + toNum(t.pnl), 0);
+        cellCapital = Math.max(BASE_CELL_CAPITAL + cellRealized, MIN_CELL_CAPITAL);
 
-        // Size to one (compounding) slot's notional.
-        quantity = dto.entryPrice > 0 ? Math.max(1, Math.floor(slotCapital / dto.entryPrice)) : 1;
+        // Deploy cellCapital × leverage worth of notional.
+        const notionalBudget = cellCapital * leverage;
+        quantity = dto.entryPrice > 0 ? Math.max(1, Math.floor(notionalBudget / dto.entryPrice)) : 1;
         capitalUsed = round2(quantity * dto.entryPrice);
         riskAmount = round2(quantity * riskPerShare);
-        marginRequired = round2(capitalUsed / leverage);
-
-        // Funding decision (inside the tx to limit double-funding races): FUNDED
-        // if a slot is free AND margin fits remaining cash; otherwise SHADOW —
-        // recorded for would-be P&L but excluded from portfolio ROI. With N slots,
-        // SHADOW only happens when the book is genuinely full.
-        const openFunded = await tx.trade.findMany({
-          where: { status: "OPEN", fundingStatus: "FUNDED" },
-        });
-        let committedMargin = 0; // cash locked up = Σ notional ÷ leverage
-        for (const t of openFunded) {
-          const qty = t.remainingQty ?? t.quantity;
-          const entry = toNum(t.entryPrice);
-          const notional = qty * entry;
-          committedMargin += notional / leverageFor(t.holdDuration);
-        }
-        const cashLeft = currentEquity - committedMargin;
-        const slotOk = openFunded.length < MAX_CONCURRENT_POSITIONS;
-        const fundsOk = marginRequired <= cashLeft;
-        if (!slotOk || !fundsOk) {
-          fundingStatus = "SHADOW";
-          declineReason = !slotOk
-            ? `all ${MAX_CONCURRENT_POSITIONS} slots in use`
-            : `margin ₹${marginRequired.toFixed(0)} > cash left ₹${round2(cashLeft).toFixed(0)}`;
-        }
 
         const sig = await tx.liveSignal.create({
           data: {
@@ -145,7 +122,6 @@ export class SignalsService {
             quantity,
             capitalUsed,
             riskAmount,
-            fundingStatus,
             entryTime: sig.timestamp,
             status: "OPEN",
             originalStopLoss: dto.stopLoss,
@@ -157,16 +133,11 @@ export class SignalsService {
         return sig;
       });
 
-      if (fundingStatus === "FUNDED") {
-        this.logger.log(
-          `Trade FUNDED: ${dto.signalType} ${signal.stock?.symbol} × ${quantity} shares (₹${capitalUsed.toFixed(0)} notional, ₹${marginRequired.toFixed(0)} margin, ₹${riskAmount.toFixed(0)} at risk)`,
-        );
-      } else {
-        this.logger.log(
-          `Trade SHADOW (research-only): ${dto.signalType} ${signal.stock?.symbol} × ${quantity} shares — ${declineReason}`,
-        );
-      }
-      return { signal, isNew: true, fundingStatus };
+      this.logger.log(
+        `Trade created: ${dto.signalType} ${signal.stock?.symbol} [${dto.strategyName}] × ${quantity} shares ` +
+          `(₹${capitalUsed.toFixed(0)} notional off ₹${cellCapital.toFixed(0)} cell fund ×${leverage}, ₹${riskAmount.toFixed(0)} at risk)`,
+      );
+      return { signal, isNew: true };
     } catch (err: unknown) {
       // P2002 = the partial-unique index rejected a concurrent duplicate active signal.
       if (typeof err === "object" && err && (err as { code?: string }).code === "P2002") {
@@ -174,7 +145,7 @@ export class SignalsService {
           where: { stockId: dto.stockId, strategyName: dto.strategyName, status: "ACTIVE" },
           include: { stock: true },
         });
-        if (dup) return { signal: dup, isNew: false, fundingStatus: undefined };
+        if (dup) return { signal: dup, isNew: false };
       }
       this.logger.error(
         `Failed to create signal/trade: ${err instanceof Error ? err.message : String(err)}`,

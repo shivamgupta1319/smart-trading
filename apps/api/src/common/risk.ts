@@ -1,27 +1,23 @@
-/** Shared portfolio/risk constants (single source of truth). */
-export const INITIAL_CAPITAL = Number(process.env.INITIAL_CAPITAL || 100000); // ₹1,00,000
-export const RISK_PER_TRADE_PCT = Number(process.env.RISK_PER_TRADE_PCT || 2); // 2% per trade
-export const MAX_RISK_PER_TRADE = INITIAL_CAPITAL * (RISK_PER_TRADE_PCT / 100); // ₹2,000
+/** Shared capital/risk constants (single source of truth). */
 
-// Equal-weight slot model: capital is split into N fixed slots so no single
-// stock can hog the wallet. Each new trade is sized to ~one slot's notional and
-// is FUNDED as long as a free slot exists. A signal only becomes SHADOW once all
-// slots are occupied — authentic, and avoids the "first tight-stop trade eats the
-// whole ₹1L" problem. MUST match the engine's BT_MAX_CONCURRENT_POSITIONS.
-export const MAX_CONCURRENT_POSITIONS = Number(process.env.MAX_CONCURRENT_POSITIONS || 10);
-export const SLOT_CAPITAL =
-  INITIAL_CAPITAL / (MAX_CONCURRENT_POSITIONS > 0 ? MAX_CONCURRENT_POSITIONS : 1); // ₹10,000
+// Per-cell fund model (strategy-testing lab): every (stock × strategy) cell owns its own
+// ₹10,000 fund that COMPOUNDS with that cell's realized P&L, so each cell's growth is a
+// clean, comparable measure of "which stock+strategy earns". A new trade is sized to
+// cellCapital × leverage worth of notional. There is no shared bankroll and no funding
+// gate — every selected-strategy signal is a real mock-money trade. MUST match the
+// engine's per-cell slot in backtest_config.py (BT slot = ₹10,000, compounding).
+export const BASE_CELL_CAPITAL = Number(process.env.BASE_CELL_CAPITAL || 10000); // ₹10,000 seed per cell
+export const MIN_CELL_CAPITAL = Number(process.env.MIN_CELL_CAPITAL || 500); // floor so a blown-up cell can still size ≥1 share
 
-// Intraday (MIS) gives ~5× buying power; delivery (CNC) needs full cash (1×). Leverage only
-// changes how much *margin* a position locks up (notional ÷ leverage), never the loss if the
-// stop hits — that stays RISK_PER_TRADE_PCT, set by quantity × stop-distance.
+// Intraday (MIS) gives ~5× buying power; delivery/swing (CNC) uses full cash (1×). Here
+// leverage multiplies the deployed NOTIONAL (cellCapital × leverage), so an intraday cell
+// deploys ~₹50k while a swing cell deploys ~₹10k off the same ₹10k fund.
 export const LEVERAGE_INTRADAY = Number(process.env.LEVERAGE_INTRADAY || 5);
 export const LEVERAGE_DELIVERY = Number(process.env.LEVERAGE_DELIVERY || 1);
 
-// Portfolio "heat" = sum of money at risk if every open stop hits. Cap at 3× the per-trade
-// rule so at most ~3 concurrent full-risk positions can be funded.
-export const MAX_HEAT_PCT = Number(process.env.MAX_HEAT_PCT || 6); // 6% of capital
-export const MAX_HEAT = INITIAL_CAPITAL * (MAX_HEAT_PCT / 100); // ₹6,000
+// Portfolio "heat" = sum of money at risk if every open stop hits, as a % of total deployed
+// base (₹10k × active cells). A soft risk-dashboard flag threshold, not a funding gate.
+export const MAX_HEAT_PCT = Number(process.env.MAX_HEAT_PCT || 6); // 6% of deployed base
 
 // A (stock × strategy) cell needs at least this many closed trades before its edge metrics
 // are treated as trustworthy (guards against small-sample flukes like "100% on 3 trades").

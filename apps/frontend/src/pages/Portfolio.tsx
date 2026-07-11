@@ -61,8 +61,8 @@ interface EdgeMetrics {
   avgRMultiple: number;
   profitFactor: number;
   maxDrawdown: number;
-  funded: number;
-  shadow: number;
+  cellCapital: number;
+  cellRoiPct: number;
   confidence: 'LOW' | 'MEDIUM' | 'HIGH';
   reliable: boolean;
 }
@@ -71,9 +71,12 @@ interface PortfolioStats {
   totalTrades: number;
   openTrades: number;
   closedTrades: number;
-  fundedClosedTrades: number;
-  shadowClosedTrades: number;
   totalPnl: number;
+  netPnl: number;
+  investedNow: number;
+  openPositions: number;
+  activeCells: number;
+  totalDeployedBase: number;
   roiPct: number;
   winRate: number;
   wins: number;
@@ -86,8 +89,6 @@ interface PortfolioStats {
   stockWiseStrategyBreakdown: ({ symbol: string; strategy: string } & EdgeMetrics)[];
   equityCurve: { time: number; value: number }[];
   holdDurationStats: Record<string, { trades: number; pnl: number }>;
-  initialCapital: number;
-  currentCapital: number;
 }
 
 export function Portfolio() {
@@ -258,7 +259,7 @@ export function Portfolio() {
       <div className="page-header">
         <h1 className="page-title">💼 <span>Portfolio</span> Tracker</h1>
         <p className="page-subtitle">
-          Track trades from live signals • ₹1,00,000 capital • 2% risk per trade
+          Strategy-testing lab • each stock×strategy runs its own ₹10k fund (compounding) • intraday 5× / swing 1×
         </p>
       </div>
 
@@ -346,23 +347,21 @@ export function Portfolio() {
                 <div className="metric-card">
                   <p className="metric-label">Open Positions</p>
                   <p className="metric-value">{risk.openPositions}</p>
-                  {risk.shadowPositions > 0 && (
-                    <p className="metric-label">+{risk.shadowPositions} shadow (unfunded)</p>
-                  )}
+                  <p className="metric-label">₹{Number(risk.deployedBase).toLocaleString('en-IN')} deployed base</p>
                 </div>
                 <div className="metric-card">
                   <p className="metric-label">Margin Used</p>
-                  <p className="metric-value" style={{ color: risk.marginUsedPct > 100 ? 'var(--red)' : 'var(--text-primary)' }}>₹{Number(risk.marginUsed).toLocaleString('en-IN')}</p>
-                  <p className="metric-label">{risk.marginUsedPct}% of cash · ₹{Number(risk.notional).toLocaleString('en-IN')} notional</p>
+                  <p className="metric-value">₹{Number(risk.marginUsed).toLocaleString('en-IN')}</p>
+                  <p className="metric-label">{risk.marginUsedPct}% of base · ₹{Number(risk.notional).toLocaleString('en-IN')} notional</p>
                 </div>
                 <div className="metric-card">
                   <p className="metric-label">Total Heat (risk-at-stop)</p>
                   <p className="metric-value" style={{ color: risk.heatPct > 6 ? 'var(--red)' : 'var(--text-primary)' }}>₹{Number(risk.totalHeat).toLocaleString('en-IN')}</p>
-                  <p className="metric-label">{risk.heatPct}% of capital</p>
+                  <p className="metric-label">{risk.heatPct}% of deployed base</p>
                 </div>
                 <div className="metric-card">
-                  <p className="metric-label">Available Cash</p>
-                  <p className="metric-value">₹{Number(risk.availableCash).toLocaleString('en-IN')}</p>
+                  <p className="metric-label">Notional Deployed</p>
+                  <p className="metric-value">₹{Number(risk.notional).toLocaleString('en-IN')}</p>
                 </div>
               </div>
 
@@ -421,19 +420,20 @@ export function Portfolio() {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
             <div className="metric-card">
-              <p className="metric-label">Current Capital</p>
-              <p className={`metric-value ${stats.currentCapital >= stats.initialCapital ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
-                ₹{stats.currentCapital.toLocaleString('en-IN')}
+              <p className="metric-label">Net P&L (realized)</p>
+              <p className={`metric-value ${stats.netPnl >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
+                {stats.netPnl >= 0 ? '+' : ''}₹{stats.netPnl.toLocaleString('en-IN')}
+              </p>
+              <p className={`metric-label ${stats.roiPct >= 0 ? 'positive' : 'negative'}`}>
+                {stats.roiPct >= 0 ? '+' : ''}{stats.roiPct}% on ₹{stats.totalDeployedBase.toLocaleString('en-IN')} base
               </p>
             </div>
             <div className="metric-card">
-              <p className="metric-label">Total P&L</p>
-              <p className={`metric-value ${stats.totalPnl >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
-                {stats.totalPnl >= 0 ? '+' : ''}₹{stats.totalPnl.toLocaleString('en-IN')}
+              <p className="metric-label">Invested Now</p>
+              <p className="metric-value" style={{ fontSize: '1.3rem' }}>
+                ₹{stats.investedNow.toLocaleString('en-IN')}
               </p>
-              <p className={`metric-label ${stats.roiPct >= 0 ? 'positive' : 'negative'}`}>
-                {stats.roiPct >= 0 ? '+' : ''}{stats.roiPct}% ROI on ₹{stats.initialCapital.toLocaleString('en-IN')}
-              </p>
+              <p className="metric-label">{stats.openPositions} open · {stats.activeCells} cells</p>
             </div>
             <div className="metric-card">
               <p className="metric-label">Win Rate</p>
@@ -619,12 +619,7 @@ export function Portfolio() {
                       <tr key={`${s.symbol}-${s.strategy}`} style={{ opacity: s.reliable ? 1 : 0.45 }}>
                         <td><span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-primary)' }}>{s.symbol}</span></td>
                         <td><span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)', fontWeight: 600 }}>{s.strategy}</span></td>
-                        <td style={{ textAlign: 'right' }}>
-                          {s.trades}
-                          {s.shadow > 0 && (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}> ({s.funded}F/{s.shadow}S)</span>
-                          )}
-                        </td>
+                        <td style={{ textAlign: 'right' }}>{s.trades}</td>
                         <td style={{ textAlign: 'right', color: s.winRate >= 50 ? 'var(--green)' : 'var(--red)' }}>{s.winRate}%</td>
                         <td style={{ textAlign: 'right', color: s.expectancy >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>
                           {s.expectancy >= 0 ? '+' : ''}₹{s.expectancy.toLocaleString('en-IN')}

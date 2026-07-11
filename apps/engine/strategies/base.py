@@ -6,6 +6,7 @@ import pandas as pd
 
 from backtest_config import (
     RISK, CostModel, uses_trailing_exit, trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD,
+    LEVERAGE_INTRADAY, LEVERAGE_DELIVERY,
 )
 
 
@@ -153,12 +154,14 @@ class BaseStrategy(ABC):
                 i += 1
                 continue
 
-            # Equal-weight slot sizing, COMPOUNDING — size from the slot's
-            # CURRENT equity (grows with prior P&L), identical in spirit to the
-            # live model (slot = current account equity ÷ slots). qty =
-            # floor(equity / entry), min 1 — notional, not risk-based, so the
-            # backtest takes exactly the trades the live ledger would.
-            qty = max(1, int(current_capital / entry))
+            # Per-cell fund sizing, COMPOUNDING + leverage — size from this cell's
+            # CURRENT equity (grows with prior P&L), identical to the live model
+            # (cellCapital × leverage of notional). Intraday (MIS) deploys 5× the
+            # fund, swing/delivery (CNC) 1×. qty = floor(equity × lev / entry),
+            # min 1 — notional, not risk-based, so the backtest takes exactly the
+            # trades the live ledger would.
+            leverage = LEVERAGE_INTRADAY if _bucket == "INTRADAY" else LEVERAGE_DELIVERY
+            qty = max(1, int((current_capital * leverage) / entry))
 
             # Walk forward to the exit bar via intrabar High/Low. For swing
             # buckets `cur_sl` ratchets up with a chandelier trail (peak ∓ k·ATR);

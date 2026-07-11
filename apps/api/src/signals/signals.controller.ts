@@ -35,10 +35,9 @@ export class SignalsController {
   @Post("new")
   @HttpCode(201)
   async create(@Body() dto: CreateSignalDto) {
-    const { signal, isNew, fundingStatus } = await this.signalsService.create(dto);
-    // Alert only for new, FUNDED signals — SHADOW trades are recorded for research but
-    // aren't actionable (the ₹1L account couldn't fund them), so they don't ping.
-    if (isNew && fundingStatus === "FUNDED") {
+    const { signal, isNew } = await this.signalsService.create(dto);
+    // Every new signal is a real trade now (no funding gate) — alert on all of them.
+    if (isNew) {
       // Prisma returns money columns as Decimal objects which serialize to
       // strings over the socket; coerce them to plain numbers so the UI can
       // call .toFixed() on entryPrice/stopLoss/target.

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  INITIAL_CAPITAL,
+  BASE_CELL_CAPITAL,
   MAX_HEAT_PCT,
   MIN_TRADES_FOR_CONFIDENCE,
   leverageFor,
@@ -46,19 +46,19 @@ export class TradesService {
     type AnyTrade = (typeof allTrades)[number];
     const closedTrades = allTrades.filter((t) => t.status === 'CLOSED');
     const openTrades = allTrades.filter((t) => t.status === 'OPEN');
-    // Portfolio P&L/ROI reflect only FUNDED trades (what the ₹1L account could afford).
-    // Research breakdowns below use ALL closed trades (funded + shadow) so the
-    // strategy×stock edge analysis stays unbiased by capital availability.
-    const fundedClosed = closedTrades.filter((t) => t.fundingStatus === 'FUNDED');
+    // No funding gate anymore — every trade is real, so portfolio metrics AND the
+    // per-cell edge breakdowns are computed over ALL closed trades.
 
     const pnlOf = (t: { pnl: unknown }) => toNum(t.pnl as never);
     const riskOf = (t: { riskAmount: unknown }) => toNum(t.riskAmount as never);
+    const notionalOf = (t: { remainingQty: number | null; quantity: number; entryPrice: unknown }) =>
+      (t.remainingQty ?? t.quantity) * toNum(t.entryPrice as never);
 
-    // ---- Portfolio metrics (FUNDED closed only) -------------------------------
-    const totalPnl = fundedClosed.reduce((sum, t) => sum + pnlOf(t), 0);
-    const wins = fundedClosed.filter((t) => t.outcome === 'WIN');
-    const losses = fundedClosed.filter((t) => t.outcome === 'LOSS');
-    const winRate = fundedClosed.length > 0 ? (wins.length / fundedClosed.length) * 100 : 0;
+    // ---- Portfolio metrics (all closed) ---------------------------------------
+    const totalPnl = closedTrades.reduce((sum, t) => sum + pnlOf(t), 0);
+    const wins = closedTrades.filter((t) => t.outcome === 'WIN');
+    const losses = closedTrades.filter((t) => t.outcome === 'LOSS');
+    const winRate = closedTrades.length > 0 ? (wins.length / closedTrades.length) * 100 : 0;
     const avgWin =
       wins.length > 0 ? wins.reduce((sum, t) => sum + pnlOf(t), 0) / wins.length : 0;
     const avgLoss =
@@ -67,10 +67,17 @@ export class TradesService {
         : 0;
     const profitFactor =
       avgLoss > 0 ? (avgWin * wins.length) / (avgLoss * losses.length) : 0;
-    const roiPct = safePct(totalPnl, INITIAL_CAPITAL);
 
-    // Equity curve: cumulative FUNDED P&L over time
-    const sortedTrades = [...fundedClosed].sort(
+    // Dynamic "invested now" = Σ notional of currently-open positions. Deployed base =
+    // ₹10k × number of distinct active cells (each open position is one cell). ROI% is
+    // net realized P&L over that deployed base.
+    const investedNow = openTrades.reduce((sum, t) => sum + notionalOf(t), 0);
+    const activeCells = new Set(openTrades.map((t) => `${t.stockId}|${t.strategyName}`)).size;
+    const totalDeployedBase = activeCells * BASE_CELL_CAPITAL;
+    const roiPct = safePct(totalPnl, totalDeployedBase);
+
+    // Equity curve: cumulative realized P&L over time (all closed)
+    const sortedTrades = [...closedTrades].sort(
       (a, b) =>
         new Date(a.exitTime || a.entryTime).getTime() -
         new Date(b.exitTime || b.entryTime).getTime(),
@@ -118,7 +125,10 @@ export class TradesService {
         if (cum > peak) peak = cum;
         if (peak - cum > maxDd) maxDd = peak - cum;
       }
-      const funded = group.filter((t) => t.fundingStatus === 'FUNDED').length;
+      // Cell fund = ₹10k seed compounded by the cell's realized P&L; cellRoiPct is how
+      // much its own ₹10k grew — the headline "which stock+strategy earns" number.
+      const cellCapital = round2(BASE_CELL_CAPITAL + grpPnl);
+      const cellRoiPct = round2((grpPnl / BASE_CELL_CAPITAL) * 100);
       const confidence = trades >= 30 ? 'HIGH' : trades >= 10 ? 'MEDIUM' : 'LOW';
       return {
         trades,
@@ -131,8 +141,8 @@ export class TradesService {
         avgRMultiple: round2(avgRMultiple),
         profitFactor: round2(grossLoss > 0 ? grossWin / grossLoss : 0),
         maxDrawdown: round2(maxDd),
-        funded,
-        shadow: trades - funded,
+        cellCapital,
+        cellRoiPct,
         confidence,
         reliable: trades >= MIN_TRADES_FOR_CONFIDENCE,
       };
@@ -178,10 +188,13 @@ export class TradesService {
       totalTrades: allTrades.length,
       openTrades: openTrades.length,
       closedTrades: closedTrades.length,
-      fundedClosedTrades: fundedClosed.length,
-      shadowClosedTrades: closedTrades.length - fundedClosed.length,
-      // Portfolio (FUNDED only):
+      // Portfolio (all trades — no funding gate):
       totalPnl: round2(totalPnl),
+      netPnl: round2(totalPnl),
+      investedNow: round2(investedNow),
+      openPositions: openTrades.length,
+      activeCells,
+      totalDeployedBase,
       roiPct: round2(roiPct),
       winRate: round2(winRate),
       wins: wins.length,
@@ -194,8 +207,6 @@ export class TradesService {
       stockWiseStrategyBreakdown,
       equityCurve,
       holdDurationStats,
-      initialCapital: INITIAL_CAPITAL,
-      currentCapital: round2(INITIAL_CAPITAL + totalPnl),
     };
   }
 
@@ -206,14 +217,12 @@ export class TradesService {
    * book is over-exposed or too concentrated.
    */
   async getRiskMetrics() {
-    // Only FUNDED open positions consume real buying power. SHADOW positions are
-    // research-only and are reported separately (count) but don't lock up capital.
+    // Every open position is a real trade (one per active cell). Deployed base backing the
+    // open book = ₹10k × number of open positions; margin/heat are measured against it.
     const open = (
-      await this.prisma.trade.findMany({ where: { status: 'OPEN', fundingStatus: 'FUNDED' } })
+      await this.prisma.trade.findMany({ where: { status: 'OPEN' } })
     ).map((t) => normalizeTradeMoney(t)!);
-    const shadowPositions = await this.prisma.trade.count({
-      where: { status: 'OPEN', fundingStatus: 'SHADOW' },
-    });
+    const deployedBase = open.length * BASE_CELL_CAPITAL;
 
     const symbols = [...new Set(open.map((t) => t.symbol))];
     const sectorRows = symbols.length
@@ -255,31 +264,24 @@ export class TradesService {
       }))
       .sort((a, b) => b.exposure - a.exposure);
 
-    const heatPct = safePct(heat, INITIAL_CAPITAL);
-    // Margin (not notional) is what the cash account funds, so measure usage against cash.
-    const marginUsedPct = safePct(marginUsed, INITIAL_CAPITAL);
-    const availableCash = round2(INITIAL_CAPITAL - marginUsed);
+    const heatPct = safePct(heat, deployedBase);
+    // Margin (not notional) is the cash a position locks up; measure against deployed base.
+    const marginUsedPct = safePct(marginUsed, deployedBase);
     const flags: string[] = [];
     if (heatPct > MAX_HEAT_PCT)
       flags.push(
-        `Total heat ${heatPct.toFixed(1)}% exceeds the ${MAX_HEAT_PCT}% guideline (3× the 2% per-trade rule).`,
-      );
-    // With the entry-time funding cap, margin should never exceed cash — flag only if it does.
-    if (marginUsed > INITIAL_CAPITAL)
-      flags.push(
-        `Margin used ₹${round2(marginUsed).toFixed(0)} exceeds cash ₹${INITIAL_CAPITAL.toFixed(0)} — funding guard breached.`,
+        `Total heat ${heatPct.toFixed(1)}% exceeds the ${MAX_HEAT_PCT}% guideline of deployed base.`,
       );
     const topSector = sectorConcentration[0];
-    if (topSector && topSector.pctOfBook > 40)
+    if (topSector && topSector.sector !== 'Unknown' && topSector.pctOfBook > 40)
       flags.push(`${topSector.pctOfBook.toFixed(0)}% of the book is in ${topSector.sector} — concentrated.`);
 
     return {
       openPositions: open.length,
-      shadowPositions,
+      deployedBase: round2(deployedBase),
       notional: round2(exposure),
       marginUsed: round2(marginUsed),
       marginUsedPct: round2(marginUsedPct),
-      availableCash,
       totalHeat: round2(heat),
       heatPct: round2(heatPct),
       sectorConcentration,

@@ -31,6 +31,12 @@ def _i(name: str, default: int) -> int:
         return default
 
 
+# Buying-power multiple by hold bucket. Intraday (MIS) deploys ~5× the cell fund as
+# notional; swing/delivery (CNC) uses the fund 1×. MUST match apps/api/src/common/risk.ts.
+LEVERAGE_INTRADAY = _f("LEVERAGE_INTRADAY", 5.0)
+LEVERAGE_DELIVERY = _f("LEVERAGE_DELIVERY", 1.0)
+
+
 @dataclass(frozen=True)
 class RiskConfig:
     initial_capital: float = _f("BT_INITIAL_CAPITAL", 100_000.0)
@@ -51,14 +57,16 @@ class RiskConfig:
 
     @property
     def slot_capital(self) -> float:
-        """Rupees allocated to one position slot (₹1L / 10 = ₹10,000)."""
+        """Per-cell fund seed (₹1L / 10 = ₹10,000). Each (stock × strategy) cell
+        compounds its own ₹10k, matching the live per-cell model."""
         slots = self.max_concurrent_positions if self.max_concurrent_positions > 0 else 1
         return self.initial_capital / slots
 
     @property
     def max_position_value(self) -> float:
-        """Hard cap on rupees deployed per position = one slot (no leverage)."""
-        return self.slot_capital
+        """Rupees deployable per position = fund × intraday leverage (kept for
+        reference; sizing in base.py applies the per-bucket leverage directly)."""
+        return self.slot_capital * LEVERAGE_INTRADAY
 
 
 @dataclass(frozen=True)
