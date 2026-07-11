@@ -1,6 +1,13 @@
 import axios from 'axios';
 
-export const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
+// In a production build the SPA is served behind nginx which proxies /api and
+// /socket.io on the SAME origin, so default to RELATIVE paths (empty base). Only dev
+// (vite dev server) talks to a separate localhost:3000 API. An explicit VITE_API_URL
+// still overrides both. (A hardcoded localhost:3000 here shipped to the browser and
+// caused ERR_CONNECTION_REFUSED on the public site.)
+export const API_BASE = (
+  import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3000')
+).replace(/\/+$/, '');
 export const API = API_BASE;
 export const API_URL = `${API_BASE}/api`;
 export const SOCKET_URL = API_BASE;
