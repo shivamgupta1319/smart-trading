@@ -242,10 +242,17 @@ export class TradesService {
     const deployedBase = open.length * BASE_CELL_CAPITAL;
 
     const symbols = [...new Set(open.map((t) => t.symbol))];
-    const sectorRows = symbols.length
-      ? await this.prisma.nseStock.findMany({ where: { symbol: { in: symbols } } })
-      : [];
-    const sectorOf = new Map(sectorRows.map((r) => [r.symbol, r.sector || 'Unknown']));
+    // Prefer Stock.sector (tradeable universe, backfilled); fall back to NseStock.
+    const [stockRows, nseRows] = symbols.length
+      ? await Promise.all([
+          this.prisma.stock.findMany({ where: { symbol: { in: symbols } }, select: { symbol: true, sector: true } }),
+          this.prisma.nseStock.findMany({ where: { symbol: { in: symbols } }, select: { symbol: true, sector: true } }),
+        ])
+      : [[], []];
+    const nseSectorOf = new Map(nseRows.map((r) => [r.symbol, r.sector]));
+    const sectorOf = new Map(
+      stockRows.map((r) => [r.symbol, r.sector || nseSectorOf.get(r.symbol) || 'Unknown']),
+    );
 
     let exposure = 0; // total notional
     let marginUsed = 0; // cash locked up = Σ notional ÷ leverage

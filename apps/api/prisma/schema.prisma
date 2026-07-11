@@ -24,6 +24,7 @@ model Stock {
   id           Int                  @id @default(autoincrement())
   symbol       String               @unique
   isActive     Boolean              @default(true)
+  sector       String?              // GICS-style sector tag (backfilled from yfinance) for risk concentration
   createdAt    DateTime             @default(now())
 
   historicalData      HistoricalData[]

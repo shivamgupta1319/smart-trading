@@ -268,35 +268,51 @@ async def get_sectors_analysis():
             "Nifty Realty": "^CNXREALTY"
         }
         
-        sector_data = []
+        # Real per-sector performance (today's % change of each NSE sectoral index),
+        # returned as STRUCTURED data so the UI can render up/down/%/color — not just
+        # an AI narrative. `sector_lines` is the text form fed to the LLM summary.
+        sector_perf = []
+        sector_lines = []
         for name, ticker_str in sector_indices.items():
             ticker = yf.Ticker(ticker_str)
             hist = ticker.history(period="5d")
             if not hist.empty and len(hist) >= 2:
-                current = hist["Close"].iloc[-1]
-                prev = hist["Close"].iloc[-2]
+                current = float(hist["Close"].iloc[-1])
+                prev = float(hist["Close"].iloc[-2])
                 change_pct = ((current - prev) / prev) * 100
-                
-                status = "Neutral"
-                if change_pct > 0.5:
-                    status = "Up"
-                elif change_pct < -0.5:
-                    status = "Down"
-                
-                sector_data.append(f"- {name}: {change_pct:.2f}% ({status})")
+
+                status = "Up" if change_pct > 0.5 else "Down" if change_pct < -0.5 else "Neutral"
+                sector_perf.append({
+                    "name": name,
+                    "ticker": ticker_str,
+                    "changePct": round(change_pct, 2),
+                    "status": status,
+                })
+                sector_lines.append(f"- {name}: {change_pct:.2f}% ({status})")
+
+        # Leading/lagging ranking derived from the same numbers.
+        ranked = sorted(sector_perf, key=lambda s: s["changePct"], reverse=True)
+        leading = ranked[:3]
+        lagging = list(reversed(ranked[-3:])) if len(ranked) >= 3 else []
 
         prompt = f"""
         You are an expert Indian Stock Market Quantitative Analyst.
-        
+
         Here is the daily performance of major Indian sector indices:
-        {chr(10).join(sector_data)}
-        
-        Provide a concise 2-paragraph overall Sector Analysis. 
+        {chr(10).join(sector_lines)}
+
+        Provide a concise 2-paragraph overall Sector Analysis.
         Identify which sectors are leading (Up), lagging (Down), or In Focus, and give brief reasons why based on typical market dynamics. Format as markdown.
         """
-        
+
         analysis = await llm.generate(prompt)
-        return {"status": "success", "analysis": analysis, "data": sector_data}
+        return {
+            "status": "success",
+            "analysis": analysis,
+            "data": sector_perf,
+            "leading": leading,
+            "lagging": lagging,
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
