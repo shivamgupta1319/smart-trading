@@ -78,6 +78,7 @@ export function LiveScanner() {
   );
   const [newSignalIds, setNewSignalIds] = useState<Set<number>>(new Set());
   const [rerunningId, setRerunningId] = useState<number | null>(null);
+  const [rerunAll, setRerunAll] = useState<{ done: number; total: number } | null>(null);
   const prevAlertsLen = useRef(0);
 
   const fetchConfigs = useCallback(() => {
@@ -127,6 +128,40 @@ export function LiveScanner() {
     } finally {
       setRerunningId(null);
     }
+  };
+
+  // Re-run the backtest for EVERY monitored pair. Runs with limited concurrency so the
+  // engine isn't hammered, tracks progress, and refetches once at the end. Individual
+  // failures are skipped so one bad pair doesn't abort the batch.
+  const rerunAllBacktests = async () => {
+    if (rerunAll) return;
+    const list = [...configs];
+    if (list.length === 0) return;
+    setRerunAll({ done: 0, total: list.length });
+    let idx = 0;
+    let done = 0;
+    const CONCURRENCY = 4;
+    const worker = async () => {
+      while (idx < list.length) {
+        const c = list[idx++];
+        try {
+          await axios.post(`${API}/api/engine/run-backtest`, {
+            symbol: c.stock.symbol,
+            strategy: c.strategyName,
+            timeframe: c.timeframe,
+          });
+        } catch {
+          /* skip this pair, keep going */
+        }
+        done++;
+        setRerunAll({ done, total: list.length });
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, list.length) }, () => worker()),
+    );
+    fetchConfigs();
+    setRerunAll(null);
   };
 
   // React to new alerts from socket
@@ -567,8 +602,24 @@ export function LiveScanner() {
 
       {activeTab === "MONITORED" && (
         <div className="card">
-          <div className="card-title">
-            📡 Monitored Stocks ({configs.length})
+          <div
+            className="card-title"
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}
+          >
+            <span>📡 Monitored Stocks ({configs.length})</span>
+            {configs.length > 0 && (
+              <button
+                className="btn btn-primary"
+                onClick={rerunAllBacktests}
+                disabled={rerunAll !== null || rerunningId !== null}
+                style={{ fontSize: "0.85rem", padding: "0.4rem 0.9rem" }}
+                title="Re-run the backtest for every monitored pair"
+              >
+                {rerunAll
+                  ? `Re-running… ${rerunAll.done}/${rerunAll.total}`
+                  : "🔄 Re-run All"}
+              </button>
+            )}
           </div>
           {configs.length === 0 ? (
             <div className="empty-state" style={{ padding: "2rem" }}>
@@ -708,7 +759,7 @@ export function LiveScanner() {
                             <div style={{ display: "flex", gap: "0.4rem" }}>
                               <button
                                 className="btn btn-secondary btn-sm"
-                                disabled={rerunningId === c.id}
+                                disabled={rerunningId === c.id || rerunAll !== null}
                                 onClick={() => rerunBacktest(c)}
                               >
                                 {rerunningId === c.id ? "Running…" : "Re-run"}
