@@ -28,6 +28,10 @@ NESTJS_URL = os.getenv("NESTJS_SIGNAL_URL", "http://localhost:3000/api/signals/n
 IST = pytz.timezone("Asia/Kolkata")
 MARKET_OPEN = dtime(9, 15)
 MARKET_CLOSE = dtime(15, 30)
+# Square off intraday positions ourselves BEFORE Dhan's broker auto-square window
+# (starts ~15:18, forces close by 15:20 with a ₹20 penalty). Closing at 15:10 leaves
+# a comfortable margin so our own MARKET exit fills first and avoids that fee.
+SQUARE_OFF_TIME = dtime(15, 10)
 POLL_INTERVAL = 100  # seconds
 
 # ── Smart Trailing SL Configuration ──
@@ -42,7 +46,7 @@ trailing_state_cache = {}
 
 # ── Max-hold time-stop (calendar days) ──
 # Swings get a hard time-stop so positions can't drift open indefinitely;
-# INTRADAY/UNKNOWN get a safety net in case the 15:15 square-off was missed
+# INTRADAY/UNKNOWN get a safety net in case the 15:10 square-off was missed
 # (scanner down 15:15-15:30). Calendar-day based — weekends count, so limits
 # are a bit generous vs trading days. LONG_POSITIONAL is intentionally omitted
 # (no time-stop). Values chosen to flush the current stale opens immediately.
@@ -347,7 +351,7 @@ def auto_close_signals(cache):
     """
     api_url = NESTJS_URL.replace("/signals/new", "/signals/active")
     now_time = datetime.now(IST).time()
-    is_square_off_time = now_time >= dtime(15, 15)
+    is_square_off_time = now_time >= SQUARE_OFF_TIME
 
     try:
         r = httpx.get(api_url, timeout=10)
@@ -476,7 +480,7 @@ def auto_close_signals(cache):
             if not should_close and sig.get('holdDuration') == 'INTRADAY' and is_square_off_time:
                 should_close = True
                 exit_price = latest_price
-                close_reason = "INTRADAY auto square-off (>= 15:15 IST)"
+                close_reason = f"INTRADAY square-off (>= {SQUARE_OFF_TIME.strftime('%H:%M')} IST)"
 
             # ── MAX-HOLD time-stop (swing enforcement + intraday safety net) ──
             if not should_close:
@@ -527,8 +531,8 @@ def main():
         # 2. Check for new setups
         if now.time() < dtime(9, 30):
             print("  Skipping new setups before 9:30 AM IST (avoiding fake opening moves).")
-        elif now.time() >= dtime(15, 15):
-            print("  Skipping new setups after 3:15 PM IST (market closing soon).")
+        elif now.time() >= SQUARE_OFF_TIME:
+            print(f"  Skipping new setups after {SQUARE_OFF_TIME.strftime('%H:%M')} IST (square-off window).")
         elif not configs:
             print("  No active configurations. Add some via the UI.")
         else:
