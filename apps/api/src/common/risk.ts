@@ -26,3 +26,26 @@ export const MIN_TRADES_FOR_CONFIDENCE = Number(process.env.MIN_TRADES_FOR_CONFI
 /** Buying-power multiple for a hold duration: INTRADAY 5×, everything else 1×. */
 export const leverageFor = (holdDuration: string | null | undefined): number =>
   holdDuration === 'INTRADAY' ? LEVERAGE_INTRADAY : LEVERAGE_DELIVERY;
+
+// A trade whose |P&L| is within this fraction of the rupees it risked is a scratch,
+// not a real win/loss — booking it WIN/LOSS distorts win-rate and profit factor.
+export const BREAKEVEN_R = Number(process.env.BREAKEVEN_R || 0.1); // 0.1R scratch band
+
+/**
+ * Classify a closed trade as WIN / LOSS / BREAKEVEN using a small R-based scratch
+ * band, so a +₹1.88 (≈0.03R) close is not booked as a WIN. Falls back to the sign
+ * of P&L when riskAmount is unknown (0).
+ */
+export const classifyOutcome = (pnl: number, riskAmount: number): 'WIN' | 'LOSS' | 'BREAKEVEN' => {
+  if (riskAmount > 0 && Math.abs(pnl) <= BREAKEVEN_R * riskAmount) return 'BREAKEVEN';
+  return pnl > 0 ? 'WIN' : pnl < 0 ? 'LOSS' : 'BREAKEVEN';
+};
+
+/**
+ * Actual cash (margin) deployed for a position = leveraged notional ÷ leverage.
+ * `capitalUsed` stores the leveraged notional (qty × entry), so per-trade return %
+ * must divide P&L by this margin — not the notional — to be comparable to the
+ * cell's ROI on its ₹10k fund.
+ */
+export const marginOf = (capitalUsed: number, holdDuration: string | null | undefined): number =>
+  capitalUsed / leverageFor(holdDuration);

@@ -5,6 +5,8 @@ import {
   MAX_HEAT_PCT,
   MIN_TRADES_FOR_CONFIDENCE,
   leverageFor,
+  classifyOutcome,
+  marginOf,
 } from '../common/risk';
 import { toNum, round2, safePct, normalizeTradeMoney } from '../common/money';
 
@@ -341,8 +343,11 @@ export class TradesService {
     const pnlPerShare = isBuy ? exitPrice - trade.entryPrice : trade.entryPrice - exitPrice;
     const finalLotPnl = pnlPerShare * trade.remainingQty;
     const totalPnl = trade.realizedPnl + finalLotPnl;
-    const pnlPercent = safePct(totalPnl, trade.capitalUsed);
-    const outcome = totalPnl > 0 ? 'WIN' : totalPnl < 0 ? 'LOSS' : 'BREAKEVEN';
+    // % of actual margin deployed (not the leveraged notional), scratch band for
+    // outcome, and realizedPnl folded in so it equals pnl on close — matches
+    // SignalsService.closeWithPrice.
+    const pnlPercent = safePct(totalPnl, marginOf(trade.capitalUsed, trade.holdDuration));
+    const outcome = classifyOutcome(totalPnl, trade.riskAmount);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.liveSignal.update({
@@ -355,6 +360,7 @@ export class TradesService {
           exitPrice,
           pnl: round2(totalPnl),
           pnlPercent: round2(pnlPercent),
+          realizedPnl: round2(totalPnl),
           remainingQty: 0,
           outcome,
           exitTime: new Date(),

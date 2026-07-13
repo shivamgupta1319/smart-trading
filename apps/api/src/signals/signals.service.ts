@@ -6,6 +6,8 @@ import {
   BASE_CELL_CAPITAL,
   MIN_CELL_CAPITAL,
   leverageFor,
+  classifyOutcome,
+  marginOf,
 } from "../common/risk";
 import { toNum, round2, safePct, normalizeTradeMoney } from "../common/money";
 
@@ -260,10 +262,11 @@ export class SignalsService {
         const pnlPerShare = isBuy ? exitPrice - trade.entryPrice : trade.entryPrice - exitPrice;
         const finalLotPnl = pnlPerShare * trade.remainingQty;
         const totalPnl = trade.realizedPnl + finalLotPnl;
-        // Consistent semantics everywhere: P&L as a % of capital deployed.
-        const pnlPercent = safePct(totalPnl, trade.capitalUsed);
-
-        const outcome = totalPnl > 0 ? "WIN" : totalPnl < 0 ? "LOSS" : "BREAKEVEN";
+        // P&L as a % of the actual cash (margin) deployed, not the leveraged
+        // notional in capitalUsed — comparable to the cell's ROI on its ₹10k fund.
+        const pnlPercent = safePct(totalPnl, marginOf(trade.capitalUsed, trade.holdDuration));
+        // Scratch band: a near-zero close is BREAKEVEN, not a WIN/LOSS.
+        const outcome = classifyOutcome(totalPnl, trade.riskAmount);
 
         await tx.trade.update({
           where: { id: trade.id },
@@ -271,6 +274,9 @@ export class SignalsService {
             exitPrice,
             pnl: round2(totalPnl),
             pnlPercent: round2(pnlPercent),
+            // Fully realized on close: fold the final lot in so realizedPnl == pnl
+            // (previously left at the partial-only sum, i.e. 0 for one-shot closes).
+            realizedPnl: round2(totalPnl),
             remainingQty: 0,
             outcome,
             exitTime: new Date(),
