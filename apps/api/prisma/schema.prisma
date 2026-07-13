@@ -143,3 +143,41 @@ model SentDigest {
 
   @@unique([period, periodKey])
 }
+
+// Durable mirror of DhanService.openPositions (in-memory Map). Survives an api restart so
+// a position entered before a redeploy is not orphaned: on boot the service reloads OPEN
+// rows and reconciles them against Dhan's actual positions/orders. Deliberately decoupled
+// from Trade (real qty/fills differ from the sim) — no FK to LiveSignal; signalId is the key.
+model DhanPosition {
+  id            Int      @id @default(autoincrement())
+  signalId      Int      @unique // = LiveSignal.id (no FK; decoupled from the sim record)
+  symbol        String
+  side          String   // "BUY" | "SELL" (entry side)
+  qty           Int
+  simEntryPrice Float
+  orderId       String?  // Dhan entry order id
+  fillPrice     Float?   // real entry fill price
+  stopPrice     Float?   // original stop the resting SL is pegged to
+  slOrderId     String?  // resting STOP_LOSS (limit) order id
+  status        String   @default("OPEN") // "OPEN" | "CLOSED"
+  exitOrderId   String?
+  exitFillPrice Float?
+  realizedPnl   Float?
+  closeReason   String?  // "market" | "SL fired" | "reconciled-flat-on-boot" | ...
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+}
+
+// Durable per-day Dhan guardrail state. One row per IST day (self-expiring). Lets the
+// daily-loss kill-switch survive a restart — otherwise a redeploy re-enables live trading
+// and zeroes the day's loss even after the switch tripped.
+model DhanDailyState {
+  id                Int      @id @default(autoincrement())
+  dayKey            String   @unique // IST date string — matches DhanService.dayKey
+  realizedLossToday Float    @default(0)
+  ordersToday       Int      @default(0)
+  killed            Boolean  @default(false) // daily-loss kill-switch tripped today
+  updatedAt         DateTime @updatedAt
+}

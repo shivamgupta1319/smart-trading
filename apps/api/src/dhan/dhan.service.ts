@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TelegramService } from '../telegram/telegram.service';
+import { PrismaService } from '../prisma/prisma.service';
 import axios, { AxiosInstance } from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import * as crypto from 'crypto';
@@ -41,7 +42,7 @@ const SECURITY_IDS: Record<string, string> = {
 const ALLOWED_STRATEGY = 'EMA_RSI';
 
 @Injectable()
-export class DhanService {
+export class DhanService implements OnModuleInit {
   private readonly logger = new Logger(DhanService.name);
 
   private mode: Mode;
@@ -69,10 +70,12 @@ export class DhanService {
   private dayKey = '';
   private ordersToday = 0;
   private realizedLossToday = 0;
+  private killedToday = false; // daily-loss kill-switch tripped (persisted so a restart can't undo it)
 
   constructor(
     private readonly config: ConfigService,
     private readonly telegram: TelegramService,
+    private readonly prisma: PrismaService,
   ) {
     this.mode = (this.config.get<string>('DHAN_TRADING_MODE') || 'off') as Mode;
     this.clientId = this.config.get<string>('DHAN_CLIENT_ID');
@@ -106,6 +109,113 @@ export class DhanService {
     );
     if (this.mode !== 'off' && this.mode !== 'log' && !this.clientId) {
       this.logger.warn('DHAN_CLIENT_ID missing — sandbox/live orders will fail.');
+    }
+  }
+
+  // ── boot: rehydrate + reconcile durable state (survives api restart) ─────────
+
+  /**
+   * On startup, reload persisted positions and the daily kill-switch state so an api
+   * restart never orphans an open position or silently re-enables live trading. Fully
+   * defensive: any error (incl. a missing table before the migration is applied) is
+   * logged and skipped — the api must never crash-loop on boot.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.restoreDailyState();
+    } catch (err: any) {
+      this.logger.error(`[dhan:boot] daily-state restore skipped: ${this.errMsg(err)}`);
+    }
+    if (this.mode === 'off' || this.mode === 'log') return;
+    try {
+      await this.reconcileOpenPositions();
+    } catch (err: any) {
+      this.logger.error(`[dhan:boot] position reconcile skipped: ${this.errMsg(err)}`);
+    }
+  }
+
+  /** Reload today's guardrail counters; re-arm the kill-switch if it had tripped. */
+  private async restoreDailyState(): Promise<void> {
+    this.rolloverDay(); // sets this.dayKey (and persists a fresh row for a new day)
+    const row = await this.prisma.dhanDailyState.findUnique({ where: { dayKey: this.dayKey } });
+    if (!row) return;
+    this.realizedLossToday = row.realizedLossToday;
+    this.ordersToday = row.ordersToday;
+    this.killedToday = row.killed;
+    if (row.killed && this.mode === 'live') {
+      this.mode = 'off';
+      this.logger.error(
+        `[dhan:boot] kill-switch was tripped today (loss ₹${row.realizedLossToday.toFixed(0)}) — forcing mode=off (NOT re-enabling live).`,
+      );
+    } else if (this.ordersToday || this.realizedLossToday) {
+      this.logger.log(
+        `[dhan:boot] restored daily state: orders=${this.ordersToday} realizedLoss=₹${this.realizedLossToday.toFixed(0)}`,
+      );
+    }
+  }
+
+  /**
+   * Reload OPEN positions and reconcile each against Dhan's ACTUAL positions/orders.
+   * NEVER places an order here — it only rehydrates the in-memory map (so the normal
+   * scanner-driven exit can act) or marks a row CLOSED if the broker is already flat.
+   */
+  private async reconcileOpenPositions(): Promise<void> {
+    const rows = await this.prisma.dhanPosition.findMany({ where: { status: 'OPEN' } });
+    if (rows.length === 0) {
+      this.logger.log('[dhan:boot] no open positions to reconcile.');
+      return;
+    }
+    const brokerPositions = await this.getPositions();
+    const netQtyFor = (symbol: string): number =>
+      brokerPositions
+        .filter((p) => p.tradingSymbol === symbol)
+        .reduce((sum, p) => sum + Number(p.netQty || 0), 0);
+
+    for (const row of rows) {
+      const pos: OpenPosition = {
+        symbol: row.symbol,
+        side: row.side as Side,
+        qty: row.qty,
+        simEntryPrice: row.simEntryPrice,
+        orderId: row.orderId ?? undefined,
+        fillPrice: row.fillPrice ?? undefined,
+        stopPrice: row.stopPrice ?? undefined,
+        slOrderId: row.slOrderId ?? undefined,
+      };
+      const brokerNet = netQtyFor(row.symbol);
+
+      // If the resting stop already fired while we were down, the position is flat.
+      if (pos.slOrderId) {
+        const slStatus = await this.getOrderStatus(pos.slOrderId).catch(() => undefined);
+        if (slStatus?.orderStatus === 'TRADED') {
+          this.reconcileExit(pos, slStatus.averageTradedPrice, `reconcile #${row.signalId}`, `SL fired (boot)`);
+          await this.closePosition(row.signalId, {
+            exitOrderId: pos.slOrderId,
+            exitFillPrice: slStatus.averageTradedPrice,
+            closeReason: 'SL fired (reconciled on boot)',
+          });
+          continue;
+        }
+        if (slStatus && slStatus.orderStatus !== 'PENDING' && slStatus.orderStatus !== 'TRANSIT') {
+          this.logger.warn(
+            `[dhan:boot] signal #${row.signalId} resting SL is ${slStatus.orderStatus} — position now UNPROTECTED.`,
+          );
+          pos.slOrderId = undefined;
+        }
+      }
+
+      if (brokerNet === 0) {
+        // Broker is flat — exited while we were down (MIS square / manual / SL). Close the row.
+        this.logger.log(`[dhan:boot] signal #${row.signalId} (${row.symbol}) flat at broker — marking CLOSED.`);
+        await this.closePosition(row.signalId, { closeReason: 'reconciled-flat-on-boot' });
+        continue;
+      }
+
+      // Broker still holds it → rehydrate so the normal exit path can close it later.
+      this.openPositions.set(row.signalId, pos);
+      this.logger.log(
+        `[dhan:boot] rehydrated signal #${row.signalId}: ${pos.side} ${pos.symbol} ×${pos.qty} (brokerNet=${brokerNet}, sl=${pos.slOrderId ?? 'none'}).`,
+      );
     }
   }
 
@@ -159,7 +269,7 @@ export class DhanService {
     try {
       const res = await this.postOrder({ transactionType: side, symbol, qty });
       const orderId = res?.orderId as string | undefined;
-      const fillPrice = orderId ? await this.getFillPrice(orderId) : undefined;
+      const fillPrice = orderId ? await this.pollFill(orderId) : undefined;
       this.openPositions.set(input.signalId, {
         symbol,
         side,
@@ -170,6 +280,8 @@ export class DhanService {
         stopPrice,
       });
       this.ordersToday++;
+      await this.persistPosition(input.signalId); // durable BEFORE the SL step, in case it fails
+      await this.persistDailyState();
       this.logger.log(
         `[dhan:${this.mode}] ENTRY placed → ${tag} | orderId=${orderId} fill=₹${fillPrice ?? '?'} (sim ₹${input.entryPrice})`,
       );
@@ -182,6 +294,7 @@ export class DhanService {
           const slOrderId = sl?.orderId as string | undefined;
           const pos = this.openPositions.get(input.signalId);
           if (pos) pos.slOrderId = slOrderId;
+          await this.persistPosition(input.signalId); // record the resting SL id
           this.logger.log(
             `[dhan:${this.mode}] protective SL placed → ${exitSide} ${symbol} ×${qty} trigger ₹${stopPrice} | slOrderId=${slOrderId}`,
           );
@@ -234,7 +347,13 @@ export class DhanService {
       const status = await this.getOrderStatus(pos.slOrderId).catch(() => undefined);
       if (status?.orderStatus === 'TRADED') {
         // Broker stop already fired — position is flat. Reconcile from the SL fill; do NOT sell again.
-        this.reconcileExit(pos, status.averageTradedPrice, tag, `SL fired orderId=${pos.slOrderId}`);
+        const pnl = this.reconcileExit(pos, status.averageTradedPrice, tag, `SL fired orderId=${pos.slOrderId}`);
+        await this.closePosition(input.signalId, {
+          exitOrderId: pos.slOrderId,
+          exitFillPrice: status.averageTradedPrice,
+          realizedPnl: pnl,
+          closeReason: 'SL fired',
+        });
         this.openPositions.delete(input.signalId);
         return;
       }
@@ -243,7 +362,13 @@ export class DhanService {
         // Cancel failed — it may have just triggered. Re-check once.
         const recheck = await this.getOrderStatus(pos.slOrderId).catch(() => undefined);
         if (recheck?.orderStatus === 'TRADED') {
-          this.reconcileExit(pos, recheck.averageTradedPrice, tag, `SL fired mid-cancel orderId=${pos.slOrderId}`);
+          const pnl = this.reconcileExit(pos, recheck.averageTradedPrice, tag, `SL fired mid-cancel orderId=${pos.slOrderId}`);
+          await this.closePosition(input.signalId, {
+            exitOrderId: pos.slOrderId,
+            exitFillPrice: recheck.averageTradedPrice,
+            realizedPnl: pnl,
+            closeReason: 'SL fired mid-cancel',
+          });
           this.openPositions.delete(input.signalId);
           return;
         }
@@ -267,28 +392,42 @@ export class DhanService {
     try {
       const res = await this.postOrder({ transactionType: exitSide, symbol: pos.symbol, qty: pos.qty });
       const orderId = res?.orderId as string | undefined;
-      const exitFill = orderId ? await this.getFillPrice(orderId) : undefined;
-      this.reconcileExit(pos, exitFill, tag, `market orderId=${orderId}`);
+      const exitFill = orderId ? await this.pollFill(orderId) : undefined;
+      const pnl = this.reconcileExit(pos, exitFill, tag, `market orderId=${orderId}`);
+      await this.closePosition(input.signalId, {
+        exitOrderId: orderId,
+        exitFillPrice: exitFill,
+        realizedPnl: pnl,
+        closeReason: 'market',
+      });
     } catch (err: any) {
-      this.logger.error(`[dhan:${this.mode}] EXIT FAILED ${tag}: ${this.errMsg(err)}`);
+      // Exit didn't happen — DB row stays OPEN so a later boot-reconcile can catch it.
+      this.logger.error(`[dhan:${this.mode}] EXIT FAILED ${tag}: ${this.errMsg(err)} — position left OPEN for reconcile.`);
     } finally {
       this.openPositions.delete(input.signalId);
     }
   }
 
-  /** Log + book realized P&L for a completed exit (our market exit or a fired SL). Trips kill-switch on loss. */
-  private reconcileExit(pos: OpenPosition, exitFill: number | undefined, tag: string, source: string): void {
+  /**
+   * Log + book realized P&L for a completed exit (our market exit or a fired SL). Trips the
+   * kill-switch on loss. Returns the realized P&L (rupees) when both fills are known, else undefined.
+   */
+  private reconcileExit(pos: OpenPosition, exitFill: number | undefined, tag: string, source: string): number | undefined {
     if (pos.fillPrice !== undefined && exitFill !== undefined) {
       const perShare = pos.side === 'BUY' ? exitFill - pos.fillPrice : pos.fillPrice - exitFill;
       const realPnl = perShare * pos.qty;
-      if (realPnl < 0) this.realizedLossToday += -realPnl;
+      if (realPnl < 0) {
+        this.realizedLossToday += -realPnl;
+        void this.persistDailyState();
+      }
       this.logger.log(
         `[dhan:${this.mode}] EXIT → ${tag} | ${source} fill=₹${exitFill} realP&L=₹${realPnl.toFixed(2)}`,
       );
       this.checkKillSwitch();
-    } else {
-      this.logger.log(`[dhan:${this.mode}] EXIT → ${tag} | ${source} fill=₹${exitFill ?? '?'}`);
+      return realPnl;
     }
+    this.logger.log(`[dhan:${this.mode}] EXIT → ${tag} | ${source} fill=₹${exitFill ?? '?'}`);
+    return undefined;
   }
 
   // ── sizing & guards ─────────────────────────────────────────────────────────
@@ -304,11 +443,14 @@ export class DhanService {
   }
 
   private rolloverDay(): void {
+    // In-memory reset only (no DB write) — the persisted row is authoritative and is
+    // re-read on boot, so writing here would risk zeroing today's row during startup.
     const key = new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
     if (key !== this.dayKey) {
       this.dayKey = key;
       this.ordersToday = 0;
       this.realizedLossToday = 0;
+      this.killedToday = false;
     }
   }
 
@@ -318,6 +460,8 @@ export class DhanService {
         `[dhan] KILL-SWITCH: daily loss ₹${this.realizedLossToday.toFixed(0)} ≥ ₹${this.maxDailyLoss}. Reverting mode → off.`,
       );
       this.mode = 'off';
+      this.killedToday = true;
+      void this.persistDailyState(); // durable — a restart must NOT re-enable live today
       void this.telegram
         .sendReversalAlert({
           symbol: 'DHAN',
@@ -325,6 +469,76 @@ export class DhanService {
           reason: `KILL-SWITCH tripped — daily loss ₹${this.realizedLossToday.toFixed(0)}. Live trading disabled.`,
         })
         .catch(() => undefined);
+    }
+  }
+
+  // ── durable state (DB mirror) ────────────────────────────────────────────────
+  // All best-effort: a DB failure logs but never throws — the real order already
+  // happened, so losing the mirror must not break live execution.
+
+  /** Upsert the DhanPosition row from the current in-memory position (by signalId). */
+  private async persistPosition(signalId: number): Promise<void> {
+    const pos = this.openPositions.get(signalId);
+    if (!pos) return;
+    const data = {
+      symbol: pos.symbol,
+      side: pos.side,
+      qty: pos.qty,
+      simEntryPrice: pos.simEntryPrice,
+      orderId: pos.orderId ?? null,
+      fillPrice: pos.fillPrice ?? null,
+      stopPrice: pos.stopPrice ?? null,
+      slOrderId: pos.slOrderId ?? null,
+      status: 'OPEN',
+    };
+    try {
+      await this.prisma.dhanPosition.upsert({
+        where: { signalId },
+        create: { signalId, ...data },
+        update: data,
+      });
+    } catch (err: any) {
+      this.logger.error(`[dhan] persistPosition #${signalId} failed: ${this.errMsg(err)}`);
+    }
+  }
+
+  /** Mark a DhanPosition CLOSED with the reconciled exit details (kept for audit). */
+  private async closePosition(
+    signalId: number,
+    exit: { exitOrderId?: string; exitFillPrice?: number; realizedPnl?: number; closeReason: string },
+  ): Promise<void> {
+    try {
+      await this.prisma.dhanPosition.updateMany({
+        where: { signalId, status: 'OPEN' },
+        data: {
+          status: 'CLOSED',
+          exitOrderId: exit.exitOrderId ?? null,
+          exitFillPrice: exit.exitFillPrice ?? null,
+          realizedPnl: exit.realizedPnl ?? null,
+          closeReason: exit.closeReason,
+        },
+      });
+    } catch (err: any) {
+      this.logger.error(`[dhan] closePosition #${signalId} failed: ${this.errMsg(err)}`);
+    }
+  }
+
+  /** Upsert today's guardrail counters + kill-switch flag (by dayKey). */
+  private async persistDailyState(): Promise<void> {
+    if (!this.dayKey) return;
+    const data = {
+      realizedLossToday: this.realizedLossToday,
+      ordersToday: this.ordersToday,
+      killed: this.killedToday,
+    };
+    try {
+      await this.prisma.dhanDailyState.upsert({
+        where: { dayKey: this.dayKey },
+        create: { dayKey: this.dayKey, ...data },
+        update: data,
+      });
+    } catch (err: any) {
+      this.logger.error(`[dhan] persistDailyState failed: ${this.errMsg(err)}`);
     }
   }
 
@@ -420,14 +634,47 @@ export class DhanService {
     };
   }
 
-  /** Fetch the average executed price for an order (best-effort; returns undefined if unavailable). */
-  private async getFillPrice(orderId: string): Promise<number | undefined> {
-    try {
-      return (await this.getOrderStatus(orderId)).averageTradedPrice;
-    } catch (err: any) {
-      this.logger.warn(`[dhan] could not fetch fill for order ${orderId}: ${this.errMsg(err)}`);
-      return undefined;
+  /**
+   * Poll an order until it fills, returning the average traded price. A MARKET fill can lag
+   * its placement response, so a single read may miss it. Best-effort: undefined if not TRADED
+   * within the budget (the order still went through; we just couldn't capture the exact fill).
+   */
+  private async pollFill(orderId: string, tries = 5, delayMs = 400): Promise<number | undefined> {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const s = await this.getOrderStatus(orderId);
+        if (s.orderStatus === 'TRADED') return s.averageTradedPrice;
+        if (s.orderStatus === 'REJECTED' || s.orderStatus === 'CANCELLED') return undefined;
+      } catch (err: any) {
+        this.logger.warn(`[dhan] fill poll for order ${orderId} errored: ${this.errMsg(err)}`);
+      }
+      if (i < tries - 1) await this.sleep(delayMs);
     }
+    return undefined;
+  }
+
+  /** Read Dhan's current positions (for boot reconciliation). Returns [] on any error. */
+  private async getPositions(): Promise<Array<{ tradingSymbol: string; netQty: number; productType?: string }>> {
+    try {
+      const data = await this.authed((token) =>
+        this.http
+          .get(`${this.baseUrl}/positions`, { headers: { 'access-token': token }, timeout: 10000 })
+          .then((r) => r.data),
+      );
+      const rows = Array.isArray(data) ? data : [];
+      return rows.map((p: any) => ({
+        tradingSymbol: p.tradingSymbol,
+        netQty: Number(p.netQty ?? 0),
+        productType: p.productType,
+      }));
+    } catch (err: any) {
+      this.logger.error(`[dhan] getPositions failed: ${this.errMsg(err)}`);
+      return [];
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
