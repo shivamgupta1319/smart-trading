@@ -9,6 +9,7 @@ import {
   marginOf,
 } from '../common/risk';
 import { toNum, round2, safePct, normalizeTradeMoney } from '../common/money';
+import { roundTripCost, LIVE_COSTS_ENABLED } from '../common/costs';
 
 @Injectable()
 export class TradesService {
@@ -342,10 +343,13 @@ export class TradesService {
     const isBuy = trade.signalType === 'BUY';
     const pnlPerShare = isBuy ? exitPrice - trade.entryPrice : trade.entryPrice - exitPrice;
     const finalLotPnl = pnlPerShare * trade.remainingQty;
-    const totalPnl = trade.realizedPnl + finalLotPnl;
-    // % of actual margin deployed (not the leveraged notional), scratch band for
-    // outcome, and realizedPnl folded in so it equals pnl on close — matches
-    // SignalsService.closeWithPrice.
+    const grossPnl = trade.realizedPnl + finalLotPnl;
+    // NET of round-trip transaction costs, margin-based %, scratch band, realizedPnl
+    // folded in — identical semantics to SignalsService.closeWithPrice.
+    const buyValue = isBuy ? trade.quantity * trade.entryPrice : trade.quantity * exitPrice;
+    const sellValue = isBuy ? trade.quantity * exitPrice : trade.quantity * trade.entryPrice;
+    const cost = LIVE_COSTS_ENABLED ? roundTripCost(buyValue, sellValue, trade.holdDuration) : 0;
+    const totalPnl = grossPnl - cost;
     const pnlPercent = safePct(totalPnl, marginOf(trade.capitalUsed, trade.holdDuration));
     const outcome = classifyOutcome(totalPnl, trade.riskAmount);
 

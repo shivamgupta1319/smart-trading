@@ -40,6 +40,9 @@ services:
       API_KEY: ${API_KEY}
       APP_PIN: ${APP_PIN:-}
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5174,https://trading-v2.pseo.cloud}"
+      # Book live P&L net of Indian transaction costs (matches the backtest). Set
+      # false to revert to gross booking. See apps/api/src/common/costs.ts.
+      LIVE_COSTS_ENABLED: ${LIVE_COSTS_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy

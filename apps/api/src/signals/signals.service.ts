@@ -10,6 +10,7 @@ import {
   marginOf,
 } from "../common/risk";
 import { toNum, round2, safePct, normalizeTradeMoney } from "../common/money";
+import { roundTripCost, LIVE_COSTS_ENABLED } from "../common/costs";
 
 @Injectable()
 export class SignalsService {
@@ -261,7 +262,13 @@ export class SignalsService {
         const isBuy = trade.signalType === "BUY";
         const pnlPerShare = isBuy ? exitPrice - trade.entryPrice : trade.entryPrice - exitPrice;
         const finalLotPnl = pnlPerShare * trade.remainingQty;
-        const totalPnl = trade.realizedPnl + finalLotPnl;
+        const grossPnl = trade.realizedPnl + finalLotPnl;
+        // Book NET of Indian transaction costs (round-trip on the full position),
+        // so live P&L matches the cost-aware backtest. buy/sell legs flip for shorts.
+        const buyValue = isBuy ? trade.quantity * trade.entryPrice : trade.quantity * exitPrice;
+        const sellValue = isBuy ? trade.quantity * exitPrice : trade.quantity * trade.entryPrice;
+        const cost = LIVE_COSTS_ENABLED ? roundTripCost(buyValue, sellValue, trade.holdDuration) : 0;
+        const totalPnl = grossPnl - cost;
         // P&L as a % of the actual cash (margin) deployed, not the leveraged
         // notional in capitalUsed — comparable to the cell's ROI on its ₹10k fund.
         const pnlPercent = safePct(totalPnl, marginOf(trade.capitalUsed, trade.holdDuration));
