@@ -52,6 +52,18 @@ Token auto-refreshed via TOTP just before (no manual rotation). No DH-905 — Tr
 
 **VERIFY NEXT (Fix B, tomorrow's open):** SL primitives already proven live (controlled test ✅). Remaining = the app-integrated flow: on the next EMA_RSI HDFCBANK/ADANIENT signal watch for `ENTRY placed` → `protective SL placed … slOrderId=…`, and confirm the **Dhan app now shows a stop-loss** on the position. On its exit: `cancelled protective SL …` → `EXIT → … market`. If a stop is ever rejected → Telegram "POSITION UNPROTECTED" (fail-open); tune `DHAN_SL_LIMIT_BUFFER_PCT` in `infra/.env` (no rebuild — just restart api) if it's an LPP-band rejection.
 
+### 18:00 IST — Durability: positions + kill-switch survive restart (image `7f54e5c7`)
+
+**Why:** the ADANIENT orphan earlier today happened because `openPositions` was in-memory — a mid-position redeploy lost tracking → MIS auto-square + ₹20 fee. Fixed the whole class of problem.
+
+- **`DhanPosition` table** mirrors every live position (entry/SL/exit order ids + real fill prices). On boot, `DhanService.onModuleInit` reloads OPEN rows and **reconciles against Dhan's actual `/positions`**: broker still holds it → rehydrate the map (normal exit path resumes); broker flat → mark CLOSED `reconciled-flat-on-boot`; resting SL already `TRADED` → book it. **Never places an order during reconcile.** A row is marked CLOSED only on *confirmed* flat (SL fired / market exit ok); on abort/exit-fail it stays OPEN so the next boot catches it.
+- **`DhanDailyState` table** (per IST day) persists `realizedLossToday` + `ordersToday` + a `killed` flag. On boot, if `killed` for today → **force `mode=off`** (a restart can no longer undo a daily-loss kill-switch or zero the day's loss).
+- Also: exit/entry fills now **polled until TRADED** (`pollFill`) instead of a single read; new `getPositions()` helper.
+- **Validated live (2026-07-13, market closed):** injected a fake OPEN ADANIENT row → restart → boot marked it CLOSED `reconciled-flat-on-boot` ✅; injected `killed:true` for today → restart → boot logged `forcing mode=off (NOT re-enabling live)` ✅. Test rows deleted; mode restored to live; tables empty.
+- **Migration gotcha:** `prisma migrate deploy` fails here (`datasource.url` missing — Prisma 7 driver-adapter uses `DATABASE_URL` at runtime, not in schema). Applied the DDL out-of-band via `psql < migration.sql` and recorded it in `_prisma_migrations` (checksum `83f754…`). Runtime PrismaService (adapter) is untouched. Migration file: `apps/api/prisma/migrations/20260713172434_add_dhan_position/`.
+- **Files (UNCOMMITTED on roadmap-v1):** `apps/api/prisma/schema.prisma`, the new migration dir, `apps/api/src/dhan/dhan.module.ts` (imports PrismaModule), `apps/api/src/dhan/dhan.service.ts`.
+- **Remaining full-path verification (tomorrow):** a *real* entry → restart mid-position → confirm the DB row rehydrates and the real exit still fires (no orphan).
+
 ---
 
 ## System topology (how to touch things)
