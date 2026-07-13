@@ -29,6 +29,8 @@ interface OpenPosition {
   simEntryPrice: number;
   orderId?: string;
   fillPrice?: number;
+  stopPrice?: number; // original stop the resting broker SL is pegged to
+  slOrderId?: string; // resting STOP_LOSS (limit) order id (catastrophic backstop)
 }
 
 // Hard whitelist: symbol -> Dhan NSE_EQ securityId (confirmed from Dhan scrip master).
@@ -54,6 +56,7 @@ export class DhanService {
   private readonly maxQty: number; // absolute per-order share cap
   private readonly maxOrdersPerDay: number;
   private readonly maxDailyLoss: number; // rupees; trips kill-switch
+  private readonly slLimitBufferPct: number; // limit offset past the SL trigger (keeps it inside LPP)
 
   // Shared HTTP client for ALL Dhan calls. When DHAN_HTTP_PROXY is set, every request
   // (token generation AND order placement) egresses through the static-IP proxy — Dhan
@@ -83,6 +86,7 @@ export class DhanService {
     this.maxQty = Number(this.config.get('DHAN_MAX_QTY') ?? 20);
     this.maxOrdersPerDay = Number(this.config.get('DHAN_MAX_ORDERS_PER_DAY') ?? 20);
     this.maxDailyLoss = Number(this.config.get('DHAN_MAX_DAILY_LOSS') ?? 1000);
+    this.slLimitBufferPct = Number(this.config.get('DHAN_SL_LIMIT_BUFFER_PCT') ?? 0.0015);
 
     // Static-IP egress: route every Dhan request through the proxy when configured.
     const proxyUrl = this.config.get<string>('DHAN_HTTP_PROXY');
@@ -114,6 +118,7 @@ export class DhanService {
     signalType: string;
     strategyName: string;
     entryPrice: number;
+    stopLoss?: number;
   }): Promise<void> {
     if (this.mode === 'off') return;
     const symbol = input.symbol || '';
@@ -134,11 +139,18 @@ export class DhanService {
       return;
     }
 
+    const exitSide: Side = side === 'BUY' ? 'SELL' : 'BUY';
+    const stopPrice = input.stopLoss && input.stopLoss > 0 ? this.roundTick(input.stopLoss) : undefined;
     const tag = `${side} ${symbol} ×${qty} MIS MARKET (signal #${input.signalId})`;
 
     if (this.mode === 'log') {
       this.logger.log(`[dhan:LOG] INTENDED ENTRY → ${tag} | securityId=${SECURITY_IDS[symbol]}`);
-      this.openPositions.set(input.signalId, { symbol, side, qty, simEntryPrice: input.entryPrice });
+      if (stopPrice) {
+        this.logger.log(
+          `[dhan:LOG] INTENDED PROTECTIVE STOP → ${exitSide} ${symbol} ×${qty} SL trigger ₹${stopPrice}`,
+        );
+      }
+      this.openPositions.set(input.signalId, { symbol, side, qty, simEntryPrice: input.entryPrice, stopPrice });
       this.ordersToday++;
       return;
     }
@@ -155,11 +167,42 @@ export class DhanService {
         simEntryPrice: input.entryPrice,
         orderId,
         fillPrice,
+        stopPrice,
       });
       this.ordersToday++;
       this.logger.log(
         `[dhan:${this.mode}] ENTRY placed → ${tag} | orderId=${orderId} fill=₹${fillPrice ?? '?'} (sim ₹${input.entryPrice})`,
       );
+
+      // Catastrophic backstop: rest a broker-side STOP_LOSS (limit) at the ORIGINAL stop.
+      // Fail-open — the entry already exists; never undo it, just alert loudly if unprotected.
+      if (stopPrice) {
+        try {
+          const sl = await this.postProtectiveStop({ transactionType: exitSide, symbol, qty, triggerPrice: stopPrice });
+          const slOrderId = sl?.orderId as string | undefined;
+          const pos = this.openPositions.get(input.signalId);
+          if (pos) pos.slOrderId = slOrderId;
+          this.logger.log(
+            `[dhan:${this.mode}] protective SL placed → ${exitSide} ${symbol} ×${qty} trigger ₹${stopPrice} | slOrderId=${slOrderId}`,
+          );
+        } catch (slErr: any) {
+          this.logger.error(
+            `[dhan:${this.mode}] PROTECTIVE STOP FAILED for ${symbol} (signal #${input.signalId}): ${this.errMsg(slErr)}`,
+          );
+          void this.telegram
+            .sendAlert(
+              'DHAN: POSITION UNPROTECTED',
+              `Entry filled but the broker stop-loss was REJECTED for <b>${symbol}</b> ×${qty} (signal #${input.signalId}). ` +
+                `No resting SL at the broker — protected only by the soft engine stop and MIS EOD square-off. ` +
+                `Error: ${this.errMsg(slErr)}`,
+            )
+            .catch(() => undefined);
+        }
+      } else {
+        this.logger.warn(
+          `[dhan:${this.mode}] no stopLoss provided for ${symbol} (signal #${input.signalId}) — NO broker stop placed`,
+        );
+      }
     } catch (err: any) {
       this.logger.error(`[dhan:${this.mode}] ENTRY FAILED ${tag}: ${this.errMsg(err)}`);
     }
@@ -176,6 +219,9 @@ export class DhanService {
 
     if (this.mode === 'log') {
       const perShare = pos.side === 'BUY' ? input.exitPrice - pos.simEntryPrice : pos.simEntryPrice - input.exitPrice;
+      if (pos.slOrderId || pos.stopPrice) {
+        this.logger.log(`[dhan:LOG] INTENDED CANCEL protective SL (signal #${input.signalId})`);
+      }
       this.logger.log(
         `[dhan:LOG] INTENDED EXIT → ${tag} | sim exit ₹${input.exitPrice} (sim P&L ≈ ₹${(perShare * pos.qty).toFixed(2)})`,
       );
@@ -183,26 +229,65 @@ export class DhanService {
       return;
     }
 
+    // Coordinate with the resting broker stop BEFORE placing our own market exit.
+    if (pos.slOrderId) {
+      const status = await this.getOrderStatus(pos.slOrderId).catch(() => undefined);
+      if (status?.orderStatus === 'TRADED') {
+        // Broker stop already fired — position is flat. Reconcile from the SL fill; do NOT sell again.
+        this.reconcileExit(pos, status.averageTradedPrice, tag, `SL fired orderId=${pos.slOrderId}`);
+        this.openPositions.delete(input.signalId);
+        return;
+      }
+      const cancelled = await this.cancelOrder(pos.slOrderId).then(() => true).catch(() => false);
+      if (!cancelled) {
+        // Cancel failed — it may have just triggered. Re-check once.
+        const recheck = await this.getOrderStatus(pos.slOrderId).catch(() => undefined);
+        if (recheck?.orderStatus === 'TRADED') {
+          this.reconcileExit(pos, recheck.averageTradedPrice, tag, `SL fired mid-cancel orderId=${pos.slOrderId}`);
+          this.openPositions.delete(input.signalId);
+          return;
+        }
+        // Cannot confirm the SL is cancelled or filled — do NOT place a market exit (double-sell → net short).
+        this.logger.error(
+          `[dhan:${this.mode}] EXIT ABORTED ${tag}: could not cancel resting SL ${pos.slOrderId}. Leaving broker stop / MIS EOD to flatten.`,
+        );
+        void this.telegram
+          .sendAlert(
+            'DHAN: EXIT ABORTED (stop cancel failed)',
+            `Could not cancel the resting stop for <b>${pos.symbol}</b> ×${pos.qty} (signal #${input.signalId}); ` +
+              `skipped the market exit to avoid a double-sell. The position will be closed by the resting SL or MIS EOD square-off. Verify manually.`,
+          )
+          .catch(() => undefined);
+        this.openPositions.delete(input.signalId);
+        return;
+      }
+      this.logger.log(`[dhan:${this.mode}] cancelled protective SL ${pos.slOrderId} (signal #${input.signalId})`);
+    }
+
     try {
       const res = await this.postOrder({ transactionType: exitSide, symbol: pos.symbol, qty: pos.qty });
       const orderId = res?.orderId as string | undefined;
       const exitFill = orderId ? await this.getFillPrice(orderId) : undefined;
-      // Reconcile real P&L from actual fills where available.
-      if (pos.fillPrice !== undefined && exitFill !== undefined) {
-        const perShare = pos.side === 'BUY' ? exitFill - pos.fillPrice : pos.fillPrice - exitFill;
-        const realPnl = perShare * pos.qty;
-        if (realPnl < 0) this.realizedLossToday += -realPnl;
-        this.logger.log(
-          `[dhan:${this.mode}] EXIT placed → ${tag} | orderId=${orderId} fill=₹${exitFill} realP&L=₹${realPnl.toFixed(2)}`,
-        );
-        this.checkKillSwitch();
-      } else {
-        this.logger.log(`[dhan:${this.mode}] EXIT placed → ${tag} | orderId=${orderId} fill=₹${exitFill ?? '?'}`);
-      }
+      this.reconcileExit(pos, exitFill, tag, `market orderId=${orderId}`);
     } catch (err: any) {
       this.logger.error(`[dhan:${this.mode}] EXIT FAILED ${tag}: ${this.errMsg(err)}`);
     } finally {
       this.openPositions.delete(input.signalId);
+    }
+  }
+
+  /** Log + book realized P&L for a completed exit (our market exit or a fired SL). Trips kill-switch on loss. */
+  private reconcileExit(pos: OpenPosition, exitFill: number | undefined, tag: string, source: string): void {
+    if (pos.fillPrice !== undefined && exitFill !== undefined) {
+      const perShare = pos.side === 'BUY' ? exitFill - pos.fillPrice : pos.fillPrice - exitFill;
+      const realPnl = perShare * pos.qty;
+      if (realPnl < 0) this.realizedLossToday += -realPnl;
+      this.logger.log(
+        `[dhan:${this.mode}] EXIT → ${tag} | ${source} fill=₹${exitFill} realP&L=₹${realPnl.toFixed(2)}`,
+      );
+      this.checkKillSwitch();
+    } else {
+      this.logger.log(`[dhan:${this.mode}] EXIT → ${tag} | ${source} fill=₹${exitFill ?? '?'}`);
     }
   }
 
@@ -246,7 +331,6 @@ export class DhanService {
   // ── Dhan HTTP ───────────────────────────────────────────────────────────────
 
   private async postOrder(o: { transactionType: Side; symbol: string; qty: number }) {
-    const token = await this.getToken();
     const body = {
       dhanClientId: this.clientId,
       transactionType: o.transactionType,
@@ -257,28 +341,126 @@ export class DhanService {
       securityId: SECURITY_IDS[o.symbol],
       quantity: String(o.qty),
     };
-    const res = await this.http.post(`${this.baseUrl}/orders`, body, {
-      headers: { 'access-token': token, 'Content-Type': 'application/json' },
-      timeout: 10000,
-    });
-    return res.data;
+    return this.authed((token) =>
+      this.http
+        .post(`${this.baseUrl}/orders`, body, {
+          headers: { 'access-token': token, 'Content-Type': 'application/json' },
+          timeout: 10000,
+        })
+        .then((r) => r.data),
+    );
+  }
+
+  /**
+   * Rest a STOP_LOSS (limit) order — the catastrophic broker-side backstop (opposite side of the entry).
+   * Dhan REJECTS a below-LTP SELL STOP_LOSS_MARKET ("Trigger Price should be greater than Price"), so we
+   * use a limit SL and place the limit just past the trigger to fill like a market order in the common case:
+   *   - SELL stop (protect a long):  limit < triggerPrice < LTP   (limit a hair BELOW the trigger)
+   *   - BUY stop  (protect a short): LTP < triggerPrice < limit    (limit a hair ABOVE the trigger)
+   * The limit buffer is kept small (default 0.15%) so it stays inside Dhan's Limit-Price-Protection band.
+   * Worst case (a violent gap through the limit) the SL rests unfilled and MIS EOD square-off is the final net.
+   */
+  private async postProtectiveStop(o: {
+    transactionType: Side;
+    symbol: string;
+    qty: number;
+    triggerPrice: number;
+  }) {
+    const buf = this.slLimitBufferPct;
+    const limit =
+      o.transactionType === 'SELL'
+        ? this.roundTick(o.triggerPrice * (1 - buf))
+        : this.roundTick(o.triggerPrice * (1 + buf));
+    const body = {
+      dhanClientId: this.clientId,
+      transactionType: o.transactionType,
+      exchangeSegment: 'NSE_EQ',
+      productType: 'INTRADAY',
+      orderType: 'STOP_LOSS',
+      validity: 'DAY',
+      securityId: SECURITY_IDS[o.symbol],
+      quantity: String(o.qty),
+      price: limit.toFixed(2),
+      triggerPrice: o.triggerPrice.toFixed(2),
+    };
+    return this.authed((token) =>
+      this.http
+        .post(`${this.baseUrl}/orders`, body, {
+          headers: { 'access-token': token, 'Content-Type': 'application/json' },
+          timeout: 10000,
+        })
+        .then((r) => r.data),
+    );
+  }
+
+  /** Cancel a resting order by id. Throws on failure so the caller can react (e.g. re-check status). */
+  private async cancelOrder(orderId: string): Promise<void> {
+    await this.authed((token) =>
+      this.http.delete(`${this.baseUrl}/orders/${orderId}`, {
+        headers: { 'access-token': token },
+        timeout: 10000,
+      }),
+    );
+  }
+
+  /** Read an order's status + average traded price. Throws on transport/auth failure. */
+  private async getOrderStatus(
+    orderId: string,
+  ): Promise<{ orderStatus?: string; averageTradedPrice?: number }> {
+    const data = await this.authed((token) =>
+      this.http
+        .get(`${this.baseUrl}/orders/${orderId}`, { headers: { 'access-token': token }, timeout: 10000 })
+        .then((r) => r.data),
+    );
+    const d = Array.isArray(data) ? data[0] : data;
+    const price = Number(d?.averageTradedPrice ?? d?.price);
+    return {
+      orderStatus: d?.orderStatus,
+      averageTradedPrice: Number.isFinite(price) && price > 0 ? price : undefined,
+    };
   }
 
   /** Fetch the average executed price for an order (best-effort; returns undefined if unavailable). */
   private async getFillPrice(orderId: string): Promise<number | undefined> {
     try {
-      const token = await this.getToken();
-      const res = await this.http.get(`${this.baseUrl}/orders/${orderId}`, {
-        headers: { 'access-token': token },
-        timeout: 10000,
-      });
-      const d = Array.isArray(res.data) ? res.data[0] : res.data;
-      const price = Number(d?.averageTradedPrice ?? d?.price);
-      return Number.isFinite(price) && price > 0 ? price : undefined;
+      return (await this.getOrderStatus(orderId)).averageTradedPrice;
     } catch (err: any) {
       this.logger.warn(`[dhan] could not fetch fill for order ${orderId}: ${this.errMsg(err)}`);
       return undefined;
     }
+  }
+
+  /**
+   * Run an authed Dhan request; on an auth error (a token invalidated out from under us by another
+   * Dhan session — app login, concurrent token-gen, etc.) refresh the token once and retry.
+   * Auth errors are pre-execution rejections, so a single retry cannot double-place an order.
+   */
+  private async authed<T>(fn: (token: string) => Promise<T>): Promise<T> {
+    let token = await this.getToken();
+    try {
+      return await fn(token);
+    } catch (err: any) {
+      if (!this.isAuthError(err)) throw err;
+      this.logger.warn('[dhan] auth error → refreshing token and retrying once');
+      this.invalidateToken();
+      token = await this.getToken();
+      return await fn(token);
+    }
+  }
+
+  private invalidateToken(): void {
+    this.cachedToken = undefined;
+  }
+
+  private isAuthError(err: any): boolean {
+    const status = err?.response?.status;
+    const code = err?.response?.data?.errorCode;
+    return status === 401 || code === 'DH-901' || code === 'DH-906';
+  }
+
+  /** Round to the NSE ₹0.05 tick — Dhan rejects off-tick trigger prices. */
+  private roundTick(price: number): number {
+    return Math.round(price / 0.05) * 0.05;
   }
 
   // ── token manager (TOTP auto-refresh) ────────────────────────────────────────

@@ -217,6 +217,35 @@ export class TelegramService {
     }
   }
 
+  /** Generic operational alert (e.g. Dhan live-execution warnings). Title + free-text body. */
+  async sendAlert(title: string, body: string) {
+    if (!this.enabled) return;
+
+    const message = [
+      `🚨 <b>${title}</b>`,
+      ``,
+      body,
+      ``,
+      `⏰ ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+    ].join('\n');
+
+    try {
+      await axios.post(
+        `https://api.telegram.org/bot${this.botToken}/sendMessage`,
+        {
+          chat_id: this.chatId,
+          text: message,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        },
+        { timeout: 10000, family: 4 },
+      );
+      this.logger.log(`Telegram alert sent: ${title}`);
+    } catch (err: any) {
+      this.logger.error(`Failed to send alert: ${err?.message || err}`);
+    }
+  }
+
   async sendPartialCloseAlert(data: {
     symbol: string;
     percent: number;

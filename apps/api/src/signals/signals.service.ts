@@ -103,6 +103,7 @@ export class SignalsService {
         signalType: dto.signalType,
         strategyName: dto.strategyName,
         entryPrice: dto.entryPrice,
+        stopLoss: dto.stopLoss,
       });
     } catch (err: unknown) {
       if (err instanceof Error) {

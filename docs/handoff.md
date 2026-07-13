@@ -1,6 +1,7 @@
 # Handoff / Resume Doc — Dhan Live Execution + v1 Hygiene
 
-**Last updated:** 2026-07-09 (market open ~09:20 IST)
+**Last updated:** 2026-07-13 (market open ~10:10 IST) — 🎉 FIRST REAL FILL CONFIRMED
+**Prev update:** 2026-07-09 (market open ~09:20 IST)
 **Branch:** `roadmap-v1` (all work committed here; not pushed to origin unless you push)
 **Design reference:** [dhan-live-execution.md](dhan-live-execution.md) · [performance-review-2026-07.md](performance-review-2026-07.md)
 
@@ -12,7 +13,44 @@ Two tracks in flight:
 1. **Dhan real-money execution** — Stage 1 (**log mode**) is **live on work-pc and validated**. It logs the exact real orders it *would* place for EMA_RSI on HDFCBANK/ADANIENT, without touching money. Stages remaining: sandbox → live.
 2. **v1 hygiene** — all 4 tasks (prune losers, symbol filter, swing time-stop, Telegram digest) are **done, deployed, and committed**. Prune + digest are verified live; the time-stop verifies at next market open.
 
-**🟢 LIVE (real money) since 2026-07-09 ~10:21 IST.** `DHAN_TRADING_MODE=live`, ₹10k funded (`availabelBalance:10000` confirmed), validating at ₹12,500/order (~2.5x, half/half). **Token auto-refresh WORKS** — TOTP seed was correct all along; the earlier "Invalid TOTP" was a stale 17h-old container holding the pre-update secret. App auto-mints a 24h token via TOTP + caches ~24h (**no daily manual rotation**); manual `DHAN_ACCESS_TOKEN` remains as fallback. Note: Dhan throttles token gen to once/2min (fine — cached 24h). Instant kill: set `DHAN_TRADING_MODE=off` + `docker compose up -d api`.
+**🟢 LIVE (real money) since 2026-07-09 ~10:21 IST. 🎉 FIRST REAL FILL 2026-07-13 10:05 IST** — BUY ADANIENT ×3 @ ₹3170 (TRADED, +₹3 vs sim; see Monday 07-13 section ↓). `DHAN_TRADING_MODE=live`, ₹10k funded (`availabelBalance:10000` confirmed), validating at ₹12,500/order (~2.5x, half/half). **Token auto-refresh WORKS** — TOTP seed was correct all along; the earlier "Invalid TOTP" was a stale 17h-old container holding the pre-update secret. App auto-mints a 24h token via TOTP + caches ~24h (**no daily manual rotation**); manual `DHAN_ACCESS_TOKEN` remains as fallback. Note: Dhan throttles token gen to once/2min (fine — cached 24h). Instant kill: set `DHAN_TRADING_MODE=off` + `docker compose up -d api`.
+
+---
+
+## ▶ MONDAY 2026-07-13 — 🎉 FIRST REAL FILL (Gate B held under a real order)
+
+**Milestone:** at **10:05:33 IST** the first real EMA_RSI order fired and **filled**:
+`[dhan:live] ENTRY placed → BUY ADANIENT ×3 MIS MARKET (signal #631) | orderId=34126071324201`.
+Token auto-refreshed via TOTP just before (no manual rotation). No DH-905 — TrueIP static-IP proxy held under a live order.
+
+**Reconciliation (independent read-only query vs Dhan `/orders`,`/positions`,`/fundlimit`):**
+- Order `34126071324201`: **orderStatus=TRADED, filledQty 3/3, averageTradedPrice ₹3170, INTRADAY, "TRADE CONFIRMED"** (updateTime 10:05:34).
+- Position: ADANIENT netQty 3, buyAvg ₹3170, uPnL −₹2.1.
+- Funds: available ₹8095.15, utilized ₹1904, SOD ₹10000 → MIS ~5× (₹9510 notional on ₹1904 margin).
+- vs sim (trade id 628 / signal #631): entry ₹3167 → real ₹3170 = **+₹3 slippage (0.09%)**; sim qty 66 → capped **3** by ₹12,500 notional. Side/symbol/strategy/product all ✅.
+- Recon helper: `scratchpad/dhan-recon.js` (run inside api container: `docker cp` → `docker exec -e NODE_PATH=/app/node_modules -w /app smart-trading-api node /tmp/dhan-recon.js <orderId>`). Generates its own TOTP token; read-only.
+
+**Open item (today):** the ADANIENT ×3 MIS position is **OPEN** — awaiting the EXIT order when sim #631 closes (target ₹3227 / SL ₹3137), else MIS auto-squares ~15:20 IST. Watcher armed for `EXIT placed/FAILED` + kill-switch. Reconcile the exit fill vs sim exit when it lands = first full round-trip on real money.
+
+**Config confirmed live (work-pc `infra/.env`):** `DHAN_TRADING_MODE=live`, proxy set, **no `DHAN_MAX_QTY`** → default cap ₹12,500 notional / maxQty 20 (the validated ~2.5x size, NOT the 1-share idea). api container up 2 days, holds config + in-memory position.
+
+**NEXT:** (1) confirm EXIT fills & reconcile round-trip P&L vs sim; (2) if clean over a few days, consider scaling toward full ~5x; (3) still deferred: persist `openPositions` to DB (only matters if api restarts mid-position — MIS auto-squares EOD as backstop).
+
+### 12:50 IST — DH-906 token incident + broker-stop feature shipped
+
+**Incident (RESOLVED):** at 10:40 IST signal #634's HDFCBANK entry failed `DH-906 Invalid Token`; #634 = *missed entry* (no real position, nothing orphaned). Root cause: Dhan sessions are single-active, so a second token generation (a read-only recon script + likely the user's Dhan-app login) invalidated the container's cached token, and `getToken()` only regenerated on *time*-expiry → every live order (incl. the pending ADANIENT #631 exit) wedged on the dead token. Our defect, independent of trigger.
+
+**Shipped (deployed 12:57 IST, image digest `06c3f242…`, container recreated → fresh token, trading restored):**
+- **Fix A — token-invalidation recovery:** new `authed()` wrapper in `dhan.service.ts` retries any order once on `DH-906`/`DH-901`/401 after clearing the cached token. Self-heals whenever another Dhan session invalidates ours (app login, concurrent gen). *Tip: avoid staying logged into the Dhan app during hours.*
+- **Fix B — catastrophic broker-side protective stop (the "no stop in the app" fix):** every live entry now rests a resting stop at the ORIGINAL stop (never trailed — pure disaster backstop). `placeEntry` threads `dto.stopLoss`; fail-open (if the stop is rejected → entry stands + Telegram "POSITION UNPROTECTED"). `placeExit` checks the resting stop first: if already `TRADED` → reconcile, don't double-sell; else cancel it, then market-exit; if cancel can't be confirmed → abort market exit + alert (never double-sell). New primitives: `postProtectiveStop`, `cancelOrder` (DELETE /orders/{id}), `getOrderStatus`. Added `TelegramService.sendAlert()`.
+  - **⚠️ Dhan order-type gotcha (learned via live controlled tests):** a below-LTP SELL `STOP_LOSS_MARKET` is **REJECTED** by Dhan (`DH-906 "Trigger Price should be greater than Price"` — it reads Price=LTP). The protective stop MUST be a **`STOP_LOSS` (limit)** with `limit < triggerPrice < LTP` (rule: SELL trigger below LTP, limit below trigger; inverse for BUY). Limit is placed a small buffer past the trigger (`DHAN_SL_LIMIT_BUFFER_PCT`, default **0.0015 = 0.15%**) to stay inside Dhan's Limit-Price-Protection band (~1.6% proven) while still filling like a market order in the common case. **Prices MUST be ₹0.05-tick-rounded** (off-tick → OMS REJECTED). Validated live on ADANIENT (held long): `STOP_LOSS` trig 3139 / limit 3134.30 → PENDING → cancelled ✅.
+  - Helpers: `scratchpad/dhan-sltest.js` (single place/status/cancel), `dhan-slbatch.js` (multi-variant sweep, one token), `dhan-orderbook.js` (list/flag pending).
+- Files: `apps/api/src/dhan/dhan.service.ts`, `apps/api/src/signals/signals.service.ts` (call site), `apps/api/src/telegram/telegram.service.ts` (sendAlert). **UNCOMMITTED on roadmap-v1.** Deployed image digest `e442cfa3` (≈15:00 IST).
+- Deferred follow-ups: trail the broker stop (PHASE2/3 modify-order), real partial-closes mirrored to broker, DB-persist `openPositions`, and (optional) true market-on-trigger stop if Dhan later supports below-LTP SELL SL-M.
+
+**Incident side-effect:** the api restart wiped in-memory `openPositions` → **ADANIENT #631 real position orphaned** (netQty 3 @ ₹3170, was +₹60) → will square via **MIS EOD ~15:20** (no broker stop; entered pre-fix). Benign.
+
+**VERIFY NEXT (Fix B, tomorrow's open):** SL primitives already proven live (controlled test ✅). Remaining = the app-integrated flow: on the next EMA_RSI HDFCBANK/ADANIENT signal watch for `ENTRY placed` → `protective SL placed … slOrderId=…`, and confirm the **Dhan app now shows a stop-loss** on the position. On its exit: `cancelled protective SL …` → `EXIT → … market`. If a stop is ever rejected → Telegram "POSITION UNPROTECTED" (fail-open); tune `DHAN_SL_LIMIT_BUFFER_PCT` in `infra/.env` (no rebuild — just restart api) if it's an LPP-band rejection.
 
 ---
 
