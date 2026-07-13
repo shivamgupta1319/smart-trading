@@ -54,6 +54,13 @@ class RiskConfig:
     pessimistic_intrabar: bool = os.getenv("BT_PESSIMISTIC_INTRABAR", "true").lower() != "false"
     # Enter on the NEXT bar's open (realistic) rather than the signal bar close.
     next_bar_entry: bool = os.getenv("BT_NEXT_BAR_ENTRY", "true").lower() != "false"
+    # Cap each position's notional at `max_position_value` (fund × intraday leverage)
+    # instead of letting it compound with the cell's running equity. Without this,
+    # `qty = current_capital × leverage / entry` compounds geometrically over a long
+    # backtest, inflating ROI absurdly (a ₹10k slot → +₹187k / +639%) and poisoning
+    # every ROI-based auto-select gate/rank. Capping keeps the equity curve additive
+    # and the reported ROI honest & comparable across cells. Env: BT_CAP_POSITION_VALUE.
+    cap_position_value: bool = os.getenv("BT_CAP_POSITION_VALUE", "true").lower() != "false"
 
     @property
     def slot_capital(self) -> float:

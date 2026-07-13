@@ -35,26 +35,31 @@ def _f(name: str, default: float) -> float:
         return default
 
 
-# Gate thresholds (all env-tunable). Tuned to "quality over coverage" — still
-# reject losing / inconsistent cells, but don't demand a flawless edge that no
-# real strategy clears. Raise these back up for a stricter selection.
+# Gate thresholds (all env-tunable). Tightened 2026-07-13 (audit): the backtest
+# now caps position notional (BT_CAP_POSITION_VALUE) so ROI is no longer inflated
+# by compounding — which means these gates finally bite. Ranking is by NET avg
+# R-multiple (risk-adjusted edge), not raw ROI. Raise/lower via env.
 MIN_TRADES = int(_f("AUTOSELECT_MIN_TRADES", 10))          # min sample size
-MAX_DD_PCT = _f("AUTOSELECT_MAX_DD_PCT", 40.0)             # drawdown cap (% of peak)
-MIN_PROFIT_FACTOR = _f("AUTOSELECT_MIN_PROFIT_FACTOR", 1.05)
+MAX_DD_PCT = _f("AUTOSELECT_MAX_DD_PCT", 25.0)             # drawdown cap (% of peak); was 40
+MIN_PROFIT_FACTOR = _f("AUTOSELECT_MIN_PROFIT_FACTOR", 1.3)  # was 1.05 (barely breakeven post-cost)
 MIN_ROI = _f("AUTOSELECT_MIN_ROI", 0.0)                    # in-sample ROI must be >0
+MIN_AVG_R = _f("AUTOSELECT_MIN_AVG_R", 0.05)              # NET avg R-multiple must be positive edge
 # Risk/reward floor: total return must be at least this multiple of max drawdown
-# (a Calmar-like bar). 1.5 = "make at least 1.5× what you risk in drawdown";
-# rejects the 4%-return / 19%-DD type picks. Env: AUTOSELECT_MIN_RETURN_DD.
+# (a Calmar-like bar). Meaningful now that ROI is de-inflated. Env: AUTOSELECT_MIN_RETURN_DD.
 MIN_RETURN_DD_RATIO = _f("AUTOSELECT_MIN_RETURN_DD", 1.5)
-MIN_PROFITABLE_FOLDS = _f("AUTOSELECT_MIN_PROFITABLE_FOLDS", 40.0)  # % of OOS folds
-# Require the strict "low variance" consistency flag too (std <= |mean|)? Off by
-# default — we still require mean OOS ROI > 0, just not low dispersion.
-WF_REQUIRE_CONSISTENT = os.getenv("AUTOSELECT_WF_REQUIRE_CONSISTENT", "false").lower() == "true"
+MIN_PROFITABLE_FOLDS = _f("AUTOSELECT_MIN_PROFITABLE_FOLDS", 60.0)  # % of OOS folds; was 40
+# Require the strict "low variance" consistency flag too (std <= |mean|). ON by
+# default now — an edge that only shows in one fold isn't trustworthy.
+WF_REQUIRE_CONSISTENT = os.getenv("AUTOSELECT_WF_REQUIRE_CONSISTENT", "true").lower() == "true"
 MC_MIN_PROB = _f("AUTOSELECT_MC_MIN_PROB", 55.0)           # % bootstrap paths profitable
 WF_FOLDS = int(_f("AUTOSELECT_WF_FOLDS", 5))
 MC_ITERS = int(_f("AUTOSELECT_MC_ITERS", 1000))
 TOP_N = int(_f("AUTOSELECT_TOP_N", 3))
 MIN_BARS = int(_f("AUTOSELECT_MIN_BARS", 60))
+# Persistent denylist so manually-pruned losers are NOT re-promoted every run.
+# Comma-separated entries; each matches either a whole strategy ("Fibonacci_Golden_Zone")
+# or a specific cell ("BSE|15m_ORB"). Env: AUTOSELECT_DENYLIST.
+DENYLIST = {e.strip() for e in os.getenv("AUTOSELECT_DENYLIST", "").split(",") if e.strip()}
 
 
 class AutoSelectRequest(BaseModel):
@@ -121,11 +126,14 @@ def _monte_carlo(strategy, df) -> dict:
     }
 
 
-def _score(roi: float, dd_pct: float, trades: int) -> float:
-    """Calmar-like, divide-by-zero safe, shrunk for small samples."""
-    calmar = roi / dd_pct if dd_pct > 0.1 else roi
+def _score(avg_r: float, dd_pct: float, trades: int) -> float:
+    """Rank by NET avg R-multiple (risk-adjusted edge), shrunk for small samples
+    and lightly penalized for drawdown. R-multiple — unlike ROI — is independent
+    of compounding and backtest horizon, so it compares cells on real edge, not
+    on which lucky curve compounded hardest. Env: AUTOSELECT_DD_PENALTY."""
     confidence = min(1.0, trades / float(MIN_TRADES))
-    return round(calmar * confidence, 3)
+    dd_penalty = 1.0 / (1.0 + max(dd_pct, 0.0) / 100.0)  # 0%DD→1.0, 25%DD→0.8, 50%DD→0.67
+    return round(avg_r * confidence * dd_penalty, 3)
 
 
 def _upsert_active(conn, stock_id: int, strategy_name: str, timeframe: str):
@@ -183,15 +191,27 @@ def auto_select(req: AutoSelectRequest):
     all_picks = []  # (stock_id, strategy, timeframe)
 
     for sname in strategy_names:
+        # Denylisted strategy — never re-promote (persists manual prunes).
+        if sname in DENYLIST:
+            summary.append({"strategy": sname, "skipped": "denylisted"})
+            continue
         strategy = STRATEGY_REGISTRY[sname]
         timeframe = STRATEGY_TIMEFRAMES.get(sname, getattr(strategy, "timeframe", "1D"))
         candidates, rejections = [], []
 
         for stock_id, symbol in stocks:
+            if f"{symbol}|{sname}" in DENYLIST:
+                continue  # denylisted cell
             try:
                 df = load_historical(stock_id, timeframe)
             except Exception:
                 continue
+            # Drop the trailing bar: during market hours it's a still-forming candle
+            # that a pre-backtest refresh mutates, so leaving it in makes repeat
+            # auto-select runs non-deterministic (different picks each run). Dropping
+            # one completed bar off a long history costs nothing.
+            if len(df) > MIN_BARS:
+                df = df.iloc[:-1]
             if len(df) < MIN_BARS:
                 continue
 
@@ -210,6 +230,9 @@ def auto_select(req: AutoSelectRequest):
                 continue
             if m["profitFactor"] < MIN_PROFIT_FACTOR:
                 rejections.append({"symbol": symbol, "gate": "profitFactor", "value": m["profitFactor"]})
+                continue
+            if m.get("avgRMultiple", 0.0) < MIN_AVG_R:
+                rejections.append({"symbol": symbol, "gate": "avgRMultiple", "value": m.get("avgRMultiple", 0.0)})
                 continue
             if m["maxDrawdownPct"] > MAX_DD_PCT:
                 rejections.append({"symbol": symbol, "gate": "drawdown", "value": m["maxDrawdownPct"]})
@@ -240,7 +263,8 @@ def auto_select(req: AutoSelectRequest):
             candidates.append({
                 "symbol": symbol,
                 "stockId": stock_id,
-                "score": _score(m["roiPercentage"], m["maxDrawdownPct"], m["totalTrades"]),
+                "score": _score(m.get("avgRMultiple", 0.0), m["maxDrawdownPct"], m["totalTrades"]),
+                "avgRMultiple": m.get("avgRMultiple", 0.0),
                 "roiPercentage": m["roiPercentage"],
                 "winRate": m["winRate"],
                 "profitFactor": m["profitFactor"],
@@ -264,7 +288,7 @@ def auto_select(req: AutoSelectRequest):
             "evaluated": len(stocks),
             "passedGates": len(candidates),
             "picked": [{k: p[k] for k in (
-                "symbol", "score", "roiPercentage", "winRate", "profitFactor",
+                "symbol", "score", "avgRMultiple", "roiPercentage", "winRate", "profitFactor",
                 "maxDrawdownPct", "returnDdRatio", "trades", "oosProfitableFolds",
                 "mcP5Roi", "mcProbProfit",
             )} for p in picks],
@@ -307,12 +331,15 @@ def auto_select(req: AutoSelectRequest):
         "gates": {
             "minTrades": MIN_TRADES,
             "minRoiPct": MIN_ROI,
+            "minAvgRMultiple": MIN_AVG_R,
             "minProfitFactor": MIN_PROFIT_FACTOR,
             "maxDrawdownPct": MAX_DD_PCT,
             "minReturnDdRatio": MIN_RETURN_DD_RATIO,
             "minProfitableFoldsPct": MIN_PROFITABLE_FOLDS,
             "walkForwardRequireConsistent": WF_REQUIRE_CONSISTENT,
             "monteCarloMinProbProfitPct": MC_MIN_PROB,
+            "rankedBy": "netAvgRMultiple",
+            "denylistSize": len(DENYLIST),
             "topNPerStrategy": top_n,
         },
         "summary": summary,

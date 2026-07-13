@@ -81,6 +81,7 @@ class BaseStrategy(ABC):
         return self._metrics(
             sim["net_trades"], sim["gross_trades"], sim["total_costs"],
             sim["max_dd"], sim["max_dd_pct"], sim["skipped_invalid"],
+            sim["r_trades"],
         )
 
     def simulate(self, df: pd.DataFrame) -> dict:
@@ -91,13 +92,15 @@ class BaseStrategy(ABC):
           * Stop-loss / target evaluated against each subsequent bar's intrabar
             High/Low — not the close. If a single bar straddles both levels we
             assume the worse (SL) filled first (pessimistic_intrabar).
-          * Risk-based position sizing: size each trade so the SL distance risks
-            a fixed % of capital (matches the live 2% rule), capped by no-leverage
-            max position value.
+          * Notional position sizing: qty = cell equity × bucket leverage / entry
+            (intraday 5×, swing/delivery 1×), matching the live per-cell fund model.
+            Notional is capped at max_position_value unless BT_CAP_POSITION_VALUE
+            is off, so a compounding cell doesn't size geometrically.
           * Indian transaction costs + slippage subtracted to report NET P&L
             alongside GROSS.
 
-        Returns {net_trades, gross_trades, total_costs, max_dd, skipped_invalid}.
+        Returns {net_trades, gross_trades, r_trades, total_costs, max_dd,
+        max_dd_pct, skipped_invalid}.
         """
         df = self.generate_signals(df).copy()
         df = self._apply_bucket_target(df)  # bucket reward:risk override (R:R-by-horizon)
@@ -126,6 +129,7 @@ class BaseStrategy(ABC):
 
         net_trades: list[float] = []
         gross_trades: list[float] = []
+        r_trades: list[float] = []  # per-trade R-multiple (net ÷ rupee risked) — horizon/compounding-independent edge
         total_costs = 0.0
         current_capital = initial_capital
         peak = initial_capital
@@ -169,7 +173,12 @@ class BaseStrategy(ABC):
             # min 1 — notional, not risk-based, so the backtest takes exactly the
             # trades the live ledger would.
             leverage = LEVERAGE_INTRADAY if _bucket == "INTRADAY" else LEVERAGE_DELIVERY
-            qty = max(1, int((current_capital * leverage) / entry))
+            notional = current_capital * leverage
+            if RISK.cap_position_value:
+                # Bound notional so a compounding cell doesn't size geometrically —
+                # keeps ROI/DD/PF honest for selection (see backtest_config).
+                notional = min(notional, RISK.max_position_value)
+            qty = max(1, int(notional / entry))
 
             # Walk forward to the exit bar via intrabar High/Low. For swing
             # buckets `cur_sl` ratchets up with a chandelier trail (peak ∓ k·ATR);
@@ -227,6 +236,10 @@ class BaseStrategy(ABC):
             total_costs += cost
             gross_trades.append(gross)
             net_trades.append(net)
+            # R-multiple = net P&L ÷ rupees risked at entry (risk_per_share × qty,
+            # both > 0 here). Compounding- and horizon-independent, so it's the
+            # honest edge metric to rank cells on. Uses NET (after costs).
+            r_trades.append(net / (risk_per_share * qty))
 
             current_capital += net
             if current_capital > peak:
@@ -246,6 +259,7 @@ class BaseStrategy(ABC):
         return {
             "net_trades": net_trades,
             "gross_trades": gross_trades,
+            "r_trades": r_trades,
             "total_costs": total_costs,
             "max_dd": max_dd,
             "max_dd_pct": max_dd_pct,
@@ -253,17 +267,19 @@ class BaseStrategy(ABC):
         }
 
     @staticmethod
-    def _metrics(net_trades, gross_trades, total_costs, max_dd, max_dd_pct, skipped_invalid) -> dict:
+    def _metrics(net_trades, gross_trades, total_costs, max_dd, max_dd_pct, skipped_invalid, r_trades=None) -> dict:
         # ROI is the compounded return on one slot's capital; maxDrawdownPct is the
-        # peak-relative max drawdown (see simulate()).
+        # peak-relative max drawdown (see simulate()). avgRMultiple is the mean
+        # per-trade R (net ÷ risk) — the compounding-independent edge metric.
         initial_capital = RISK.slot_capital
+        r_trades = r_trades or []
         if not net_trades:
             return {
                 "winRate": 0.0, "totalTrades": 0, "netProfit": 0.0,
                 "grossProfit": 0.0, "totalCosts": 0.0, "maxDrawdown": 0.0,
                 "maxDrawdownPct": 0.0, "roiPercentage": 0.0, "grossRoiPercentage": 0.0,
                 "profitFactor": 0.0, "avgWin": 0.0, "avgLoss": 0.0,
-                "expectancy": 0.0, "skippedInvalid": skipped_invalid,
+                "expectancy": 0.0, "avgRMultiple": 0.0, "skippedInvalid": skipped_invalid,
             }
 
         wins = [t for t in net_trades if t > 0]
@@ -277,6 +293,7 @@ class BaseStrategy(ABC):
         avg_win = (gross_win / len(wins)) if wins else 0.0
         avg_loss = (gross_loss / len(losses)) if losses else 0.0
         expectancy = net_profit / len(net_trades)
+        avg_r_multiple = (sum(r_trades) / len(r_trades)) if r_trades else 0.0
 
         return {
             "winRate": round(win_rate, 2),
@@ -292,5 +309,6 @@ class BaseStrategy(ABC):
             "avgWin": round(avg_win, 2),
             "avgLoss": round(avg_loss, 2),
             "expectancy": round(expectancy, 2),
+            "avgRMultiple": round(avg_r_multiple, 3),
             "skippedInvalid": skipped_invalid,
         }
