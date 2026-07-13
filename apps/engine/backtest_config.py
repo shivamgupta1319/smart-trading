@@ -86,6 +86,7 @@ class CostProfile:
     sebi_pct: float            # % of turnover (both sides)
     stamp_buy_pct: float       # % on buy side only
     gst_pct: float             # % on (brokerage + exchange txn)
+    dp_charge_per_sell: float  # flat rupee fee per delivery (CNC) sell, incl. GST
 
 
 # Approximate NSE discount-broker schedules (as of ~2025-26). Tunable via env.
@@ -98,6 +99,7 @@ INTRADAY_PROFILE = CostProfile(
     sebi_pct=_f("BT_SEBI_PCT", 0.0001),
     stamp_buy_pct=_f("BT_INTRADAY_STAMP_BUY_PCT", 0.003),
     gst_pct=_f("BT_GST_PCT", 18.0),
+    dp_charge_per_sell=0.0,  # no delivery leg for intraday (MIS) — no DP charge
 )
 
 DELIVERY_PROFILE = CostProfile(
@@ -109,6 +111,8 @@ DELIVERY_PROFILE = CostProfile(
     sebi_pct=_f("BT_SEBI_PCT", 0.0001),
     stamp_buy_pct=_f("BT_DELIVERY_STAMP_BUY_PCT", 0.015),
     gst_pct=_f("BT_GST_PCT", 18.0),
+    # Dhan: ₹12.50 + 18% GST ≈ ₹14.75 per ISIN per day on every CNC sell (flat, not turnover-based).
+    dp_charge_per_sell=_f("BT_DP_CHARGE_PER_DELIVERY_SELL", 14.75),
 )
 
 
@@ -131,7 +135,9 @@ class CostModel:
         sebi = (buy_value + sell_value) * p.sebi_pct / 100.0
         stamp = buy_value * p.stamp_buy_pct / 100.0
         gst = (brokerage + exch) * p.gst_pct / 100.0
-        return brokerage + stt + exch + sebi + stamp + gst
+        # Flat DP charge, once per delivery sell (already GST-inclusive; 0 for intraday).
+        dp = p.dp_charge_per_sell
+        return brokerage + stt + exch + sebi + stamp + gst + dp
 
 
 RISK = RiskConfig()

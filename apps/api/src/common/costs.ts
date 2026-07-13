@@ -23,6 +23,7 @@ interface CostProfile {
   sebiPct: number; // both sides
   stampBuyPct: number; // buy side only
   gstPct: number; // on (brokerage + exchange txn)
+  dpChargePerSell: number; // flat ₹ per delivery (CNC) sell, incl. GST
 }
 
 // MIS-style: STT on sell only, higher intraday stamp. Matches INTRADAY_PROFILE.
@@ -35,6 +36,7 @@ const INTRADAY_PROFILE: CostProfile = {
   sebiPct: num('BT_SEBI_PCT', 0.0001),
   stampBuyPct: num('BT_INTRADAY_STAMP_BUY_PCT', 0.003),
   gstPct: num('BT_GST_PCT', 18.0),
+  dpChargePerSell: 0.0, // no delivery leg for intraday (MIS) — no DP charge
 };
 
 // CNC-style: STT both sides, brokerage often free, higher stamp. Matches DELIVERY_PROFILE.
@@ -47,6 +49,8 @@ const DELIVERY_PROFILE: CostProfile = {
   sebiPct: num('BT_SEBI_PCT', 0.0001),
   stampBuyPct: num('BT_DELIVERY_STAMP_BUY_PCT', 0.015),
   gstPct: num('BT_GST_PCT', 18.0),
+  // Dhan: ₹12.50 + 18% GST ≈ ₹14.75 per ISIN per day on every CNC sell (flat, not turnover-based).
+  dpChargePerSell: num('BT_DP_CHARGE_PER_DELIVERY_SELL', 14.75),
 };
 
 /** Master switch to book live P&L net of costs (env LIVE_COSTS_ENABLED, default on). */
@@ -73,5 +77,7 @@ export function roundTripCost(
   const sebi = ((buyValue + sellValue) * p.sebiPct) / 100.0;
   const stamp = (buyValue * p.stampBuyPct) / 100.0;
   const gst = ((brok + exch) * p.gstPct) / 100.0;
-  return brok + stt + exch + sebi + stamp + gst;
+  // Flat DP charge, once per delivery sell (already GST-inclusive; 0 for intraday).
+  const dp = p.dpChargePerSell;
+  return brok + stt + exch + sebi + stamp + gst + dp;
 }
