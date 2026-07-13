@@ -442,7 +442,8 @@ export function Portfolio() {
                 ₹{stats.investedNow.toLocaleString('en-IN')}
               </p>
               <p className="metric-label">
-                {stats.openPositions} open · {stats.activeCells} cells · ₹{stats.notionalNow.toLocaleString('en-IN')} notional
+                {stats.openPositions} open · {stats.activeCells} cells
+                {stats.notionalNow != null ? ` · ₹${stats.notionalNow.toLocaleString('en-IN')} notional` : ''}
               </p>
             </div>
             <div className="metric-card">
