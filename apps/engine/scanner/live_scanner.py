@@ -23,12 +23,17 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from db.client import engine
 from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
+# Shared intraday-exit primitives — same source of truth the backtest models.
+from intraday_exits import (
+    calculate_progress,
+    detect_reversal,
+    MIN_QTY_FOR_PARTIAL,
+    REVERSAL_ZONE_START,
+)
 
 NESTJS_URL = os.getenv("NESTJS_SIGNAL_URL", "http://localhost:3000/api/signals/new")
 # Shared API key sent to the NestJS API (no-op when unset / API auth disabled).
 NEST_HEADERS = {"x-api-key": os.getenv("API_KEY")} if os.getenv("API_KEY") else {}
-# Positions smaller than this never partial-exit (booking 35% of 1-2 shares is moot).
-MIN_QTY_FOR_PARTIAL = int(os.getenv("MIN_QTY_FOR_PARTIAL", "3"))
 IST = pytz.timezone("Asia/Kolkata")
 
 
@@ -72,10 +77,11 @@ MARKET_CLOSE = dtime(15, 30)
 POLL_INTERVAL = 100  # seconds
 
 # ── Smart Trailing SL Configuration ──
+# Phase triggers (50%/75%) and REVERSAL_ZONE_START (80%) now live in
+# `intraday_exits` so the backtest models the exact same thresholds.
 BREAKEVEN_THRESHOLD = 0.50   # Move SL to breakeven at 50% of target distance
 PROFIT_LOCK_THRESHOLD = 0.75 # Lock profit at 75% of target distance
 PROFIT_LOCK_PERCENT = 0.40   # Lock 40% of unrealized profit
-REVERSAL_ZONE_START = 0.80   # Start checking for reversals at 80% of target distance
 
 # Track trailing state per signal to avoid redundant API calls
 # {signal_id: "INITIAL" | "BREAKEVEN" | "PROFIT_LOCK"}
@@ -231,123 +237,6 @@ def get_recent_daily_candles(symbol: str, n: int = 30) -> pd.DataFrame:
     except Exception as e:
         print(f"  [ERROR] fetching recent daily candles for {symbol}: {e}")
         return pd.DataFrame()
-
-
-def detect_reversal(df: pd.DataFrame, is_buy: bool) -> tuple[bool, str]:
-    """
-    Detect reversal patterns in recent candles.
-    Returns (is_reversal, reason_string).
-    
-    Checks for:
-    1. Bearish/Bullish Engulfing
-    2. Pin bar / long wick rejection
-    3. RSI divergence (price new high but RSI lower)
-    4. Volume spike + opposite direction candle
-    """
-    if df.empty or len(df) < 3:
-        return False, ""
-
-    latest = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    body_latest = abs(latest['Close'] - latest['Open'])
-    body_prev = abs(prev['Close'] - prev['Open'])
-    
-    # Avoid division by zero
-    if body_latest == 0:
-        body_latest = 0.001
-
-    # ── Check 1: Engulfing Pattern ──
-    if is_buy:
-        # Bearish engulfing: prev was green, latest is red and body covers prev body
-        prev_green = prev['Close'] > prev['Open']
-        latest_red = latest['Close'] < latest['Open']
-        engulfing = (
-            prev_green and latest_red and
-            latest['Open'] >= prev['Close'] and
-            latest['Close'] <= prev['Open'] and
-            body_latest > body_prev
-        )
-        if engulfing:
-            return True, "Bearish Engulfing candle"
-    else:
-        # Bullish engulfing: prev was red, latest is green and body covers prev body
-        prev_red = prev['Close'] < prev['Open']
-        latest_green = latest['Close'] > latest['Open']
-        engulfing = (
-            prev_red and latest_green and
-            latest['Open'] <= prev['Close'] and
-            latest['Close'] >= prev['Open'] and
-            body_latest > body_prev
-        )
-        if engulfing:
-            return True, "Bullish Engulfing candle (reversal for SELL)"
-
-    # ── Check 2: Pin Bar / Long Wick Rejection ──
-    if is_buy:
-        # Upper wick much longer than body = rejection from highs
-        upper_wick = latest['High'] - max(latest['Open'], latest['Close'])
-        if upper_wick >= 2 * body_latest and latest['Close'] < latest['Open']:
-            return True, "Pin bar rejection from highs"
-    else:
-        # Lower wick much longer than body = rejection from lows
-        lower_wick = min(latest['Open'], latest['Close']) - latest['Low']
-        if lower_wick >= 2 * body_latest and latest['Close'] > latest['Open']:
-            return True, "Pin bar rejection from lows"
-
-    # ── Check 3: RSI Divergence (simplified) ──
-    if len(df) >= 5:
-        try:
-            rsi = ta.rsi(df['Close'], length=5)
-            if rsi is not None and len(rsi) >= 2:
-                rsi_latest = rsi.iloc[-1]
-                rsi_prev_max = rsi.iloc[:-1].max()
-                price_latest = latest['Close']
-                price_prev_max = df['Close'].iloc[:-1].max()
-                price_prev_min = df['Close'].iloc[:-1].min()
-                
-                if is_buy:
-                    # Price making new high but RSI not → bearish divergence
-                    if price_latest >= price_prev_max and rsi_latest < rsi_prev_max - 5:
-                        return True, "RSI bearish divergence"
-                else:
-                    # Price making new low but RSI not → bullish divergence
-                    rsi_prev_min = rsi.iloc[:-1].min()
-                    if price_latest <= price_prev_min and rsi_latest > rsi_prev_min + 5:
-                        return True, "RSI bullish divergence (reversal for SELL)"
-        except Exception:
-            pass  # RSI calculation can fail with insufficient data
-
-    # ── Check 4: Volume Exhaustion ──
-    if len(df) >= 5:
-        avg_vol = df['Volume'].iloc[:-1].mean()
-        if avg_vol > 0:
-            latest_vol = latest['Volume']
-            prev_vol = prev['Volume']
-            if latest_vol >= 1.8 * avg_vol or prev_vol >= 1.8 * avg_vol:
-                if is_buy and latest['Close'] < latest['Open']:
-                    return True, "Volume exhaustion (Bearish)"
-                elif not is_buy and latest['Close'] > latest['Open']:
-                    return True, "Volume exhaustion (Bullish)"
-
-    return False, ""
-
-
-def calculate_progress(entry: float, target: float, current: float, is_buy: bool) -> float:
-    """
-    Calculate how far price has moved from entry toward target (0.0 to 1.0+).
-    Returns negative if price moved against the trade.
-    """
-    total_distance = abs(target - entry)
-    if total_distance == 0:
-        return 0.0
-    
-    if is_buy:
-        moved = current - entry
-    else:
-        moved = entry - current
-    
-    return moved / total_distance
 
 
 def update_trailing_sl(signal_id: int, new_sl: float, state: str, peak_price: float = None):

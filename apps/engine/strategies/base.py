@@ -8,6 +8,11 @@ from backtest_config import (
     RISK, CostModel, uses_trailing_exit, trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD,
     LEVERAGE_INTRADAY, LEVERAGE_DELIVERY,
 )
+from intraday_exits import (
+    PHASE2_TRIGGER, PHASE3_TRIGGER, REVERSAL_ZONE_START,
+    PARTIAL_FRACTION, MIN_QTY_FOR_PARTIAL, SQUARE_OFF_TIME,
+    progress_price, breakeven_stop, candle_trail_stop, detect_reversal,
+)
 
 
 def _atr_array(h, low, c, period: int):
@@ -114,6 +119,10 @@ class BaseStrategy(ABC):
         sig = df.get("signal", pd.Series(0, index=df.index)).fillna(0).to_numpy(dtype=float)
         sl_arr = df.get("stop_loss", pd.Series(np.nan, index=df.index)).to_numpy(dtype=float)
         tp_arr = df.get("target", pd.Series(np.nan, index=df.index)).to_numpy(dtype=float)
+        vol = df.get("Volume", pd.Series(0.0, index=df.index)).to_numpy(dtype=float)
+        # Bar timestamps drive the intraday 15:15 square-off; kept as-is (IST-naive,
+        # per load_historical). The swing/delivery path never reads them.
+        ts = df.index
 
         n = len(df)
         slip = RISK.slippage_bps / 10_000.0
@@ -180,56 +189,64 @@ class BaseStrategy(ABC):
                 notional = min(notional, RISK.max_position_value)
             qty = max(1, int(notional / entry))
 
-            # Walk forward to the exit bar via intrabar High/Low. For swing
-            # buckets `cur_sl` ratchets up with a chandelier trail (peak ∓ k·ATR);
-            # for intraday it stays fixed (== sl), so this loop covers both.
-            exit_price = None
-            exit_idx = n - 1
-            cur_sl = sl
-            px_peak = entry  # best PRICE since entry (for the chandelier trail)
-            for j in range(entry_idx, n):
-                hi, lo = h[j], low[j]
-                if ttype == 1:
-                    hit_sl, hit_tp = lo <= cur_sl, hi >= tp
-                else:
-                    hit_sl, hit_tp = hi >= cur_sl, lo <= tp
-                if hit_sl and hit_tp:
-                    exit_price = cur_sl if RISK.pessimistic_intrabar else tp
-                    exit_idx = j
-                    break
-                if hit_sl:
-                    exit_price, exit_idx = cur_sl, j
-                    break
-                if hit_tp:
-                    exit_price, exit_idx = tp, j
-                    break
-                # Ratchet the trailing stop using THIS bar's extreme, applied to
-                # the NEXT bar (so no intrabar lookahead).
-                if trailing:
-                    if ttype == 1:
-                        if hi > px_peak:
-                            px_peak = hi
-                        new_sl = px_peak - trail_mult * atr[j]
-                        if new_sl > cur_sl:
-                            cur_sl = new_sl
-                    else:
-                        if lo < px_peak:
-                            px_peak = lo
-                        new_sl = px_peak + trail_mult * atr[j]
-                        if new_sl < cur_sl:
-                            cur_sl = new_sl
-            if exit_price is None:
-                exit_price = c[n - 1]  # still open at series end → mark to last close
-
-            # Adverse slippage on exit
-            exit_fill = exit_price * (1 - slip) if ttype == 1 else exit_price * (1 + slip)
-
-            if ttype == 1:
-                gross = (exit_fill - entry) * qty
-                buy_val, sell_val = qty * entry, qty * exit_fill
+            # Walk forward to the exit bar. INTRADAY models the live 3-phase exit
+            # (partials + breakeven + candle-trail + reversal + 15:15 square-off);
+            # swing/mid/long use the chandelier-trail / fixed-SL walk below.
+            if _bucket == "INTRADAY":
+                exit_idx, gross, buy_val, sell_val = self._intraday_exit(
+                    entry_idx, entry, sl, tp, ttype, qty,
+                    o, h, low, c, vol, ts, n, slip,
+                )
             else:
-                gross = (entry - exit_fill) * qty
-                sell_val, buy_val = qty * entry, qty * exit_fill
+                # For swing buckets `cur_sl` ratchets up with a chandelier trail
+                # (peak ∓ k·ATR); for the rest it stays fixed (== sl).
+                exit_price = None
+                exit_idx = n - 1
+                cur_sl = sl
+                px_peak = entry  # best PRICE since entry (for the chandelier trail)
+                for j in range(entry_idx, n):
+                    hi, lo = h[j], low[j]
+                    if ttype == 1:
+                        hit_sl, hit_tp = lo <= cur_sl, hi >= tp
+                    else:
+                        hit_sl, hit_tp = hi >= cur_sl, lo <= tp
+                    if hit_sl and hit_tp:
+                        exit_price = cur_sl if RISK.pessimistic_intrabar else tp
+                        exit_idx = j
+                        break
+                    if hit_sl:
+                        exit_price, exit_idx = cur_sl, j
+                        break
+                    if hit_tp:
+                        exit_price, exit_idx = tp, j
+                        break
+                    # Ratchet the trailing stop using THIS bar's extreme, applied to
+                    # the NEXT bar (so no intrabar lookahead).
+                    if trailing:
+                        if ttype == 1:
+                            if hi > px_peak:
+                                px_peak = hi
+                            new_sl = px_peak - trail_mult * atr[j]
+                            if new_sl > cur_sl:
+                                cur_sl = new_sl
+                        else:
+                            if lo < px_peak:
+                                px_peak = lo
+                            new_sl = px_peak + trail_mult * atr[j]
+                            if new_sl < cur_sl:
+                                cur_sl = new_sl
+                if exit_price is None:
+                    exit_price = c[n - 1]  # still open at series end → mark to last close
+
+                # Adverse slippage on exit
+                exit_fill = exit_price * (1 - slip) if ttype == 1 else exit_price * (1 + slip)
+
+                if ttype == 1:
+                    gross = (exit_fill - entry) * qty
+                    buy_val, sell_val = qty * entry, qty * exit_fill
+                else:
+                    gross = (entry - exit_fill) * qty
+                    sell_val, buy_val = qty * entry, qty * exit_fill
 
             cost = costs.round_trip(buy_val, sell_val)
             net = gross - cost
@@ -265,6 +282,128 @@ class BaseStrategy(ABC):
             "max_dd_pct": max_dd_pct,
             "skipped_invalid": skipped_invalid,
         }
+
+    def _intraday_exit(self, entry_idx, entry, sl0, tp, ttype, qty,
+                       o, h, low, c, vol, ts, n, slip):
+        """Model the LIVE intraday 3-phase exit bar-by-bar (15m bars), mirroring
+        `scanner/live_scanner.auto_close_signals` via the shared `intraday_exits`
+        primitives so backtest ⇄ live can't drift.
+
+        Per bar (buy shown; short is the mirror), in the same order live polls:
+          1. Stop first — pessimistic: an intrabar stop hit ends the trade.
+          2. 15:15 square-off — MIS is force-flattened at the entry day's close bar
+             (exit at that bar's open ≈ the 15:15 price); no partials/target there.
+          3. Partials — at the 50%/75% progress LEVELS book 35% of the ORIGINAL qty
+             (only if qty ≥ MIN_QTY_FOR_PARTIAL and a runner survives); phase-2 moves
+             the stop to breakeven, phase-3 starts the candle trail.
+          4. Target — books ALL remaining at tp.
+          5. Reversal — once past the 80% level, exit the remainder at the bar close
+             on a reversal candle pattern.
+          6. Phase-3 candle trail — ratchet the stop to this bar's low/high, applied
+             to the NEXT bar (uses bar j's extreme, checked at j+1 — no lookahead).
+
+        Returns (exit_idx, gross, buy_val, sell_val). Costs at intraday sizes are
+        linear in turnover (the ₹20 brokerage cap never binds, DP = 0), so the
+        weighted multi-leg sell can be costed on aggregate buy_val + summed sell_val.
+        """
+        is_buy = ttype == 1
+        lvl50 = progress_price(entry, tp, PHASE2_TRIGGER, is_buy)
+        lvl75 = progress_price(entry, tp, PHASE3_TRIGGER, is_buy)
+        lvl80 = progress_price(entry, tp, REVERSAL_ZONE_START, is_buy)
+
+        # Same-day boundary for the square-off (index is IST-naive per load_historical).
+        entry_ts = ts[entry_idx]
+        entry_day = entry_ts.date() if hasattr(entry_ts, "date") else None
+
+        cur_sl = sl0
+        state = "INITIAL"
+        remaining = qty
+        legs: list[tuple[int, float]] = []  # (leg_qty, leg_price) before slippage
+        exit_idx = n - 1
+        # Live gates partials on the FULL qty; book 35% but always leave a runner.
+        can_partial = qty >= MIN_QTY_FOR_PARTIAL
+        partial_qty = max(1, int(qty * PARTIAL_FRACTION))
+
+        for j in range(entry_idx, n):
+            hi, lo = h[j], low[j]
+
+            # 1) Stop first (pessimistic).
+            if (is_buy and lo <= cur_sl) or (not is_buy and hi >= cur_sl):
+                legs.append((remaining, cur_sl))
+                remaining = 0
+                exit_idx = j
+                break
+
+            # 2) 15:15 square-off (or any bar rolled onto a later day).
+            ts_j = ts[j]
+            if entry_day is not None and hasattr(ts_j, "time"):
+                if ts_j.date() != entry_day or ts_j.time() >= SQUARE_OFF_TIME:
+                    legs.append((remaining, o[j]))
+                    remaining = 0
+                    exit_idx = j
+                    break
+
+            # 3) Partial phase transitions — book at the threshold LEVEL price.
+            if can_partial and state == "INITIAL" and \
+                    ((is_buy and hi >= lvl50) or (not is_buy and lo <= lvl50)) and \
+                    remaining - partial_qty >= 1:
+                legs.append((partial_qty, lvl50))
+                remaining -= partial_qty
+                be = breakeven_stop(entry, is_buy)
+                if (is_buy and be > cur_sl) or (not is_buy and be < cur_sl):
+                    cur_sl = be
+                state = "PHASE2"
+            if can_partial and state == "PHASE2" and \
+                    ((is_buy and hi >= lvl75) or (not is_buy and lo <= lvl75)) and \
+                    remaining - partial_qty >= 1:
+                legs.append((partial_qty, lvl75))
+                remaining -= partial_qty
+                state = "PHASE3"
+
+            # 4) Target books all remaining.
+            if (is_buy and hi >= tp) or (not is_buy and lo <= tp):
+                legs.append((remaining, tp))
+                remaining = 0
+                exit_idx = j
+                break
+
+            # 5) Reversal exit on the remainder once in the 80% zone (at bar close).
+            if (is_buy and hi >= lvl80) or (not is_buy and lo <= lvl80):
+                s = max(0, j - 9)  # last up-to-10 bars, like live get_recent_candles
+                wdf = pd.DataFrame({
+                    "Open": o[s:j + 1], "High": h[s:j + 1], "Low": low[s:j + 1],
+                    "Close": c[s:j + 1], "Volume": vol[s:j + 1],
+                })
+                is_rev, _ = detect_reversal(wdf, is_buy)
+                if is_rev:
+                    legs.append((remaining, c[j]))
+                    remaining = 0
+                    exit_idx = j
+                    break
+
+            # 6) Phase-3 candle trail (ratchet to bar j's extreme, applied next bar).
+            if state == "PHASE3":
+                trail = candle_trail_stop(low[j], h[j], is_buy)
+                if (is_buy and trail > cur_sl) or (not is_buy and trail < cur_sl):
+                    cur_sl = trail
+
+        if remaining > 0:
+            legs.append((remaining, c[n - 1]))  # open at series end → last close
+            exit_idx = n - 1
+
+        # Aggregate legs with adverse slippage; keep the round_trip buy/sell convention.
+        entry_val = qty * entry
+        exit_val = 0.0
+        gross = 0.0
+        for lq, lp in legs:
+            fill = lp * (1 - slip) if is_buy else lp * (1 + slip)
+            exit_val += lq * fill
+            gross += (fill - entry) * lq if is_buy else (entry - fill) * lq
+        if is_buy:
+            buy_val, sell_val = entry_val, exit_val
+        else:
+            sell_val, buy_val = entry_val, exit_val
+        return exit_idx, gross, buy_val, sell_val
 
     @staticmethod
     def _metrics(net_trades, gross_trades, total_costs, max_dd, max_dd_pct, skipped_invalid, r_trades=None) -> dict:
