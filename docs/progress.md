@@ -97,7 +97,30 @@
 - [x] Exact P&L Calculation Fixes (incorporating `realizedPnl` and `remainingQty`)
 - [x] Telegram Notifications for all lifecycles (Trailing SL, Partial Close, Reversal, Trade Closed)
 
-## What's Running
+## Phase 8 — Trust & correctness audit + auto-select hardening ✅ (2026-07-13)
+> Full report: [agent-reports/2026-07-13-trust-and-correctness-audit.md](agent-reports/2026-07-13-trust-and-correctness-audit.md)
+- [x] Audited docs + live data (174 closed trades) + engine/API code for trust & correctness
+- [x] Pruned chronic losers from live scanning — DMA20_Pullback, Fibonacci_Golden_Zone, Volume_Profile_POC (9 cells, 77→68 active); recorded in `infra/scripts/hygiene-prune-losers.sql`
+- [x] Backtest de-inflation: `BT_CAP_POSITION_VALUE` caps position notional so compounding no longer inflates ROI (2458%→358% on a test cell); NET `avgRMultiple` added to metrics
+- [x] Auto-select hardened: rank by NET avg-R (not ROI/DD); gates tightened (maxDD 40→25%, PF 1.05→1.3, OOS folds 40→60%, walk-forward consistency ON, new min-avg-R gate); drops forming tail bar for determinism
+- [x] Persistent `AUTOSELECT_DENYLIST` so manually-pruned losers are never re-promoted (wired through compose env)
+- [x] Portfolio "Invested Now" now shows deployed **margin**, not leveraged notional
+- [x] Verified via read-only dry-run auto-select (6 quality picks / 31 strategies) + `/api/trades/stats`
+- [ ] **Phase C (open):** backtest↔live exit parity — fix dead live swing trail (daily candles), book live P&L net of costs, reconcile intraday exits. Until done, auto-select undervalues intraday winners.
+- [ ] **FEAT-002 (open):** BREAKEVEN band (scratches booked WIN), `realizedPnl` column gap, per-trade `pnlPercent` uses notional not margin.
+
+> ⚠️ **Phases 0–7 above describe the original v1 prototype** and are partly stale (ports 3000/8000/5173,
+> the "3-phase partial exit" framing — the live intraday loop actually does breakeven + candle-trail +
+> reversal + 15:15 square-off; ₹1L/2%-risk model replaced by the per-cell ₹10k compounding fund).
+> For the **current** system see [architecture.md](architecture.md) and [work-pc-deployment.md](work-pc-deployment.md).
+
+## What's Running (current — v2 on work-pc)
+- **v2 host ports:** frontend `5174`, api `3001`, engine `8001`, postgres `5471` (v1 holds 3000/8000/5173/5470)
+- **Deploy:** build+push on dev PC (`infra/scripts/build-and-push.sh`), pull+run on work-pc (`infra/scripts/deploy.sh`)
+- **6 services:** db, api, engine, frontend, scanner, scheduler (scanner+scheduler share the engine image)
+- Public: `https://trading-v2.pseo.cloud` (basic-auth) — see [work-pc-deployment.md](work-pc-deployment.md)
+
+### Historical dev commands (v1 prototype)
 - **NestJS**: `npx nx serve api` (port 3000)
 - **Python Engine**: `uvicorn main:app --reload` in apps/engine (port 8000)
 - **React**: `npx nx serve frontend` (port 5173)
