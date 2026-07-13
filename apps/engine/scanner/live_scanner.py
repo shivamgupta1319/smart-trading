@@ -202,7 +202,7 @@ def get_live_price(symbol: str) -> float:
 
 
 def get_recent_candles(symbol: str, n: int = 10) -> pd.DataFrame:
-    """Fetch the most recent N completed candles for reversal detection."""
+    """Fetch the most recent N completed 15m candles for intraday reversal detection."""
     yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
     try:
         df = yf.download(yf_symbol, period="5d", interval="15m", progress=False, auto_adjust=True)
@@ -213,6 +213,23 @@ def get_recent_candles(symbol: str, n: int = 10) -> pd.DataFrame:
         return df.tail(n)
     except Exception as e:
         print(f"  [ERROR] fetching recent candles for {symbol}: {e}")
+        return pd.DataFrame()
+
+
+def get_recent_daily_candles(symbol: str, n: int = 30) -> pd.DataFrame:
+    """Most recent N completed DAILY candles — for the swing/mid/long ATR chandelier
+    trail. The 15m series from get_recent_candles is the wrong timeframe for a daily
+    trail (a length-14 ATR on ~10 rows is all-NaN, so the trail silently never moves)."""
+    yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
+    try:
+        df = yf.download(yf_symbol, period="90d", interval="1d", progress=False, auto_adjust=True)
+        if df.empty:
+            return df
+        df = df.iloc[:-1]  # Exclude today's still-forming candle
+        df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        return df.tail(n)
+    except Exception as e:
+        print(f"  [ERROR] fetching recent daily candles for {symbol}: {e}")
         return pd.DataFrame()
 
 
@@ -473,15 +490,22 @@ def auto_close_signals(cache):
                 peak = float(trade.get('peakPrice') or entry)
                 peak = max(peak, latest_price) if is_buy else min(peak, latest_price)
                 atr_val = None
-                if not recent_df.empty and len(recent_df) >= 2:
+                # DAILY ATR — not the 15m recent_df — so the chandelier trail matches
+                # the backtest (SWING_TRAIL_ATR_PERIOD on daily bars). Previously this
+                # read the 15m series and produced an all-NaN ATR, so the trail was dead.
+                from backtest_config import trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD
+                daily_df = get_recent_daily_candles(symbol)
+                if not daily_df.empty and len(daily_df) > SWING_TRAIL_ATR_PERIOD:
                     try:
-                        atr_series = ta.atr(recent_df['High'], recent_df['Low'], recent_df['Close'], length=14)
+                        atr_series = ta.atr(
+                            daily_df['High'], daily_df['Low'], daily_df['Close'],
+                            length=SWING_TRAIL_ATR_PERIOD,
+                        )
                         if atr_series is not None and not atr_series.dropna().empty:
                             atr_val = float(atr_series.dropna().iloc[-1])
                     except Exception:
                         atr_val = None
                 if atr_val and atr_val > 0:
-                    from backtest_config import trail_mult_for_bucket
                     mult = trail_mult_for_bucket(hold_duration)
                     new_sl = peak - mult * atr_val if is_buy else peak + mult * atr_val
                     sl_better = (is_buy and new_sl > sl) or (not is_buy and new_sl < sl)
