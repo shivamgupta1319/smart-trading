@@ -9,3 +9,5 @@ dist
 venv
 __pycache__
 *.pyc
+scratchpad
+.claude
