@@ -58,6 +58,8 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       API_KEY: ${API_KEY}
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5174,https://trading-v2.pseo.cloud}"
+      # Auto-select persistent denylist (strategies / SYMBOL|STRATEGY cells never re-promoted).
+      AUTOSELECT_DENYLIST: ${AUTOSELECT_DENYLIST:-}
       BROKER: ${BROKER:-dhan}
       DATA_SOURCE: ${DATA_SOURCE:-auto}
       DHAN_ACCESS_TOKEN: ${DHAN_ACCESS_TOKEN:-}
