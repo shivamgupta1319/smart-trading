@@ -74,10 +74,17 @@ export class TradesService {
     const profitFactor =
       avgLoss > 0 ? (avgWin * wins.length) / (avgLoss * losses.length) : 0;
 
-    // Dynamic "invested now" = Σ notional of currently-open positions. Deployed base =
-    // ₹10k × number of distinct active cells (each open position is one cell). ROI% is
-    // net realized P&L over that deployed base.
-    const investedNow = openTrades.reduce((sum, t) => sum + notionalOf(t), 0);
+    // Dynamic "invested now" = actual capital (margin) deployed in currently-open
+    // positions = Σ notional ÷ leverage. This is the per-cell ₹10k fund at work, NOT the
+    // leveraged notional (5× intraday) — 7 open cells read ≈ ₹70k, not ₹235k. We keep the
+    // full leveraged exposure as `notionalNow` for transparency. Deployed base = ₹10k ×
+    // distinct active cells (each open position is one cell); ROI% is net realized P&L
+    // over that deployed base.
+    const notionalNow = openTrades.reduce((sum, t) => sum + notionalOf(t), 0);
+    const investedNow = openTrades.reduce(
+      (sum, t) => sum + notionalOf(t) / leverageFor(t.holdDuration),
+      0,
+    );
     const activeCells = new Set(openTrades.map((t) => `${t.stockId}|${t.strategyName}`)).size;
     const totalDeployedBase = activeCells * BASE_CELL_CAPITAL;
     const roiPct = safePct(totalPnl, totalDeployedBase);
@@ -206,6 +213,7 @@ export class TradesService {
       totalPnl: round2(totalPnl),
       netPnl: round2(totalPnl),
       investedNow: round2(investedNow),
+      notionalNow: round2(notionalNow),
       openPositions: openTrades.length,
       activeCells,
       totalDeployedBase,

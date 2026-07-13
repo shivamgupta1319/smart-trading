@@ -74,6 +74,7 @@ interface PortfolioStats {
   totalPnl: number;
   netPnl: number;
   investedNow: number;
+  notionalNow: number;
   openPositions: number;
   activeCells: number;
   totalDeployedBase: number;
@@ -440,7 +441,9 @@ export function Portfolio() {
               <p className="metric-value" style={{ fontSize: '1.3rem' }}>
                 ₹{stats.investedNow.toLocaleString('en-IN')}
               </p>
-              <p className="metric-label">{stats.openPositions} open · {stats.activeCells} cells</p>
+              <p className="metric-label">
+                {stats.openPositions} open · {stats.activeCells} cells · ₹{stats.notionalNow.toLocaleString('en-IN')} notional
+              </p>
             </div>
             <div className="metric-card">
               <p className="metric-label">Win Rate</p>
