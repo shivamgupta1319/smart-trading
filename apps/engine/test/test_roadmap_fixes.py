@@ -73,8 +73,11 @@ def test_bb_mean_reversion_geometry_is_valid():
 def test_backtest_sizes_to_one_slot():
     """A single-cell backtest must cap notional at one slot (slot_capital) and
     report ROI against the slot, not the whole ₹1L account."""
+    from backtest_config import LEVERAGE_INTRADAY
     assert RISK.slot_capital == RISK.initial_capital / RISK.max_concurrent_positions
-    assert RISK.max_position_value == RISK.slot_capital
+    # Notional is capped at one slot × intraday leverage (the reworked cap), not the
+    # bare slot — so a compounding cell can still deploy its leveraged notional.
+    assert RISK.max_position_value == RISK.slot_capital * LEVERAGE_INTRADAY
 
     class _OneBuy(BaseStrategy):
         name, timeframe = "ONE_BUY", "1D"
@@ -94,8 +97,8 @@ def test_backtest_sizes_to_one_slot():
         "Low": [99, 99, 100], "Close": [100, 101, 105],
     }, index=idx)
     sim = _OneBuy().simulate(df)
-    # qty capped by slot: floor(slot_capital / entry) bound. With slot=10k, entry~100
-    # the risk-based qty (slot*2% / 5 = 40) binds, well under the 100-share notional cap.
+    # Notional sizing (not risk-based): 1D → delivery leverage 1×, so notional =
+    # slot_capital = 10k, qty = floor(10k / entry~100) ≈ 99, under the 50k cap.
     m = _OneBuy().run_backtest(df)
     assert m["totalTrades"] == 1
     # ROI denominator is the slot, so netProfit / slot_capital * 100 == roiPercentage.
