@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from db.client import engine
 from strategies import STRATEGY_REGISTRY
+from reports import save_report as _upsert_report
 
 router = APIRouter()
 
@@ -48,17 +49,9 @@ def load_historical(stock_id: int, timeframe: str) -> pd.DataFrame:
 
 
 def save_report(stock_id: int, strategy_name: str, timeframe: str, metrics: dict):
+    """UPSERT one BacktestReport row for this cell via the shared writer."""
     with engine.connect() as conn:
-        conn.execute(text("""
-            INSERT INTO "BacktestReport"
-              ("stockId", "strategyName", "timeframe", "winRate", "totalTrades", "maxDrawdown", "netProfit", "roiPercentage", "createdAt")
-            VALUES (:sid, :sn, :tf, :wr, :tt, :md, :np, :roi, NOW())
-        """), {
-            "sid": stock_id, "sn": strategy_name, "tf": timeframe,
-            "wr": float(metrics['winRate']), "tt": int(metrics['totalTrades']),
-            "md": float(metrics['maxDrawdown']), "np": float(metrics['netProfit']),
-            "roi": float(metrics['roiPercentage'])
-        })
+        _upsert_report(conn, stock_id, strategy_name, timeframe, metrics)
         conn.commit()
 
 

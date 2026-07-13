@@ -61,10 +61,16 @@ model BacktestReport {
   netProfit    Float
   maxDrawdown  Float
   roiPercentage Float
+  // Engine model version that produced these numbers. Bumped when the fill/exit
+  // model changes (e.g. C3), so stored reports that won't reproduce are identifiable.
+  engineVersion String  @default("unversioned")
   createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
 
   stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
 
+  // Exactly one report row per cell; every writer UPSERTs on this key.
+  @@unique([stockId, strategyName, timeframe])
   @@index([stockId, strategyName])
 }
 

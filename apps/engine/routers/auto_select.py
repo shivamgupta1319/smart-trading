@@ -24,6 +24,7 @@ from db.client import engine
 from strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES
 from routers.backtest import load_historical
 from routers.history import fetch_and_store
+from reports import save_report as _save_report  # shared UPSERT writer (one row per cell)
 
 router = APIRouter()
 
@@ -143,22 +144,6 @@ def _upsert_active(conn, stock_id: int, strategy_name: str, timeframe: str):
         ON CONFLICT ("stockId", "strategyName")
         DO UPDATE SET "timeframe" = EXCLUDED."timeframe", "updatedAt" = NOW()
     """), {"sid": stock_id, "sn": strategy_name, "tf": timeframe})
-
-
-def _save_report(conn, stock_id: int, strategy_name: str, timeframe: str, metrics: dict):
-    """Persist a BacktestReport row (mirrors routers.backtest.save_report) so the
-    monitor's latest-snapshot lookup finds a current report for each pick."""
-    conn.execute(text("""
-        INSERT INTO "BacktestReport"
-          ("stockId", "strategyName", "timeframe", "winRate", "totalTrades",
-           "maxDrawdown", "netProfit", "roiPercentage", "createdAt")
-        VALUES (:sid, :sn, :tf, :wr, :tt, :md, :np, :roi, NOW())
-    """), {
-        "sid": stock_id, "sn": strategy_name, "tf": timeframe,
-        "wr": float(metrics["winRate"]), "tt": int(metrics["totalTrades"]),
-        "md": float(metrics["maxDrawdown"]), "np": float(metrics["netProfit"]),
-        "roi": float(metrics["roiPercentage"]),
-    })
 
 
 @router.post("/auto-select")

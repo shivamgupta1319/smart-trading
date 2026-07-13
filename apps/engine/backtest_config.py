@@ -31,6 +31,12 @@ def _i(name: str, default: int) -> int:
         return default
 
 
+# Version tag stamped on every BacktestReport (see reports.save_report). BUMP this
+# whenever the fill/exit model changes so stored reports produced by an older engine
+# are identifiable — they won't reproduce. Current model: C3 (live intraday exits).
+ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.07.13-c3")
+
+
 # Buying-power multiple by hold bucket. Intraday (MIS) deploys ~5× the cell fund as
 # notional; swing/delivery (CNC) uses the fund 1×. MUST match apps/api/src/common/risk.ts.
 LEVERAGE_INTRADAY = _f("LEVERAGE_INTRADAY", 5.0)

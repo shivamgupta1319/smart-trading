@@ -22,7 +22,12 @@ router = APIRouter()
 def leaderboard():
     """Rank strategies by a RISK-ADJUSTED score across all saved backtest reports,
     instead of raw ROI. Score ≈ avg ROI / avg max-drawdown% (a Calmar-like ratio)
-    weighted down when the sample is tiny."""
+    weighted down when the sample is tiny.
+
+    The report table is now one row per (stock × strategy × timeframe) (UPSERTed —
+    see reports.save_report), so `reports` counts DISTINCT cells, not append-only
+    duplicates. Rows with no trades are excluded so empty backtests don't dilute the
+    averages or inflate the sample-confidence."""
     with engine.connect() as conn:
         rows = conn.execute(text("""
             SELECT "strategyName" AS s,
@@ -33,6 +38,7 @@ def leaderboard():
                    avg("totalTrades") AS avg_trades,
                    sum("netProfit") AS total_net
             FROM "BacktestReport"
+            WHERE "totalTrades" > 0
             GROUP BY "strategyName"
         """)).fetchall()
 
