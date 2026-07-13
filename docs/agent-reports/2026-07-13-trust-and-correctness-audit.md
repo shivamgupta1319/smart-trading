@@ -131,7 +131,22 @@
 3. **Auto-select:** rank by avg-R, tighter gates (DD 25 / PF 1.3 / OOS 60 / consistency on / MIN_AVG_R),
    persistent `AUTOSELECT_DENYLIST`, drop forming tail bar for determinism.
 4. **Frontend/API:** Portfolio "Invested Now" now shows deployed margin, not leveraged notional.
-5. Deployed engine + api + frontend; verified via read-only dry-run auto-select and `/api/trades/stats`.
+5. **P&L bookkeeping (F6):** 0.1R BREAKEVEN band, `realizedPnl:=pnl` on close, margin-based per-trade %;
+   history backfilled (`infra/scripts/backfill-pnl-bookkeeping.sql`).
+6. **Phase C1 (F5a):** revived the dead live swing trailing stop (daily ATR via `get_recent_daily_candles`).
+7. **Phase C2 (F5c):** live P&L now booked NET of transaction costs (`apps/api/src/common/costs.ts`, a
+   verified port of the engine cost model). **This flipped the book from +₹4,623 gross to −₹4,182 net** —
+   costs (₹8,805, ≈all intraday) exceed the gross edge. All 178 closed trades backfilled to net; win-rate
+   45.5%, PF 0.90, ROI −13.9%. The honest baseline: **the current strategy mix does not beat costs.**
+8. Deployed engine + api + frontend; verified via read-only dry-run auto-select and `/api/trades/stats`.
+
+## The bottom line (post-cost)
+
+The single most important number this audit produced: **net −₹4,182 / PF 0.90 / −13.9% ROI** once costs
+are real. The intraday book over-trades at ~₹30 gross edge against ~₹49 cost. Improving the system now
+means *fewer, higher-edge trades* — which is exactly what the tightened auto-select gates enforce (only
+6 cells cleared). Phase C3 (make the backtest model live intraday exits) is the remaining lever so
+auto-select can fairly rank the intraday strategies that live actually profits from before costs.
 
 ## Suggested next report
 

@@ -1,5 +1,7 @@
 # ⚡ SmartTrader — Zero-Cost Algorithmic Trading Scanner
 
+> ⚠️ **Partly historical.** This README still describes the v1 prototype in places (ports 5173/3000/8000, old container names, and a '3-phase 35%/40% partial exit' the live code does NOT run). For the current v2 system see **[architecture.md](docs/architecture.md)** and **[work-pc-deployment.md](docs/work-pc-deployment.md)**; latest audit: **[2026-07-13 trust & correctness audit](docs/agent-reports/2026-07-13-trust-and-correctness-audit.md)**.
+
 A full-stack local platform for Indian stock market (NSE) algorithmic trading. Backtests 28 strategies, provides interactive candlestick charting, automatic portfolio/risk management tracking, and monitors live markets every 60 seconds to fire WebSocket and Telegram alerts.
 
 > **🛠 v2 hardening (branch `roadmap-v2`):** the system was audited and largely

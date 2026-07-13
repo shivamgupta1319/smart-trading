@@ -1,5 +1,7 @@
 # gemini.md — AI Assistant Context for Smart Trading Platform
 
+> ⚠️ **HISTORICAL — describes the original v1 prototype; do NOT trust as the current system.** Retained for history only. The live v2 system uses a per-cell ₹10k compounding fund (no FUNDED/SHADOW, no ₹1L/2% rule), ports 5174/3001/8001/5471, net-of-cost P&L, and ~31 strategies. See **[architecture.md](docs/architecture.md)** and **[work-pc-deployment.md](docs/work-pc-deployment.md)**; latest audit: **[2026-07-13 trust & correctness audit](docs/agent-reports/2026-07-13-trust-and-correctness-audit.md)**.
+
 > This file is the persistent memory for the AI assistant (Antigravity/Gemini) working on this project.
 > Update this file at the end of every session with a summary of what was done, decisions made, and what's next.
 

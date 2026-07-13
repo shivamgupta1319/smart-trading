@@ -1,5 +1,7 @@
 ## Trade protection framework
 
+> ⚠️ **Historical / inaccurate.** The 3-phase partial-exit system (35% @50%, 40% @75%) described here is NOT what the live scanner runs — it does breakeven + candle-low trailing + reversal + 15:15 square-off. Retained for history. See **[architecture.md](architecture.md)** and **[work-pc-deployment.md](work-pc-deployment.md)**; latest audit: **[2026-07-13 trust & correctness audit](agent-reports/2026-07-13-trust-and-correctness-audit.md)**.
+
 **Stocks / Equity · 1:2 RR · ₹1L capital · 2% risk per trade**
 
 ---

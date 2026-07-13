@@ -1,5 +1,7 @@
 # Understanding: Zero-Cost Algorithmic Trading Scanner
 
+> ⚠️ **HISTORICAL — describes the original v1 prototype; do NOT trust as the current system.** Retained for history only. The live v2 system uses a per-cell ₹10k compounding fund (no FUNDED/SHADOW, no ₹1L/2% rule), ports 5174/3001/8001/5471, net-of-cost P&L, and ~31 strategies. See **[architecture.md](architecture.md)** and **[work-pc-deployment.md](work-pc-deployment.md)**; latest audit: **[2026-07-13 trust & correctness audit](agent-reports/2026-07-13-trust-and-correctness-audit.md)**.
+
 ## What This Platform Does
 
 This platform is a **local algorithmic trading assistant** for Indian stock markets (NSE). It does three things:

@@ -1,5 +1,7 @@
 # Live System Performance Review — v2
 
+> ⚠️ **Analyzes a since-removed model.** This review is framed in the old FUNDED/SHADOW + ₹1L/10-slot terms, which no longer exist (replaced by the per-cell ₹10k fund). Read the findings with that caveat. See **[architecture.md](architecture.md)** and **[work-pc-deployment.md](work-pc-deployment.md)**; latest audit: **[2026-07-13 trust & correctness audit](agent-reports/2026-07-13-trust-and-correctness-audit.md)**.
+
 **Review date:** 2026-07-11
 **Data window:** 2026-06-09 → 2026-07-10 (~1 month live)
 **Environment:** work-pc, `smart-trading-v2` stack (DB `smart-trading-v2-db`, port 5471)
