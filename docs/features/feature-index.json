@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-13",
+  "updatedAt": "2026-07-14",
   "legend": {
     "priority": {
       "P0": "Keystone \u2014 blocks trustworthy numbers for everything downstream; build first.",
@@ -75,6 +75,19 @@
       "origin": "2026-06-12 F3 + 2026-06-16 F1/F3 (every big live loser cell backtested positive)",
       "summary": "Every live-loss cell carries positive backtest expectancy \u2014 the system trades on numbers the market contradicts. This is a validation/reporting feature (walk-forward + Monte-Carlo bands per live-traded cell, surfaced so auto-select stops trusting inflated cells). BLOCKED until FEAT-001 makes backtest numbers trustworthy and FEAT-002 makes live numbers trustworthy.",
       "createdAt": "2026-06-16T00:00:00Z"
+    },
+    {
+      "id": "FEAT-005",
+      "title": "Risk-Normalized Sizing (per-trade risk cap)",
+      "slug": "risk-normalized-sizing",
+      "path": "docs/features/risk-normalized-sizing",
+      "priority": "P1",
+      "status": "DOCS_DRAFTED",
+      "docsReviewed": false,
+      "dependsOn": [],
+      "origin": "2026-07-14 audit F1 \u2014 owner observed avg profit < avg loss (payoff 0.921)",
+      "summary": "Root cause of the payoff-ratio leak: sizing is pure notional, so per-trade rupee-risk is unequal (intraday losers carried Rs 582 avg risk vs Rs 486 on winners) even though per-trade R is positive (+1.77R expectancy). Add a per-trade risk cap qty=max(1,min(notionalQty, floor(cellCapital\u00d7RISK_PER_TRADE_PCT/riskPerShare))) in risk.ts + signals.service.ts, MIRRORED identically in engine base.py/backtest_config.py (backtest/live parity is the key constraint). Plus a guarded backfill (off originalStopLoss, re-book net costs) to restate the existing work-pc equity curve. Swing per-bucket time-stop (F3) is a follow-up phase.",
+      "createdAt": "2026-07-14T00:00:00Z"
     }
   ]
 }

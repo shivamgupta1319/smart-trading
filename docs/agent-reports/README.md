@@ -60,3 +60,13 @@ Nothing skips straight from "the agent thinks so" to a code change.
 
 - `TEMPLATE.md` — the required shape of every report. The agent must follow it.
 - `<YYYY-MM-DD>-<topic>.md` — one dated report per run.
+
+## Report history
+
+- `2026-06-12-whats-not-working.md` — first analyst run; backtest non-determinism (F1).
+- `2026-06-16-whats-not-working.md` — follow-up.
+- `2026-07-13-trust-and-correctness-audit.md` — trust/correctness sweep (ROI inflation, denylist,
+  backtest≠live); acted on same session.
+- `2026-07-13-c3-intraday-exit-parity-validation.md` — C3 intraday-exit parity validation.
+- `2026-07-14-avg-loss-gt-avg-win-audit.md` — why avg profit < avg loss: notional sizing decouples
+  ₹-risk from R (root cause), capped winners, swing book, stale roster; loss mostly historical.
