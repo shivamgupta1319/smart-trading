@@ -41,6 +41,12 @@ const SECURITY_IDS: Record<string, string> = {
 };
 const ALLOWED_STRATEGY = 'EMA_RSI';
 
+// EOD square-off backstop window (IST minutes-of-day). We force-flatten any still-open real
+// position starting 15:12 — 2 min after the scanner's primary 15:10 close, and before Dhan's
+// ~15:18–15:20 MIS auto-square (which charges a penalty). We stop trying at 15:20.
+const EOD_SQUAREOFF_MIN = 15 * 60 + 12; // 15:12 IST
+const EOD_SQUAREOFF_END_MIN = 15 * 60 + 20; // 15:20 IST
+
 @Injectable()
 export class DhanService implements OnModuleInit {
   private readonly logger = new Logger(DhanService.name);
@@ -126,11 +132,148 @@ export class DhanService implements OnModuleInit {
     } catch (err: any) {
       this.logger.error(`[dhan:boot] daily-state restore skipped: ${this.errMsg(err)}`);
     }
+    // Always run the EOD square-off timer — it self-checks mode + IST window each tick, so it is
+    // a no-op in off/log mode and survives a mid-day mode flip (e.g. kill-switch → off).
+    this.startEodSquareOffTimer();
     if (this.mode === 'off' || this.mode === 'log') return;
     try {
       await this.reconcileOpenPositions();
     } catch (err: any) {
       this.logger.error(`[dhan:boot] position reconcile skipped: ${this.errMsg(err)}`);
+    }
+  }
+
+  // ── EOD square-off backstop ──────────────────────────────────────────────────
+
+  /** IST minutes-of-day + weekday (0=Sun..6=Sat), mirroring ReportsService.istNow(). */
+  private istClock(): { weekday: number; minutes: number } {
+    const parts: Record<string, string> = {};
+    for (const p of new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      weekday: 'short',
+      hour12: false,
+    }).formatToParts(new Date())) {
+      parts[p.type] = p.value;
+    }
+    const wd: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    const hour = parts.hour === '24' ? 0 : parseInt(parts.hour, 10);
+    return { weekday: wd[parts.weekday] ?? -1, minutes: hour * 60 + parseInt(parts.minute, 10) };
+  }
+
+  /**
+   * A dependency-free 60s tick (same pattern as ReportsService) that force-flattens any open real
+   * position inside the 15:12–15:20 IST window. squareOffAllOpen is idempotent, so firing several
+   * times in the window automatically retries a transient failure before Dhan's auto-square.
+   */
+  private startEodSquareOffTimer(): void {
+    setInterval(() => {
+      try {
+        if (this.mode !== 'live' && this.mode !== 'sandbox') return;
+        const { weekday, minutes } = this.istClock();
+        const inWindow =
+          weekday >= 1 && weekday <= 5 && minutes >= EOD_SQUAREOFF_MIN && minutes < EOD_SQUAREOFF_END_MIN;
+        if (!inWindow) return;
+        void this.squareOffAllOpen('EOD 15:12 square-off').catch((e: any) =>
+          this.logger.error(`[dhan] EOD square-off failed: ${this.errMsg(e)}`),
+        );
+      } catch (e: any) {
+        this.logger.error(`[dhan] EOD square-off tick error: ${this.errMsg(e)}`);
+      }
+    }, 60_000);
+    this.logger.log('[dhan] EOD square-off timer started (force-flatten open positions 15:12–15:20 IST).');
+  }
+
+  /**
+   * Force every still-open whitelisted position flat, driven by BROKER TRUTH (Dhan netQty) rather
+   * than the in-memory map — so it catches orphans left by restarts, aborted exits, or missed
+   * scanner closes. Cancels any resting SL, places a MARKET exit for the actual net qty, books P&L,
+   * and closes the durable row. Idempotent: once the broker is flat there is nothing to do.
+   */
+  async squareOffAllOpen(reason: string): Promise<void> {
+    if (this.mode === 'off' || this.mode === 'log') return;
+    this.rolloverDay();
+
+    const openRows = await this.prisma.dhanPosition.findMany({ where: { status: 'OPEN' } });
+    if (openRows.length === 0) return;
+
+    const broker = await this.getPositions();
+    if (broker === null) {
+      this.logger.error(`[dhan] ${reason}: could not read broker positions — will retry next tick.`);
+      return;
+    }
+    const netQtyFor = (symbol: string): number =>
+      broker
+        .filter((p) => p.tradingSymbol === symbol)
+        .reduce((sum, p) => sum + Number(p.netQty || 0), 0);
+
+    for (const row of openRows) {
+      if (!SECURITY_IDS[row.symbol]) continue; // can only trade whitelisted symbols
+      const net = netQtyFor(row.symbol);
+
+      if (net === 0) {
+        // Broker already flat (SL fired / manual / prior sweep) — just close the durable row.
+        this.logger.log(`[dhan] ${reason}: ${row.symbol} (signal #${row.signalId}) already flat at broker — marking CLOSED.`);
+        await this.closePosition(row.signalId, { closeReason: `${reason}: already flat` });
+        this.openPositions.delete(row.signalId);
+        continue;
+      }
+
+      const posSide: Side = net > 0 ? 'BUY' : 'SELL'; // long if net>0
+      const exitSide: Side = net > 0 ? 'SELL' : 'BUY';
+      const qty = Math.abs(net);
+
+      // Cancel the resting SL first so it can't fire during our market exit (→ double-sell).
+      if (row.slOrderId) {
+        const cancelled = await this.cancelOrder(row.slOrderId).then(() => true).catch(() => false);
+        if (!cancelled) {
+          const st = await this.getOrderStatus(row.slOrderId).catch(() => undefined);
+          if (st?.orderStatus === 'TRADED') {
+            this.logger.log(`[dhan] ${reason}: ${row.symbol} SL already fired — marking CLOSED.`);
+            await this.closePosition(row.signalId, {
+              exitOrderId: row.slOrderId,
+              exitFillPrice: st.averageTradedPrice,
+              closeReason: `${reason}: SL fired`,
+            });
+            this.openPositions.delete(row.signalId);
+            continue;
+          }
+          this.logger.error(
+            `[dhan] ${reason}: could not cancel SL ${row.slOrderId} for ${row.symbol} (not TRADED) — skipping market exit this tick to avoid a double-sell.`,
+          );
+          continue; // next tick retries
+        }
+      }
+
+      const tag = `${exitSide} ${row.symbol} ×${qty} MIS MARKET (signal #${row.signalId})`;
+      try {
+        const res = await this.postOrder({ transactionType: exitSide, symbol: row.symbol, qty });
+        const orderId = res?.orderId as string | undefined;
+        const fill = orderId ? await this.pollFill(orderId) : undefined;
+        // Reconcile P&L from the in-memory position if present, else from the durable row.
+        const pos: OpenPosition = this.openPositions.get(row.signalId) ?? {
+          symbol: row.symbol,
+          side: posSide,
+          qty,
+          simEntryPrice: row.simEntryPrice,
+          orderId: row.orderId ?? undefined,
+          fillPrice: row.fillPrice ?? undefined,
+          stopPrice: row.stopPrice ?? undefined,
+          slOrderId: row.slOrderId ?? undefined,
+        };
+        const pnl = this.reconcileExit(pos, fill, tag, `${reason} orderId=${orderId}`);
+        await this.closePosition(row.signalId, {
+          exitOrderId: orderId,
+          exitFillPrice: fill,
+          realizedPnl: pnl,
+          closeReason: reason,
+        });
+        this.openPositions.delete(row.signalId);
+        this.logger.log(`[dhan] ${reason}: flattened ${tag} | orderId=${orderId} fill=₹${fill ?? '?'}`);
+      } catch (err: any) {
+        this.logger.error(`[dhan] ${reason}: EXIT FAILED ${tag}: ${this.errMsg(err)} — will retry next tick.`);
+      }
     }
   }
 
@@ -166,8 +309,9 @@ export class DhanService implements OnModuleInit {
       return;
     }
     const brokerPositions = await this.getPositions();
+    const brokerReadOk = brokerPositions !== null; // null = couldn't reach broker (never treat as flat)
     const netQtyFor = (symbol: string): number =>
-      brokerPositions
+      (brokerPositions ?? [])
         .filter((p) => p.tradingSymbol === symbol)
         .reduce((sum, p) => sum + Number(p.netQty || 0), 0);
 
@@ -185,6 +329,7 @@ export class DhanService implements OnModuleInit {
       const brokerNet = netQtyFor(row.symbol);
 
       // If the resting stop already fired while we were down, the position is flat.
+      // (Runs regardless of the positions read — getOrderStatus is an independent call.)
       if (pos.slOrderId) {
         const slStatus = await this.getOrderStatus(pos.slOrderId).catch(() => undefined);
         if (slStatus?.orderStatus === 'TRADED') {
@@ -204,17 +349,20 @@ export class DhanService implements OnModuleInit {
         }
       }
 
-      if (brokerNet === 0) {
-        // Broker is flat — exited while we were down (MIS square / manual / SL). Close the row.
+      if (brokerReadOk && brokerNet === 0) {
+        // Broker DEFINITIVELY flat — exited while we were down (MIS square / manual / SL). Close the row.
         this.logger.log(`[dhan:boot] signal #${row.signalId} (${row.symbol}) flat at broker — marking CLOSED.`);
         await this.closePosition(row.signalId, { closeReason: 'reconciled-flat-on-boot' });
         continue;
       }
 
-      // Broker still holds it → rehydrate so the normal exit path can close it later.
+      // Broker still holds it, OR we couldn't read the broker (brokerReadOk=false) → keep the row
+      // OPEN and rehydrate the in-memory map so the normal exit path + EOD sweep can close it later.
+      // We never mark flat on an unknown read — that was the bug that orphaned positions to MIS EOD.
       this.openPositions.set(row.signalId, pos);
       this.logger.log(
-        `[dhan:boot] rehydrated signal #${row.signalId}: ${pos.side} ${pos.symbol} ×${pos.qty} (brokerNet=${brokerNet}, sl=${pos.slOrderId ?? 'none'}).`,
+        `[dhan:boot] rehydrated signal #${row.signalId}: ${pos.side} ${pos.symbol} ×${pos.qty} ` +
+          `(brokerNet=${brokerReadOk ? brokerNet : 'unknown'}, sl=${pos.slOrderId ?? 'none'}).`,
       );
     }
   }
@@ -289,28 +437,7 @@ export class DhanService implements OnModuleInit {
       // Catastrophic backstop: rest a broker-side STOP_LOSS (limit) at the ORIGINAL stop.
       // Fail-open — the entry already exists; never undo it, just alert loudly if unprotected.
       if (stopPrice) {
-        try {
-          const sl = await this.postProtectiveStop({ transactionType: exitSide, symbol, qty, triggerPrice: stopPrice });
-          const slOrderId = sl?.orderId as string | undefined;
-          const pos = this.openPositions.get(input.signalId);
-          if (pos) pos.slOrderId = slOrderId;
-          await this.persistPosition(input.signalId); // record the resting SL id
-          this.logger.log(
-            `[dhan:${this.mode}] protective SL placed → ${exitSide} ${symbol} ×${qty} trigger ₹${stopPrice} | slOrderId=${slOrderId}`,
-          );
-        } catch (slErr: any) {
-          this.logger.error(
-            `[dhan:${this.mode}] PROTECTIVE STOP FAILED for ${symbol} (signal #${input.signalId}): ${this.errMsg(slErr)}`,
-          );
-          void this.telegram
-            .sendAlert(
-              'DHAN: POSITION UNPROTECTED',
-              `Entry filled but the broker stop-loss was REJECTED for <b>${symbol}</b> ×${qty} (signal #${input.signalId}). ` +
-                `No resting SL at the broker — protected only by the soft engine stop and MIS EOD square-off. ` +
-                `Error: ${this.errMsg(slErr)}`,
-            )
-            .catch(() => undefined);
-        }
+        await this.armProtectiveStop(input.signalId, exitSide, symbol, qty, stopPrice);
       } else {
         this.logger.warn(
           `[dhan:${this.mode}] no stopLoss provided for ${symbol} (signal #${input.signalId}) — NO broker stop placed`,
@@ -406,6 +533,100 @@ export class DhanService implements OnModuleInit {
     } finally {
       this.openPositions.delete(input.signalId);
     }
+  }
+
+  /**
+   * Place the resting protective STOP_LOSS and CONFIRM the broker accepted it. Dhan can flip an
+   * order to REJECTED asynchronously after returning an orderId (off-tick / LPP band), so we poll:
+   *   - accepted  → store slOrderId, done.
+   *   - REJECTED  → retry ONCE with a wider limit buffer (the first order is dead, so no double-SL
+   *                 risk). If the retry is also rejected → clear slOrderId + "UNPROTECTED" alert.
+   *   - unknown   → keep the orderId (it may be resting) and warn; never retry on unknown (would
+   *                 risk two live stops → an oversell when one fires).
+   * Always fail-open: the entry stays; this only governs the broker-side protection.
+   */
+  private async armProtectiveStop(
+    signalId: number,
+    exitSide: Side,
+    symbol: string,
+    qty: number,
+    triggerPrice: number,
+  ): Promise<void> {
+    const setSl = async (slOrderId: string | undefined) => {
+      const pos = this.openPositions.get(signalId);
+      if (pos) pos.slOrderId = slOrderId;
+      await this.persistPosition(signalId);
+    };
+
+    try {
+      const sl = await this.postProtectiveStop({ transactionType: exitSide, symbol, qty, triggerPrice });
+      const slOrderId = sl?.orderId as string | undefined;
+      await setSl(slOrderId);
+      const accepted = slOrderId ? await this.pollAccepted(slOrderId) : false;
+
+      if (accepted === true) {
+        this.logger.log(
+          `[dhan:${this.mode}] protective SL accepted → ${exitSide} ${symbol} ×${qty} trigger ₹${triggerPrice} | slOrderId=${slOrderId}`,
+        );
+        return;
+      }
+      if (accepted === undefined) {
+        this.logger.warn(
+          `[dhan:${this.mode}] protective SL status UNKNOWN for ${symbol} (signal #${signalId}) slOrderId=${slOrderId} — assuming resting; verify manually.`,
+        );
+        return;
+      }
+
+      // Definitively rejected → the first order is dead. Retry once with a wider limit buffer.
+      this.logger.error(
+        `[dhan:${this.mode}] protective SL REJECTED for ${symbol} (signal #${signalId}) — retrying once with a wider buffer.`,
+      );
+      const retry = await this.postProtectiveStop({
+        transactionType: exitSide,
+        symbol,
+        qty,
+        triggerPrice,
+        bufferPct: this.slLimitBufferPct * 2,
+      });
+      const retryId = retry?.orderId as string | undefined;
+      await setSl(retryId);
+      const retryAccepted = retryId ? await this.pollAccepted(retryId) : false;
+
+      if (retryAccepted === true) {
+        this.logger.log(
+          `[dhan:${this.mode}] protective SL accepted on retry → ${exitSide} ${symbol} ×${qty} | slOrderId=${retryId}`,
+        );
+        return;
+      }
+      if (retryAccepted === undefined) {
+        this.logger.warn(
+          `[dhan:${this.mode}] protective SL status UNKNOWN after retry for ${symbol} (signal #${signalId}) slOrderId=${retryId} — verify manually.`,
+        );
+        return;
+      }
+
+      // Both attempts rejected — position is genuinely unprotected at the broker.
+      await setSl(undefined);
+      await this.alertUnprotected(symbol, qty, signalId, 'stop-loss REJECTED twice (original + wider-buffer retry)');
+    } catch (slErr: any) {
+      // Transport/auth error placing the SL — treat as unprotected (fail-open, entry kept).
+      this.logger.error(
+        `[dhan:${this.mode}] PROTECTIVE STOP FAILED for ${symbol} (signal #${signalId}): ${this.errMsg(slErr)}`,
+      );
+      await this.alertUnprotected(symbol, qty, signalId, this.errMsg(slErr));
+    }
+  }
+
+  /** Fire the "position unprotected" Telegram alert (best-effort). */
+  private async alertUnprotected(symbol: string, qty: number, signalId: number, reason: string): Promise<void> {
+    await this.telegram
+      .sendAlert(
+        'DHAN: POSITION UNPROTECTED',
+        `Entry filled but the broker stop-loss could not be placed for <b>${symbol}</b> ×${qty} (signal #${signalId}). ` +
+          `No resting SL at the broker — protected only by the soft engine stop and the 15:12 EOD square-off. ` +
+          `Reason: ${reason}`,
+      )
+      .catch(() => undefined);
   }
 
   /**
@@ -579,8 +800,9 @@ export class DhanService implements OnModuleInit {
     symbol: string;
     qty: number;
     triggerPrice: number;
+    bufferPct?: number; // override the limit-offset (used to widen on a retry after rejection)
   }) {
-    const buf = this.slLimitBufferPct;
+    const buf = o.bufferPct ?? this.slLimitBufferPct;
     const limit =
       o.transactionType === 'SELL'
         ? this.roundTick(o.triggerPrice * (1 - buf))
@@ -653,8 +875,13 @@ export class DhanService implements OnModuleInit {
     return undefined;
   }
 
-  /** Read Dhan's current positions (for boot reconciliation). Returns [] on any error. */
-  private async getPositions(): Promise<Array<{ tradingSymbol: string; netQty: number; productType?: string }>> {
+  /**
+   * Read Dhan's current positions (for boot reconciliation + EOD square-off).
+   * Returns `null` on any error (could NOT reach the broker) — this is deliberately distinct
+   * from `[]` (broker reached, genuinely flat), so callers never treat a read failure as "flat"
+   * and orphan a still-open position.
+   */
+  private async getPositions(): Promise<Array<{ tradingSymbol: string; netQty: number; productType?: string }> | null> {
     try {
       const data = await this.authed((token) =>
         this.http
@@ -669,12 +896,35 @@ export class DhanService implements OnModuleInit {
       }));
     } catch (err: any) {
       this.logger.error(`[dhan] getPositions failed: ${this.errMsg(err)}`);
-      return [];
+      return null;
     }
   }
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Poll a just-placed order until we know whether the broker ACCEPTED it. A protective
+   * STOP_LOSS rests as PENDING/TRANSIT (not TRADED) — those, and TRADED, count as accepted.
+   * REJECTED/CANCELLED = not accepted. Dhan can flip an order to REJECTED asynchronously
+   * (e.g. off-tick / LPP-band) after returning an orderId, so a single read isn't enough.
+   * Returns true if accepted, false if rejected/cancelled, undefined if still unknown.
+   */
+  private async pollAccepted(orderId: string, tries = 4, delayMs = 500): Promise<boolean | undefined> {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const s = await this.getOrderStatus(orderId);
+        if (s.orderStatus === 'REJECTED' || s.orderStatus === 'CANCELLED') return false;
+        if (s.orderStatus === 'PENDING' || s.orderStatus === 'TRANSIT' || s.orderStatus === 'TRADED') {
+          return true;
+        }
+      } catch (err: any) {
+        this.logger.warn(`[dhan] accept poll for order ${orderId} errored: ${this.errMsg(err)}`);
+      }
+      if (i < tries - 1) await this.sleep(delayMs);
+    }
+    return undefined;
   }
 
   /**
@@ -705,9 +955,13 @@ export class DhanService implements OnModuleInit {
     return status === 401 || code === 'DH-901' || code === 'DH-906';
   }
 
-  /** Round to the NSE ₹0.05 tick — Dhan rejects off-tick trigger prices. */
+  /**
+   * Round to the NSE ₹0.05 tick — Dhan rejects off-tick trigger prices. The `.toFixed(2)`
+   * collapses binary-float artifacts (e.g. 3152.7000000000003 → 3152.70) so both the stored
+   * value and the wire value are a clean 2-decimal tick.
+   */
   private roundTick(price: number): number {
-    return Math.round(price / 0.05) * 0.05;
+    return Number((Math.round(price / 0.05) * 0.05).toFixed(2));
   }
 
   // ── token manager (TOTP auto-refresh) ────────────────────────────────────────

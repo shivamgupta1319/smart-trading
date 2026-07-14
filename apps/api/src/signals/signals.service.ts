@@ -7,6 +7,7 @@ import { DhanService } from "../dhan/dhan.service";
 const INITIAL_CAPITAL = 100000; // ₹1,00,000
 const RISK_PER_TRADE_PCT = 2; // 2% risk per trade (standard for professional traders)
 const MAX_RISK_PER_TRADE = INITIAL_CAPITAL * (RISK_PER_TRADE_PCT / 100); // ₹2,000
+const CAPITAL_PER_TRADE = INITIAL_CAPITAL; // ₹1,00,000 — max notional deployed per trade
 
 @Injectable()
 export class SignalsService {
@@ -60,12 +61,18 @@ export class SignalsService {
     // Auto-create Trade record with professional position sizing
     try {
       const riskPerShare = Math.abs(dto.entryPrice - dto.stopLoss);
-      // Position size = Risk Amount / Risk Per Share
-      // This ensures we never lose more than 2% of capital on any single trade
-      const quantity =
+      // Position size is the SMALLER of two caps so both invariants always hold:
+      //   • Risk-based cap: never risk more than 2% (₹2,000) of capital on a single trade.
+      //   • Capital-based cap: never deploy more than ₹1L notional on a single trade.
+      // Without the capital cap, a tight stop on a high-priced stock (e.g. HDFCBANK ~₹817,
+      // stop ~₹1 away) would size ~1904 shares = ₹15.5L notional — a ~15x over-leverage.
+      const riskBasedQty =
         riskPerShare > 0
-          ? Math.max(1, Math.floor(MAX_RISK_PER_TRADE / riskPerShare))
-          : 1;
+          ? Math.floor(MAX_RISK_PER_TRADE / riskPerShare)
+          : Number.MAX_SAFE_INTEGER;
+      const notionalCapQty =
+        dto.entryPrice > 0 ? Math.floor(CAPITAL_PER_TRADE / dto.entryPrice) : 1;
+      const quantity = Math.max(1, Math.min(riskBasedQty, notionalCapQty));
       const capitalUsed = quantity * dto.entryPrice;
       const riskAmount = quantity * riskPerShare;
 
