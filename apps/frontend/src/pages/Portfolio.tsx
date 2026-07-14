@@ -138,7 +138,9 @@ export function Portfolio() {
     try {
       const [statsRes, tradesRes] = await Promise.all([
         axios.get(`${API}/api/trades/stats`),
-        axios.get(`${API}/api/trades`),
+        // High limit so the journal shows ALL trades (incl. old swing ones) and matches the
+        // duration/strategy breakdowns, which are computed server-side over every closed trade.
+        axios.get(`${API}/api/trades?limit=5000`),
       ]);
       setStats(statsRes.data);
       setTrades(tradesRes.data);
@@ -596,18 +598,21 @@ export function Portfolio() {
                         <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--green)' }}>₹{t.target.toFixed(2)}</span>
                       </td>
                       <td>
-                        {/* Show the PLANNED stop (originalStopLoss). t.stopLoss is the trailed value,
-                            which moves to ~breakeven once in profit and otherwise looks "wrong-side". */}
+                        {/* Current stop on top; if it has trailed, show the original struck-through
+                            below (same style as LiveScanner). */}
                         {(() => {
-                          const plannedSL = t.originalStopLoss ?? t.stopLoss;
                           const trailed = t.originalStopLoss != null && Math.abs(t.originalStopLoss - t.stopLoss) > 0.01;
                           return (
-                            <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--red)' }}>
-                              ₹{plannedSL.toFixed(2)}
-                              {trailed && (
-                                <span style={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}> · trail ₹{t.stopLoss.toFixed(2)}</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
+                              <span className="mono" style={{ fontSize: '0.85rem', fontWeight: 600, color: trailed ? 'var(--green)' : 'var(--red)' }}>
+                                ₹{t.stopLoss.toFixed(2)}
+                              </span>
+                              {trailed && t.originalStopLoss != null && (
+                                <span className="mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                                  ₹{t.originalStopLoss.toFixed(2)}
+                                </span>
                               )}
-                            </span>
+                            </div>
                           );
                         })()}
                       </td>
