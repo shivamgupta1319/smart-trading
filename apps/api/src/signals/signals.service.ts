@@ -7,7 +7,15 @@ import { DhanService } from "../dhan/dhan.service";
 const INITIAL_CAPITAL = 100000; // ₹1,00,000
 const RISK_PER_TRADE_PCT = 2; // 2% risk per trade (standard for professional traders)
 const MAX_RISK_PER_TRADE = INITIAL_CAPITAL * (RISK_PER_TRADE_PCT / 100); // ₹2,000
-const CAPITAL_PER_TRADE = INITIAL_CAPITAL; // ₹1,00,000 — max notional deployed per trade
+// Per-trade notional cap depends on horizon: intraday runs on MIS ~5x leverage (₹5L on the ₹1L
+// base), swing/positional is delivery (CNC) at 1x (₹1L). The 2% (₹2,000) risk cap still applies to
+// both — quantity is the SMALLER of the risk-based and notional-based sizes.
+const INTRADAY_NOTIONAL = INITIAL_CAPITAL * 5; // ₹5,00,000 (5x MIS intraday)
+const SWING_NOTIONAL = INITIAL_CAPITAL; // ₹1,00,000 (1x delivery)
+/** ₹5L for explicit INTRADAY; ₹1L for swing/positional and any unknown horizon (conservative). */
+function notionalCapFor(holdDuration?: string | null): number {
+  return holdDuration === "INTRADAY" ? INTRADAY_NOTIONAL : SWING_NOTIONAL;
+}
 
 @Injectable()
 export class SignalsService {
@@ -63,15 +71,16 @@ export class SignalsService {
       const riskPerShare = Math.abs(dto.entryPrice - dto.stopLoss);
       // Position size is the SMALLER of two caps so both invariants always hold:
       //   • Risk-based cap: never risk more than 2% (₹2,000) of capital on a single trade.
-      //   • Capital-based cap: never deploy more than ₹1L notional on a single trade.
-      // Without the capital cap, a tight stop on a high-priced stock (e.g. HDFCBANK ~₹817,
+      //   • Notional cap: never deploy more than the per-horizon notional (₹5L intraday / ₹1L swing).
+      // Without the notional cap, a tight stop on a high-priced stock (e.g. HDFCBANK ~₹817,
       // stop ~₹1 away) would size ~1904 shares = ₹15.5L notional — a ~15x over-leverage.
+      const notionalCap = notionalCapFor(dto.holdDuration);
       const riskBasedQty =
         riskPerShare > 0
           ? Math.floor(MAX_RISK_PER_TRADE / riskPerShare)
           : Number.MAX_SAFE_INTEGER;
       const notionalCapQty =
-        dto.entryPrice > 0 ? Math.floor(CAPITAL_PER_TRADE / dto.entryPrice) : 1;
+        dto.entryPrice > 0 ? Math.floor(notionalCap / dto.entryPrice) : 1;
       const quantity = Math.max(1, Math.min(riskBasedQty, notionalCapQty));
       const capitalUsed = quantity * dto.entryPrice;
       const riskAmount = quantity * riskPerShare;
@@ -111,6 +120,7 @@ export class SignalsService {
         strategyName: dto.strategyName,
         entryPrice: dto.entryPrice,
         stopLoss: dto.stopLoss,
+        holdDuration: dto.holdDuration,
       });
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -127,84 +137,9 @@ export class SignalsService {
     return { signal, isNew: true };
   }
 
-  async close(id: number) {
-    const signal = await this.prisma.liveSignal.update({
-      where: { id },
-      data: { status: "CLOSED" },
-      include: { stock: true, trade: true },
-    });
-
-    // Auto-close the associated trade and compute P&L
-    if (signal.trade && signal.trade.status === "OPEN") {
-      try {
-        // Default fallback if no price is provided (breakeven assumption)
-        const exitPrice = signal.trade.entryPrice;
-
-        // Determine if SL or TP was hit based on most recent signal context
-        // For a more accurate exit: check current price. For now, use SL/TP logic.
-        const trade = signal.trade;
-        const isBuy = trade.signalType === "BUY";
-
-        // Default: assume the signal was closed because price hit either SL or TP
-        // The live_scanner auto-close logic checks: BUY → price <= SL or price >= TP
-        // We'll use the target as exit if profit scenario, else SL
-        let computedExitPrice = exitPrice;
-
-        const pnlPerShare = isBuy
-          ? computedExitPrice - trade.entryPrice
-          : trade.entryPrice - computedExitPrice;
-          
-        // Final lot P&L based ONLY on remaining quantity
-        const finalLotPnl = pnlPerShare * trade.remainingQty;
-        
-        // Total Trade P&L = Realized from partials + Final Lot P&L
-        const totalPnl = trade.realizedPnl + finalLotPnl;
-        const pnlPercent = (totalPnl / trade.capitalUsed) * 100;
-
-        let outcome = "BREAKEVEN";
-        if (totalPnl > 0) outcome = "WIN";
-        else if (totalPnl < 0) outcome = "LOSS";
-
-        await this.prisma.trade.update({
-          where: { id: trade.id },
-          data: {
-            exitPrice: computedExitPrice,
-            pnl: Math.round(totalPnl * 100) / 100,
-            pnlPercent: Math.round(pnlPercent * 100) / 100,
-            remainingQty: 0,
-            outcome,
-            exitTime: new Date(),
-            status: "CLOSED",
-          },
-        });
-        this.logger.log(
-          `Trade closed: ${trade.symbol} ${outcome} P&L: ₹${totalPnl.toFixed(2)} (${pnlPercent.toFixed(2)}%)`,
-        );
-
-        // Square off the real Dhan position (no-op unless this signal is Dhan-managed).
-        await this.dhan.placeExit({
-          signalId: id,
-          symbol: signal.stock?.symbol,
-          exitPrice: computedExitPrice,
-        });
-      } catch (err: unknown) {
-        if (err instanceof Error) {
-          this.logger.error(
-            `Failed to close trade for signal ${id}: ${err.message}`,
-          );
-        } else {
-          this.logger.error(
-            `Failed to close trade for signal ${id}: ${String(err)}`,
-          );
-        }
-      }
-    }
-
-    return this.prisma.liveSignal.findUnique({
-      where: { id },
-      include: { stock: true, trade: true },
-    });
-  }
+  // NOTE: the old no-price `close(id)` was removed. It booked exit = entry (a fake ₹0 breakeven)
+  // whenever a caller omitted the price, corrupting P&L. All closes now go through
+  // `closeWithPrice(id, exitPrice)`; the controller rejects a priceless close with 400.
 
   async partialClose(id: number, percentToClose: number, exitPrice: number, reason: string) {
     const signal = await this.prisma.liveSignal.findUnique({

@@ -201,8 +201,12 @@ export class TradesService {
     const pnlPerShare = isBuy
       ? exitPrice - trade.entryPrice
       : trade.entryPrice - exitPrice;
-    const pnl = pnlPerShare * trade.quantity;
-    const pnlPercent = (pnlPerShare / trade.entryPrice) * 100;
+    // Only the still-open lot is closed here; already-booked partials live in realizedPnl. Using
+    // trade.quantity (full size) would double-count partials and ignore realizedPnl. Mirror
+    // closeWithPrice: total = realizedPnl + perShare * remainingQty, and pnlPercent off capitalUsed.
+    const finalLotPnl = pnlPerShare * trade.remainingQty;
+    const pnl = trade.realizedPnl + finalLotPnl;
+    const pnlPercent = trade.capitalUsed > 0 ? (pnl / trade.capitalUsed) * 100 : 0;
 
     let outcome = 'BREAKEVEN';
     if (pnl > 0) outcome = 'WIN';
@@ -220,6 +224,7 @@ export class TradesService {
         exitPrice,
         pnl: Math.round(pnl * 100) / 100,
         pnlPercent: Math.round(pnlPercent * 100) / 100,
+        remainingQty: 0,
         outcome,
         exitTime: new Date(),
         status: 'CLOSED',

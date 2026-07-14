@@ -7,6 +7,7 @@ import {
   Body,
   ParseIntPipe,
   HttpCode,
+  BadRequestException,
 } from "@nestjs/common";
 import { SignalsService } from "./signals.service";
 import { SignalsGateway } from "./signals.gateway";
@@ -59,15 +60,16 @@ export class SignalsController {
 
   @Patch(":id/close")
   async close(@Param("id", ParseIntPipe) id: number, @Body() body: any) {
-    let result;
-    if (body && body.exitPrice !== undefined) {
-      result = await this.signalsService.closeWithPrice(
-        id,
-        Number(body.exitPrice),
+    // A close MUST carry a real exit price. The old no-price fallback booked exit = entry (a fake
+    // ₹0 breakeven); callers (scanner + frontend) always have the live/last price, so reject the
+    // priceless case instead of corrupting P&L.
+    const exitPrice = Number(body?.exitPrice);
+    if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
+      throw new BadRequestException(
+        "A valid exitPrice is required to close a trade",
       );
-    } else {
-      result = await this.signalsService.close(id);
     }
+    const result = await this.signalsService.closeWithPrice(id, exitPrice);
 
     if (result && result.trade) {
       const trade = result.trade;
