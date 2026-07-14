@@ -6,6 +6,7 @@ import {
   BASE_CELL_CAPITAL,
   MIN_CELL_CAPITAL,
   leverageFor,
+  riskBudgetFor,
   classifyOutcome,
   marginOf,
 } from "../common/risk";
@@ -101,9 +102,16 @@ export class SignalsService {
         const cellRealized = cellClosed.reduce((s, t) => s + toNum(t.pnl), 0);
         cellCapital = Math.max(BASE_CELL_CAPITAL + cellRealized, MIN_CELL_CAPITAL);
 
-        // Deploy cellCapital × leverage worth of notional.
+        // Deploy cellCapital × leverage worth of notional, but bound rupee-risk by a
+        // per-trade cap (FEAT-005): qty = min(notionalQty, floor(riskBudget/riskPerShare)),
+        // riskBudget = cellCapital × RISK_PER_TRADE_PCT. This equalizes ₹-risk across trades
+        // so wide-stop trades stop out-risking tight-stop ones (fixes avg₹loss > avg₹win).
+        // MUST match the engine sizing in apps/engine/strategies/base.py.
         const notionalBudget = cellCapital * leverage;
-        quantity = dto.entryPrice > 0 ? Math.max(1, Math.floor(notionalBudget / dto.entryPrice)) : 1;
+        const notionalQty = dto.entryPrice > 0 ? Math.floor(notionalBudget / dto.entryPrice) : 1;
+        const riskBudget = riskBudgetFor(cellCapital);
+        const riskCappedQty = riskPerShare > 0 ? Math.floor(riskBudget / riskPerShare) : notionalQty;
+        quantity = Math.max(1, Math.min(notionalQty, riskCappedQty));
         capitalUsed = round2(quantity * dto.entryPrice);
         riskAmount = round2(quantity * riskPerShare);
 

@@ -97,9 +97,37 @@ def test_backtest_sizes_to_one_slot():
         "Low": [99, 99, 100], "Close": [100, 101, 105],
     }, index=idx)
     sim = _OneBuy().simulate(df)
-    # Notional sizing (not risk-based): 1D → delivery leverage 1×, so notional =
-    # slot_capital = 10k, qty = floor(10k / entry~100) ≈ 99, under the 50k cap.
+    # Sizing = min(notional, per-trade risk cap). 1D → delivery leverage 1×, notional =
+    # slot_capital = 10k → notionalQty = floor(10k/entry~100) ≈ 99. Risk cap (FEAT-005):
+    # riskBudget = 10k×0.02 = 200, risk/share = |entry−95| ≈ 5 → riskQty = 40, so the cap
+    # binds and qty = 40. ROI denominator is still the slot, independent of qty.
     m = _OneBuy().run_backtest(df)
     assert m["totalTrades"] == 1
     # ROI denominator is the slot, so netProfit / slot_capital * 100 == roiPercentage.
     assert m["roiPercentage"] == pytest.approx(m["netProfit"] / RISK.slot_capital * 100, abs=0.01)
+
+
+def test_per_trade_risk_cap_bounds_wide_stops():
+    """FEAT-005: sizing bounds rupee-risk at fund × RISK_PER_TRADE_PCT, so a wide-stop
+    trade can't out-risk a tight-stop one on the same fund. Mirrors the live formula in
+    apps/api/src/common/risk.ts (parity)."""
+    from backtest_config import RISK_PER_TRADE_PCT, LEVERAGE_INTRADAY, LEVERAGE_DELIVERY
+
+    def qty(cell, lev, entry, stop, pct=RISK_PER_TRADE_PCT, cap=None):
+        notional = cell * lev
+        if cap is not None:
+            notional = min(notional, cap)
+        notional_qty = int(notional / entry)
+        rps = abs(entry - stop)
+        risk_qty = int((cell * pct) / rps) if rps > 0 else notional_qty
+        return max(1, min(notional_qty, risk_qty))
+
+    assert RISK_PER_TRADE_PCT == 0.02  # keep in lockstep with risk.ts default
+    # Wide-stop swing (live open #241 IFCI·Fibonacci): notional 128 sh, cap trims to 38.
+    assert qty(10000, LEVERAGE_DELIVERY, 78.00, 72.86) == 38
+    # entry == stop → cap inert (no div-by-zero), falls back to notional qty.
+    assert qty(10000, LEVERAGE_DELIVERY, 78.00, 78.00) == int(10000 / 78.00)
+    # Cap disabled (pct huge) → qty equals the pre-feature notional qty (purely additive).
+    assert qty(10000, LEVERAGE_DELIVERY, 78.00, 72.86, pct=1.0) == int(10000 / 78.00)
+    # A fund too small for one risk-unit still trades ≥1 share.
+    assert qty(500, LEVERAGE_DELIVERY, 78.00, 40.00) >= 1

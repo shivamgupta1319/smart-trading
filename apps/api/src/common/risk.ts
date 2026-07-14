@@ -15,6 +15,18 @@ export const MIN_CELL_CAPITAL = Number(process.env.MIN_CELL_CAPITAL || 500); // 
 export const LEVERAGE_INTRADAY = Number(process.env.LEVERAGE_INTRADAY || 5);
 export const LEVERAGE_DELIVERY = Number(process.env.LEVERAGE_DELIVERY || 1);
 
+// Per-trade risk cap (FEAT-005). Notional sizing alone lets a wide-stop trade risk multiples
+// of a tight-stop one on the same fund — the payoff-ratio leak (avg ₹-loss > avg ₹-win) from
+// docs/agent-reports/2026-07-14-avg-loss-gt-avg-win-audit.md (F1). We bound each trade to at
+// most `cellCapital × RISK_PER_TRADE_PCT` rupees of risk:
+//   qty = max(1, min(floor(notionalBudget/entry), floor(riskBudget/riskPerShare)))
+// MUST match the engine's RISK_PER_TRADE_PCT in apps/engine/backtest_config.py, or the
+// backtest stops predicting live (same parity invariant as leverage/costs).
+export const RISK_PER_TRADE_PCT = Number(process.env.RISK_PER_TRADE_PCT || 0.02); // 2% of the cell fund
+
+/** Rupees a single trade may risk = cell fund × RISK_PER_TRADE_PCT. */
+export const riskBudgetFor = (cellCapital: number): number => cellCapital * RISK_PER_TRADE_PCT;
+
 // Portfolio "heat" = sum of money at risk if every open stop hits, as a % of total deployed
 // base (₹10k × active cells). A soft risk-dashboard flag threshold, not a funding gate.
 export const MAX_HEAT_PCT = Number(process.env.MAX_HEAT_PCT || 6); // 6% of deployed base

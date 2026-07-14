@@ -42,6 +42,14 @@ ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.07.13-c3")
 LEVERAGE_INTRADAY = _f("LEVERAGE_INTRADAY", 5.0)
 LEVERAGE_DELIVERY = _f("LEVERAGE_DELIVERY", 1.0)
 
+# Per-trade risk cap (FEAT-005). Sizing is notional (fund × leverage / entry), which lets a
+# wide-stop trade risk multiples of a tight-stop one on the same fund — the payoff-ratio leak
+# (avg ₹-loss > avg ₹-win) documented in agent-reports/2026-07-14-avg-loss-gt-avg-win-audit.md.
+# We add a second bound: each trade risks at most `fund × RISK_PER_TRADE_PCT` rupees, i.e.
+# qty = max(1, min(notionalQty, floor(fund × pct / |entry−stop|))). MUST match the value in
+# apps/api/src/common/risk.ts (RISK_PER_TRADE_PCT) or backtest≠live sizing breaks.
+RISK_PER_TRADE_PCT = _f("RISK_PER_TRADE_PCT", 0.02)  # 2% of the cell fund (₹200 on a ₹10k seed)
+
 
 @dataclass(frozen=True)
 class RiskConfig:

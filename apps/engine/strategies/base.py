@@ -6,7 +6,7 @@ import pandas as pd
 
 from backtest_config import (
     RISK, CostModel, uses_trailing_exit, trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD,
-    LEVERAGE_INTRADAY, LEVERAGE_DELIVERY,
+    LEVERAGE_INTRADAY, LEVERAGE_DELIVERY, RISK_PER_TRADE_PCT,
 )
 from intraday_exits import (
     PHASE2_TRIGGER, PHASE3_TRIGGER, REVERSAL_ZONE_START,
@@ -187,7 +187,14 @@ class BaseStrategy(ABC):
                 # Bound notional so a compounding cell doesn't size geometrically —
                 # keeps ROI/DD/PF honest for selection (see backtest_config).
                 notional = min(notional, RISK.max_position_value)
-            qty = max(1, int(notional / entry))
+            notional_qty = int(notional / entry)
+            # Per-trade risk cap (FEAT-005): also bound rupee-risk so a wide-stop trade
+            # doesn't risk multiples of a tight-stop one on the same fund. riskBudget =
+            # fund × RISK_PER_TRADE_PCT; risk_per_share = |entry − sl| (entry-time stop,
+            # computed above). MUST match apps/api/src/common/risk.ts sizing.
+            risk_budget = current_capital * RISK_PER_TRADE_PCT
+            risk_qty = int(risk_budget / risk_per_share) if risk_per_share > 0 else notional_qty
+            qty = max(1, min(notional_qty, risk_qty))
 
             # Walk forward to the exit bar. INTRADAY models the live 3-phase exit
             # (partials + breakeven + candle-trail + reversal + 15:15 square-off);
