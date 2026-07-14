@@ -113,25 +113,33 @@ export function LiveScanner() {
 
   const closeSignal = async (id: number, symbol: string) => {
     try {
-      let payload = {};
+      let livePrice: number | undefined;
       try {
         const liveRes = await axios.post(`${API}/api/engine/live-prices`, {
           symbols: [symbol],
         });
         const livePriceData = liveRes.data[symbol];
-        const livePrice = livePriceData
+        livePrice = livePriceData
           ? typeof livePriceData === "object"
             ? livePriceData.price
             : livePriceData
           : undefined;
-        if (livePrice) {
-          payload = { exitPrice: livePrice };
-        }
       } catch (e) {
         console.error("Failed to fetch live price for closing", e);
       }
 
-      await axios.patch(`${API}/api/signals/${id}/close`, payload);
+      // Never close without a real exit price — the backend used to book exit=entry (fake ₹0
+      // breakeven) on an empty payload, corrupting P&L. Abort and tell the user instead.
+      if (!livePrice || Number(livePrice) <= 0) {
+        alert(
+          `Could not fetch a live price for ${symbol}. Close skipped to avoid a false breakeven — try again when the market is open.`,
+        );
+        return;
+      }
+
+      await axios.patch(`${API}/api/signals/${id}/close`, {
+        exitPrice: livePrice,
+      });
       setActiveSignals((prev) =>
         prev.map((s) => (s.id === id ? { ...s, status: "CLOSED" } : s)),
       );

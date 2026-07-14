@@ -99,19 +99,23 @@ export function Portfolio() {
 
   const closeTrade = async (signalId: number, symbol: string) => {
     try {
-      let payload = {};
+      let livePrice: number | undefined;
       try {
         const liveRes = await axios.post(`${API}/api/engine/live-prices`, { symbols: [symbol] });
         const livePriceData = liveRes.data[symbol];
-        const livePrice = livePriceData ? (typeof livePriceData === 'object' ? livePriceData.price : livePriceData) : undefined;
-        if (livePrice) {
-          payload = { exitPrice: livePrice };
-        }
+        livePrice = livePriceData ? (typeof livePriceData === 'object' ? livePriceData.price : livePriceData) : undefined;
       } catch (e) {
         console.error('Failed to fetch live price for closing', e);
       }
-      
-      await axios.patch(`${API}/api/signals/${signalId}/close`, payload);
+
+      // Never close without a real exit price — an empty payload made the backend book exit=entry
+      // (fake ₹0 breakeven), corrupting P&L. Abort and tell the user instead.
+      if (!livePrice || Number(livePrice) <= 0) {
+        alert(`Could not fetch a live price for ${symbol}. Close skipped to avoid a false breakeven — try again when the market is open.`);
+        return;
+      }
+
+      await axios.patch(`${API}/api/signals/${signalId}/close`, { exitPrice: livePrice });
       // Refresh portfolio after closing
       fetchData();
     } catch (e) {
@@ -592,7 +596,20 @@ export function Portfolio() {
                         <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--green)' }}>₹{t.target.toFixed(2)}</span>
                       </td>
                       <td>
-                        <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--red)' }}>₹{t.stopLoss.toFixed(2)}</span>
+                        {/* Show the PLANNED stop (originalStopLoss). t.stopLoss is the trailed value,
+                            which moves to ~breakeven once in profit and otherwise looks "wrong-side". */}
+                        {(() => {
+                          const plannedSL = t.originalStopLoss ?? t.stopLoss;
+                          const trailed = t.originalStopLoss != null && Math.abs(t.originalStopLoss - t.stopLoss) > 0.01;
+                          return (
+                            <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--red)' }}>
+                              ₹{plannedSL.toFixed(2)}
+                              {trailed && (
+                                <span style={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}> · trail ₹{t.stopLoss.toFixed(2)}</span>
+                              )}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td>
                         {(() => {
