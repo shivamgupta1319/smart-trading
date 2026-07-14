@@ -34,10 +34,35 @@
 -- scan, so deleting these cells stops NEW signals immediately. Existing OPEN positions are
 -- unaffected — they exit via normal stop/target/time-stop rules (e.g. the open IFCI
 -- Fibonacci_Golden_Zone position remains until it hits its stop/target).
+--
+-- RE-APPLIED 2026-07-14 (avg-loss > avg-win audit — docs/agent-reports/2026-07-14-...). The 3
+-- "kept" 15m_ORB cells have since turned negative, so this round adds CELL-SPECIFIC cuts (not the
+-- whole strategy — OLAELEC·15m_ORB stays, +Rs 425 / 100% win). Over all closed trades now:
+--   ATGL·15m_ORB      (stockId 12)  -Rs 690   18 trades  50% win   -> CUT
+--   VEDL·15m_ORB      (stockId 10)  -Rs 677   14 trades  43% win   -> CUT
+--   MTARTECH·15m_ORB  (stockId 24)  -Rs 670    6 trades  50% win   -> CUT
+--   OLAELEC·15m_ORB   (stockId 22)  +Rs 425    1 trade  100% win   -> KEEP (do NOT delete)
+--   BSE·MACD_Stoch_Confluence (stockId 7) -Rs 573  1 trade  (MID swing, wide stop) -> CUT (thin
+--                     sample; owner may prefer to let auto-select judge it instead).
+-- The durable fix is still the auto-select selection guard + denylist (F5): after this prune, run
+-- the real quality-gated `POST /api/engine/auto-select` so the roster becomes the quality picks and
+-- the deny-listed chronic losers can't be re-promoted. A one-off DELETE alone is not sticky.
+-- Reverse a cell: re-INSERT its ActiveConfiguration row, or re-run auto-select.
+--
+-- Current work-pc AUTOSELECT_DENYLIST = "DMA20_Pullback,Fibonacci_Golden_Zone,Volume_Profile_POC,BSE|15m_ORB".
+-- To make THIS round sticky, extend it in the work-pc .env to (then restart engine/scanner):
+--   AUTOSELECT_DENYLIST=DMA20_Pullback,Fibonacci_Golden_Zone,Volume_Profile_POC,BSE|15m_ORB,ATGL|15m_ORB,VEDL|15m_ORB,MTARTECH|15m_ORB,BSE|MACD_Stoch_Confluence
+-- (denylist matches whole strategy "Name" or a cell "SYMBOL|Strategy" — auto_select.py:60-63,179-189.)
 
 BEGIN;
 
+-- 2026-07-11/13 rounds: whole-strategy cuts (every cell of these strategies loses).
 DELETE FROM "ActiveConfiguration"
 WHERE "strategyName" IN ('DMA20_Pullback', 'Fibonacci_Golden_Zone', 'Volume_Profile_POC');
+
+-- 2026-07-14 round: CELL-SPECIFIC cuts (keep the other cells of these strategies).
+DELETE FROM "ActiveConfiguration"
+WHERE ("strategyName" = '15m_ORB'               AND "stockId" IN (12, 10, 24))  -- ATGL, VEDL, MTARTECH
+   OR ("strategyName" = 'MACD_Stoch_Confluence' AND "stockId" = 7);             -- BSE
 
 COMMIT;
