@@ -34,12 +34,22 @@ interface OpenPosition {
   slOrderId?: string; // resting STOP_LOSS (limit) order id (catastrophic backstop)
 }
 
-// Hard whitelist: symbol -> Dhan NSE_EQ securityId (confirmed from Dhan scrip master).
+// Real-money ENTRY whitelist: each (strategy, symbol) pair that may open a new position. A symbol
+// only trades under its paired strategy, and the scanner must also have a matching
+// ActiveConfiguration to emit the signal. securityId = Dhan NSE_EQ id (confirmed from scrip master).
+const LIVE_WHITELIST: ReadonlyArray<{ strategy: string; symbol: string; securityId: string }> = [
+  { strategy: 'MACD_Zero', symbol: 'ZEEL', securityId: '3812' },
+  { strategy: 'RVOL_ORB', symbol: 'BSE', securityId: '19585' },
+];
+
+// symbol -> Dhan NSE_EQ securityId. This is a SUPERSET of the entry whitelist: it also carries
+// legacy symbols we may still hold an open position in, so exits / the EOD square-off sweep can
+// always place a CLOSING order for them even though new entries there are no longer allowed.
 const SECURITY_IDS: Record<string, string> = {
-  HDFCBANK: '1333',
-  ADANIENT: '25',
+  ...Object.fromEntries(LIVE_WHITELIST.map((w) => [w.symbol, w.securityId])),
+  HDFCBANK: '1333', // legacy — entry no longer whitelisted; kept so an open position can be exited
+  ADANIENT: '25', // legacy — same
 };
-const ALLOWED_STRATEGY = 'EMA_RSI';
 
 // EOD square-off backstop window (IST minutes-of-day). We force-flatten any still-open real
 // position starting 15:12 — 2 min after the scanner's primary 15:10 close, and before Dhan's
@@ -59,8 +69,10 @@ export class DhanService implements OnModuleInit {
   private readonly baseUrl: string;
 
   // sizing / guardrails (all configurable via env)
-  private readonly maxNotional: number; // per-order rupee cap → drives qty
+  private readonly maxNotional: number; // base per-order rupee cap (swing/1x) → drives qty
   private readonly maxQty: number; // absolute per-order share cap
+  private readonly maxRisk: number; // rupees at risk cap per order (mirrors the sim ₹2000)
+  private readonly intradayLeverage: number; // notional multiplier for INTRADAY (MIS), e.g. 5x
   private readonly maxOrdersPerDay: number;
   private readonly maxDailyLoss: number; // rupees; trips kill-switch
   private readonly slLimitBufferPct: number; // limit offset past the SL trigger (keeps it inside LPP)
@@ -93,6 +105,8 @@ export class DhanService implements OnModuleInit {
 
     this.maxNotional = Number(this.config.get('DHAN_MAX_NOTIONAL') ?? 12500);
     this.maxQty = Number(this.config.get('DHAN_MAX_QTY') ?? 20);
+    this.maxRisk = Number(this.config.get('DHAN_MAX_RISK') ?? 2000);
+    this.intradayLeverage = Number(this.config.get('DHAN_INTRADAY_LEVERAGE') ?? 5);
     this.maxOrdersPerDay = Number(this.config.get('DHAN_MAX_ORDERS_PER_DAY') ?? 20);
     this.maxDailyLoss = Number(this.config.get('DHAN_MAX_DAILY_LOSS') ?? 1000);
     this.slLimitBufferPct = Number(this.config.get('DHAN_SL_LIMIT_BUFFER_PCT') ?? 0.0015);
@@ -108,9 +122,9 @@ export class DhanService implements OnModuleInit {
     }
 
     this.logger.log(
-      `DhanService mode=${this.mode} | whitelist=${ALLOWED_STRATEGY}:{${Object.keys(
-        SECURITY_IDS,
-      ).join(',')}} | maxNotional=₹${this.maxNotional} maxQty=${this.maxQty} ` +
+      `DhanService mode=${this.mode} | entryWhitelist=${LIVE_WHITELIST.map(
+        (w) => `${w.strategy}:${w.symbol}`,
+      ).join(',')} | maxNotional=₹${this.maxNotional} maxQty=${this.maxQty} ` +
         `maxOrders/day=${this.maxOrdersPerDay} killLoss=₹${this.maxDailyLoss}`,
     );
     if (this.mode !== 'off' && this.mode !== 'log' && !this.clientId) {
@@ -377,13 +391,23 @@ export class DhanService implements OnModuleInit {
     strategyName: string;
     entryPrice: number;
     stopLoss?: number;
+    holdDuration?: string;
   }): Promise<void> {
     if (this.mode === 'off') return;
     const symbol = input.symbol || '';
     if (!this.isWhitelisted(input.strategyName, symbol)) return;
 
+    // Swing/positional would need CNC (delivery) + a non-intraday EOD-sweep exclusion, which are not
+    // wired yet. Only INTRADAY (MIS) is executed for real money; the current whitelist is intraday-only.
+    if (input.holdDuration && input.holdDuration !== 'INTRADAY') {
+      this.logger.warn(
+        `[dhan] skip entry ${symbol}: real-money swing/CNC not supported yet (holdDuration=${input.holdDuration})`,
+      );
+      return;
+    }
+
     const side = input.signalType === 'BUY' ? 'BUY' : 'SELL';
-    const qty = this.computeQty(input.entryPrice);
+    const qty = this.computeQty(input.entryPrice, input.stopLoss, input.holdDuration);
     if (qty < 1) {
       this.logger.warn(
         `[dhan] skip entry ${symbol}: computed qty=0 (price ₹${input.entryPrice} > notional cap ₹${this.maxNotional})`,
@@ -654,13 +678,21 @@ export class DhanService implements OnModuleInit {
   // ── sizing & guards ─────────────────────────────────────────────────────────
 
   private isWhitelisted(strategyName: string, symbol: string): boolean {
-    return strategyName === ALLOWED_STRATEGY && !!SECURITY_IDS[symbol];
+    return LIVE_WHITELIST.some((w) => w.strategy === strategyName && w.symbol === symbol);
   }
 
-  /** qty = min(floor(maxNotional / price), maxQty). Notional cap keeps it ~1x (no leverage). */
-  private computeQty(price: number): number {
+  /**
+   * qty = min(risk-based, notional-based, maxQty) — mirrors the sim sizer. INTRADAY gets the MIS
+   * leverage multiplier on the base notional (e.g. 5x); swing/other stays 1x. The ₹-risk cap
+   * (maxRisk) and the absolute maxQty are hard safety ceilings.
+   */
+  private computeQty(price: number, stopLoss?: number, holdDuration?: string): number {
     if (!price || price <= 0) return 0;
-    return Math.min(Math.floor(this.maxNotional / price), this.maxQty);
+    const notional = holdDuration === 'INTRADAY' ? this.maxNotional * this.intradayLeverage : this.maxNotional;
+    const riskPerShare = stopLoss && stopLoss > 0 ? Math.abs(price - stopLoss) : 0;
+    const riskQty = riskPerShare > 0 ? Math.floor(this.maxRisk / riskPerShare) : Number.MAX_SAFE_INTEGER;
+    const notionalQty = Math.floor(notional / price);
+    return Math.max(0, Math.min(riskQty, notionalQty, this.maxQty));
   }
 
   private rolloverDay(): void {
