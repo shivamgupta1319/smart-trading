@@ -145,6 +145,15 @@ Then forward-test ~3 months and pick the top cell from the Portfolio → Leaderb
 
 ## Gotchas
 
+- **502 Bad Gateway right after a deploy (login/`/api` fails, SPA loads).** `docker compose up -d`
+  recreates the `api` container with a **new internal IP**; the frontend nginx used to `proxy_pass
+  http://api:3000` and cached that IP **once at startup**, so it kept hitting the dead old IP →
+  `connect() failed (111: Connection refused)` → 502 on every `/api` call incl. `/api/auth/login`
+  (looks like "incorrect PIN"/won't log in). **Permanent fix applied 2026-07-14:** `infra/nginx/default.conf`
+  now has `resolver 127.0.0.11 valid=10s ipv6=off;` + a variable in `proxy_pass`
+  (`set $api_upstream api; proxy_pass http://$api_upstream:3000;`) so nginx re-resolves at request
+  time. If you ever see this again (e.g. an old config): `docker exec smart-trading-v2-frontend nginx -s reload`.
+  Diagnose via `docker logs --tail 30 smart-trading-v2-frontend | grep upstream`.
 - **Wrong docker account on push** → `denied`. Always use `build-and-push.sh` (it sets
   `DOCKER_CFG=$HOME/.docker-account2`).
 - **`.env` not reloaded on `restart`** — use `up -d <svc>` to pick up new env.
