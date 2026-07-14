@@ -1,5 +1,11 @@
 # Handoff / Resume Doc — Dhan Live Execution + v1 Hygiene
 
+> **⚠️ Point-in-time handoff (through 2026-07-13).** For the *current* live setup and operations use
+> **[real-money-trading.md](real-money-trading.md)** (runbook + add-a-pair) and
+> [live-capabilities.md](live-capabilities.md). The EMA_RSI/HDFCBANK/ADANIENT whitelist, ₹12.5K
+> notional, and ₹2,000 risk mentioned below have since been superseded (now MACD_Zero/ZEEL +
+> RVOL_ORB/BSE, ₹5K-margin × 5×, 2%-of-account risk).
+
 **Last updated:** 2026-07-13 (market open ~10:10 IST) — 🎉 FIRST REAL FILL CONFIRMED
 **Prev update:** 2026-07-09 (market open ~09:20 IST)
 **Branch:** `roadmap-v1` (all work committed here; not pushed to origin unless you push)

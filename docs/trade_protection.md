@@ -70,7 +70,7 @@ If the trade reaches 80% progress, the system actively monitors for reversal pat
 To avoid fake moves and after-hours slippage, the scanner enforces strict time boundaries:
 - **Morning Block**: No setups are evaluated before **9:30 AM IST**.
 - **Afternoon Intraday Block**: No new INTRADAY setups are generated after **3:00 PM IST**.
-- **Global Block & Square-Off**: No signals are processed after **3:15 PM IST**. Any open INTRADAY positions are forcefully closed at market price at 3:15 PM.
+- **Square-Off**: open INTRADAY positions are forcefully closed at market price at **3:10 PM (15:10 IST)**. For real-money (Dhan) positions an independent broker-truth EOD sweep also runs **15:12–15:20** as a backstop before Dhan's ~15:18 MIS auto-square.
 
 ---
 

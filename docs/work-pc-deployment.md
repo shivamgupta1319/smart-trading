@@ -113,7 +113,7 @@ Real-money order routing lives in the **api** container and is gated by env.
 | `DHAN_TRADING_MODE` | `off` (sim) \| `log` \| `sandbox` \| `live` |
 | `DHAN_CLIENT_ID` / `DHAN_PIN` / `DHAN_TOTP_SECRET` / `DHAN_ACCESS_TOKEN` | credentials (TOTP auto-mints a 24h token; manual token = fallback) |
 | `DHAN_HTTP_PROXY` | **static-IP egress** — routes all Dhan calls through TrueIP.in IPv6 proxy so SEBI's static-IP mandate (`DH-905 Invalid IP`) is satisfied. Fails *safe* (no bypass if proxy down). |
-| `DHAN_MAX_NOTIONAL` / `DHAN_MAX_QTY` / `DHAN_MAX_ORDERS_PER_DAY` / `DHAN_MAX_DAILY_LOSS` | sizing caps + kill-switch |
+| `DHAN_MAX_NOTIONAL` (base margin/trade) · `DHAN_INTRADAY_LEVERAGE` (MIS multiplier, e.g. 5) · `DHAN_MAX_RISK` (₹ risk cap = 2% of account) · `DHAN_MAX_QTY` · `DHAN_MAX_ORDERS_PER_DAY` · `DHAN_MAX_DAILY_LOSS` | sizing caps + kill-switch — see [real-money-trading.md](real-money-trading.md) for the live values and the add-a-pair runbook |
 
 **Go live:** in `infra/.env` set `DHAN_TRADING_MODE=live` (+ desired caps), then
 `docker compose up -d api`.

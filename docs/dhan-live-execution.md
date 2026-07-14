@@ -1,6 +1,12 @@
 # Dhan Live Execution — EMA_RSI Real-Money Test
 
-**Status:** Planned (not yet built)
+> **⚠️ HISTORICAL DESIGN DOC (2026-07-08).** This describes the *original* EMA_RSI/HDFCBANK/ADANIENT
+> validation plan and is kept for context. The **current** live setup (whitelist MACD_Zero/ZEEL +
+> RVOL_ORB/BSE, ₹5K-margin × 5× sizing, 2%-of-account risk) and the add-a-pair runbook live in
+> **[real-money-trading.md](real-money-trading.md)**; current capabilities in
+> [live-capabilities.md](live-capabilities.md).
+
+**Status:** Built + live (superseded plan below)
 **Created:** 2026-07-08
 **Scope:** First real-money validation of the v1 paper system via the Dhan broker API.
 **Owner:** shivamgupta1319

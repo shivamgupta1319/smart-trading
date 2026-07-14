@@ -63,7 +63,7 @@ docker exec -it smart-trading-engine python -m apps.engine.scanner.live_scanner
 The live scanner enforces real-world market hours to protect your capital:
 - **Before 9:30 AM IST:** The scanner tracks prices but will **not** generate new signals (to avoid opening 15-minute fake moves).
 - **After 3:00 PM IST:** No new INTRADAY setups will be generated.
-- **At 3:15 PM IST:** All remaining open INTRADAY positions are forcefully squared off at the market price, and the scanner stops evaluating *all* strategies.
+- **At 3:10 PM IST (15:10):** All remaining open INTRADAY positions are forcefully squared off at the market price. (Real-money Dhan positions also get a broker-side EOD sweep at 15:12–15:20 as a backstop.)
 
 ---
 
