@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { createChart, ColorType, type IChartApi, AreaSeries } from 'lightweight-charts';
 
-const API = 'http://localhost:3000';
+const API = '';
 
 const HOLD_LABELS: Record<string, { label: string; color: string; icon: string }> = {
   INTRADAY: { label: 'Intraday', color: '#22d3ee', icon: '⏱' },
@@ -28,12 +28,17 @@ interface Trade {
   capitalUsed: number;
   riskAmount: number;
   pnl: number | null;
+  realizedPnl: number | null;
   pnlPercent: number | null;
   outcome: string | null;
   entryTime: string;
   exitTime: string | null;
   status: string;
   notes: string | null;
+  originalStopLoss: number | null;
+  trailingState: string;
+  remainingQty: number | null;
+  peakPrice: number | null;
 }
 
 interface PortfolioStats {
@@ -94,19 +99,23 @@ export function Portfolio() {
 
   const closeTrade = async (signalId: number, symbol: string) => {
     try {
-      let payload = {};
+      let livePrice: number | undefined;
       try {
         const liveRes = await axios.post(`${API}/api/engine/live-prices`, { symbols: [symbol] });
         const livePriceData = liveRes.data[symbol];
-        const livePrice = livePriceData ? (typeof livePriceData === 'object' ? livePriceData.price : livePriceData) : undefined;
-        if (livePrice) {
-          payload = { exitPrice: livePrice };
-        }
+        livePrice = livePriceData ? (typeof livePriceData === 'object' ? livePriceData.price : livePriceData) : undefined;
       } catch (e) {
         console.error('Failed to fetch live price for closing', e);
       }
-      
-      await axios.patch(`${API}/api/signals/${signalId}/close`, payload);
+
+      // Never close without a real exit price — an empty payload made the backend book exit=entry
+      // (fake ₹0 breakeven), corrupting P&L. Abort and tell the user instead.
+      if (!livePrice || Number(livePrice) <= 0) {
+        alert(`Could not fetch a live price for ${symbol}. Close skipped to avoid a false breakeven — try again when the market is open.`);
+        return;
+      }
+
+      await axios.patch(`${API}/api/signals/${signalId}/close`, { exitPrice: livePrice });
       // Refresh portfolio after closing
       fetchData();
     } catch (e) {
@@ -129,7 +138,9 @@ export function Portfolio() {
     try {
       const [statsRes, tradesRes] = await Promise.all([
         axios.get(`${API}/api/trades/stats`),
-        axios.get(`${API}/api/trades`),
+        // High limit so the journal shows ALL trades (incl. old swing ones) and matches the
+        // duration/strategy breakdowns, which are computed server-side over every closed trade.
+        axios.get(`${API}/api/trades?limit=5000`),
       ]);
       setStats(statsRes.data);
       setTrades(tradesRes.data);
@@ -306,7 +317,7 @@ export function Portfolio() {
           </div>
 
           {/* Secondary stats row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
             <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
               <p className="metric-label">W / L</p>
               <p className="metric-value" style={{ fontSize: '1.1rem' }}>
@@ -326,6 +337,28 @@ export function Portfolio() {
             <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
               <p className="metric-label">Best Strategy</p>
               <p className="metric-value highlight" style={{ fontSize: '0.9rem' }}>{stats.bestStrategy}</p>
+            </div>
+            <div className="metric-card" style={{ background: 'var(--bg-input)', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+              <p className="metric-label">🔒 Saved by Trailing</p>
+              <p className="metric-value" style={{ fontSize: '1.1rem' }}>
+                {(() => {
+                  const saved = trades.filter(t => {
+                    if (t.status !== 'CLOSED' || !t.trailingState || t.trailingState === 'INITIAL') return false;
+                    if (t.outcome !== 'WIN' && t.outcome !== 'BREAKEVEN') return false;
+                    
+                    if (t.exitPrice !== null && t.target !== null) {
+                      const hitTarget = t.signalType === 'BUY' ? t.exitPrice >= t.target : t.exitPrice <= t.target;
+                      if (hitTarget) return false;
+                    }
+                    return true;
+                  }).length;
+                  return (
+                    <span style={{ color: saved > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
+                      {saved} trade{saved !== 1 ? 's' : ''}
+                    </span>
+                  );
+                })()}
+              </p>
             </div>
           </div>
         </>
@@ -554,7 +587,9 @@ export function Portfolio() {
                         </span>
                       </td>
                       <td>
-                        <span className="mono" style={{ fontSize: '0.85rem' }}>{t.quantity}</span>
+                        <span className="mono" style={{ fontSize: '0.85rem' }}>
+                          {t.remainingQty !== null && t.remainingQty < t.quantity ? `${t.remainingQty}/${t.quantity}` : t.quantity}
+                        </span>
                       </td>
                       <td>
                         <span className="mono" style={{ fontSize: '0.85rem' }}>₹{t.entryPrice.toFixed(2)}</span>
@@ -563,7 +598,23 @@ export function Portfolio() {
                         <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--green)' }}>₹{t.target.toFixed(2)}</span>
                       </td>
                       <td>
-                        <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--red)' }}>₹{t.stopLoss.toFixed(2)}</span>
+                        {/* Current stop on top; if it has trailed, show the original struck-through
+                            below (same style as LiveScanner). */}
+                        {(() => {
+                          const trailed = t.originalStopLoss != null && Math.abs(t.originalStopLoss - t.stopLoss) > 0.01;
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
+                              <span className="mono" style={{ fontSize: '0.85rem', fontWeight: 600, color: trailed ? 'var(--green)' : 'var(--red)' }}>
+                                ₹{t.stopLoss.toFixed(2)}
+                              </span>
+                              {trailed && t.originalStopLoss != null && (
+                                <span className="mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                                  ₹{t.originalStopLoss.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td>
                         {(() => {
@@ -598,12 +649,14 @@ export function Portfolio() {
                              const priceData = livePrices[t.symbol];
                              const livePrice = priceData ? (typeof priceData === 'object' ? (priceData as any).price : priceData) : null;
                              if (livePrice) {
-                               pnlToDisplay = t.signalType === 'BUY' 
-                                 ? (livePrice - t.entryPrice) * t.quantity 
-                                 : (t.entryPrice - livePrice) * t.quantity;
-                               pnlPercentToDisplay = t.signalType === 'BUY'
-                                 ? ((livePrice - t.entryPrice) / t.entryPrice) * 100
-                                 : ((t.entryPrice - livePrice) / t.entryPrice) * 100;
+                               const remQty = t.remainingQty !== null ? t.remainingQty : t.quantity;
+                               const realized = t.realizedPnl || 0;
+                               const unrealized = t.signalType === 'BUY' 
+                                 ? (livePrice - t.entryPrice) * remQty 
+                                 : (t.entryPrice - livePrice) * remQty;
+                               
+                               pnlToDisplay = unrealized + realized;
+                               pnlPercentToDisplay = (pnlToDisplay / (t.quantity * t.entryPrice)) * 100;
                                isLivePnl = true;
                              }
                           }
@@ -633,9 +686,28 @@ export function Portfolio() {
                         })()}
                       </td>
                       <td>
-                        <span className={`badge ${t.outcome === 'WIN' ? 'badge-buy' : t.outcome === 'LOSS' ? 'badge-sell' : t.status === 'OPEN' ? 'badge-active' : ''}`}>
-                          {t.outcome || (t.status === 'OPEN' ? '⏳ Open' : 'BREAKEVEN')}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                          <span className={`badge ${t.outcome === 'WIN' ? 'badge-buy' : t.outcome === 'LOSS' ? 'badge-sell' : t.status === 'OPEN' ? 'badge-active' : ''}`}>
+                            {t.outcome || (t.status === 'OPEN' ? '⏳ Open' : 'BREAKEVEN')}
+                          </span>
+                          {t.status === 'CLOSED' && t.trailingState && t.trailingState !== 'INITIAL' && (
+                            <span style={{
+                              fontSize: '0.6rem',
+                              padding: '0.1rem 0.35rem',
+                              borderRadius: '3px',
+                              fontWeight: 600,
+                              ...(t.trailingState === 'BREAKEVEN' ? { color: '#22c55e', background: '#22c55e15' } :
+                                 t.trailingState === 'PROFIT_LOCK' ? { color: '#f59e0b', background: '#f59e0b15' } :
+                                 t.trailingState === 'REVERSAL_EXIT' ? { color: '#ef4444', background: '#ef444415' } :
+                                 { color: '#64748b', background: '#64748b15' })
+                            }}>
+                              {t.trailingState === 'BREAKEVEN' ? '🔒 BE Exit' :
+                               t.trailingState === 'PROFIT_LOCK' ? '💰 Lock Exit' :
+                               t.trailingState === 'REVERSAL_EXIT' ? '⚠️ Reversal' :
+                               t.trailingState}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
                         {new Date(t.entryTime).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }).toLowerCase()}

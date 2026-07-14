@@ -14,6 +14,7 @@ class VWAPMACDRSIStrategy(BaseStrategy):
     timeframe = "15m"
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
         if df.empty or len(df) < 50:
             return df
 
@@ -25,7 +26,12 @@ class VWAPMACDRSIStrategy(BaseStrategy):
         
         # Calculate MACD
         macd = ta.macd(df['Close'], fast=12, slow=26, signal=9)
-        # Check column names output by pandas_ta
+        if macd is None or macd.empty:
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
+            return df
+
         macd_col = [c for c in macd.columns if c.startswith('MACD_')][0]
         hist_col = [c for c in macd.columns if c.startswith('MACDh_')][0]
         signal_col = [c for c in macd.columns if c.startswith('MACDs_')][0]
@@ -39,23 +45,22 @@ class VWAPMACDRSIStrategy(BaseStrategy):
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        for i in range(1, len(df)):
-            close = df['Close'].iloc[i]
-            vwap = df['VWAP'].iloc[i]
-            rsi = df['RSI'].iloc[i]
-            macd_hist = df['MACD_Hist'].iloc[i]
-            prev_macd_hist = df['MACD_Hist'].iloc[i-1]
+        prev_macd_hist = df['MACD_Hist'].shift(1)
 
-            # Long conditions
-            if close > vwap and rsi > 60 and macd_hist > 0 and prev_macd_hist <= 0:
-                df.at[df.index[i], 'signal'] = 1
-                df.at[df.index[i], 'stop_loss'] = df['Low'].iloc[i] - (close * 0.005) # 0.5% SL
-                df.at[df.index[i], 'target'] = close + (close - df.at[df.index[i], 'stop_loss']) * 2 # 1:2 RR
+        # Long conditions
+        bullish_cond = (df['Close'] > df['VWAP']) & (df['RSI'] > 60) & (df['MACD_Hist'] > 0) & (prev_macd_hist <= 0)
 
-            # Short conditions
-            elif close < vwap and rsi < 40 and macd_hist < 0 and prev_macd_hist >= 0:
-                df.at[df.index[i], 'signal'] = -1
-                df.at[df.index[i], 'stop_loss'] = df['High'].iloc[i] + (close * 0.005) # 0.5% SL
-                df.at[df.index[i], 'target'] = close - (df.at[df.index[i], 'stop_loss'] - close) * 2 # 1:2 RR
+        # Short conditions
+        bearish_cond = (df['Close'] < df['VWAP']) & (df['RSI'] < 40) & (df['MACD_Hist'] < 0) & (prev_macd_hist >= 0)
+
+        df.loc[bullish_cond, 'signal'] = 1
+        df.loc[bullish_cond, 'stop_loss'] = df['Low'][bullish_cond] - (df['Close'][bullish_cond] * 0.005)
+        sl_diff_bull = df['Close'][bullish_cond] - df.loc[bullish_cond, 'stop_loss']
+        df.loc[bullish_cond, 'target'] = df['Close'][bullish_cond] + sl_diff_bull * 2
+
+        df.loc[bearish_cond, 'signal'] = -1
+        df.loc[bearish_cond, 'stop_loss'] = df['High'][bearish_cond] + (df['Close'][bearish_cond] * 0.005)
+        sl_diff_bear = df.loc[bearish_cond, 'stop_loss'] - df['Close'][bearish_cond]
+        df.loc[bearish_cond, 'target'] = df['Close'][bearish_cond] - sl_diff_bear * 2
 
         return df

@@ -23,6 +23,18 @@ export class EngineController {
     return response.data;
   }
 
+  @Post('run-strategy-all-stocks')
+  async runStrategyAllStocks(@Body() body: { strategy: string; timeframe?: string }) {
+    const response = await axios.post(`${this.engineUrl}/api/engine/run-strategy-all-stocks`, body);
+    return response.data;
+  }
+
+  @Get('strategies')
+  async getStrategies() {
+    const response = await axios.get(`${this.engineUrl}/api/engine/strategies`);
+    return response.data;
+  }
+
   @Post('live-prices')
   async getLivePrices(@Body() body: { symbols: string[] }) {
     const response = await axios.post(`${this.engineUrl}/api/engine/live-prices`, body);

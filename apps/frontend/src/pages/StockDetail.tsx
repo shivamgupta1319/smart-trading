@@ -4,7 +4,7 @@ import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import { CandlestickChart } from '../components/CandlestickChart';
 
-const API = 'http://localhost:3000';
+const API = '';
 
 interface BacktestResult {
   strategy: string;

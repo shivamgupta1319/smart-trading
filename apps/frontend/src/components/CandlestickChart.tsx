@@ -10,7 +10,7 @@ import {
 } from 'lightweight-charts';
 import axios from 'axios';
 
-const API = 'http://localhost:3000';
+const API = '';
 
 interface ChartData {
   candles: { time: number; open: number; high: number; low: number; close: number }[];

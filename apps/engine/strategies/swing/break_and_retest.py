@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from strategies.base import BaseStrategy
 
 class BreakAndRetestStrategy(BaseStrategy):
@@ -14,7 +15,11 @@ class BreakAndRetestStrategy(BaseStrategy):
     timeframe = "1D"
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
         if df.empty or len(df) < 60:
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
             return df
 
         df['signal'] = 0
@@ -26,12 +31,21 @@ class BreakAndRetestStrategy(BaseStrategy):
         active_breakout_level = 0
         days_since_breakout = 0
         
+        # Optimize with numpy arrays
+        closes = df['Close'].values
+        opens = df['Open'].values
+        lows = df['Low'].values
+        high_60s = df['High_60'].values
+        
+        signals = np.zeros(len(df))
+        stop_losses = np.zeros(len(df))
+        targets = np.zeros(len(df))
+
         for i in range(60, len(df)):
-            close = df['Close'].iloc[i]
-            open_p = df['Open'].iloc[i]
-            low = df['Low'].iloc[i]
-            
-            high_60 = df['High_60'].iloc[i]
+            close = closes[i]
+            open_p = opens[i]
+            low = lows[i]
+            high_60 = high_60s[i]
             
             # 1. Detect Breakout
             if close > high_60 and active_breakout_level == 0:
@@ -52,11 +66,10 @@ class BreakAndRetestStrategy(BaseStrategy):
                 if low <= active_breakout_level * 1.02 and low >= active_breakout_level * 0.98:
                     # 3. Enter on bounce (bullish close)
                     if close > open_p:
-                        df.at[df.index[i], 'signal'] = 1
-                        # Stop loss slightly below the breakout level
+                        signals[i] = 1
                         sl = active_breakout_level * 0.96
-                        df.at[df.index[i], 'stop_loss'] = sl
-                        df.at[df.index[i], 'target'] = close + (close - sl) * 2
+                        stop_losses[i] = sl
+                        targets[i] = close + (close - sl) * 2
                         
                         # Reset
                         active_breakout_level = 0
@@ -65,4 +78,7 @@ class BreakAndRetestStrategy(BaseStrategy):
                 elif days_since_breakout > 20:
                     active_breakout_level = 0
 
+        df['signal'] = signals
+        df['stop_loss'] = stop_losses
+        df['target'] = targets
         return df

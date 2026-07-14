@@ -13,6 +13,7 @@ class GapAndGoStrategy(BaseStrategy):
     timeframe = "5m"
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
         if df.empty or len(df) < 10:
             return df
 
@@ -20,62 +21,38 @@ class GapAndGoStrategy(BaseStrategy):
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        # We need the previous day's close.
-        # Ensure index is datetime
         if not pd.api.types.is_datetime64_any_dtype(df.index):
             df.index = pd.to_datetime(df.index)
 
-        # Create a date column for grouping
         df['Date'] = df.index.date
         
-        # Get the first candle of each day
-        first_candles = df.groupby('Date').head(1).copy()
+        first_candles = df.groupby('Date').first()
+        last_closes = df.groupby('Date')['Close'].last().shift(1)
         
-        # Get the last close of each day
-        last_closes = df.groupby('Date').tail(1)['Close'].shift(1)
-        # Re-map the previous close to the first candle of the current day using the dates
-        # Wait, shift(1) moves the last close down by 1 day.
-        last_closes.index = first_candles.index
-        first_candles['Prev_Close'] = last_closes
+        # map last_closes to df index based on Date
+        df['Prev_Close'] = df['Date'].map(last_closes)
 
-        # Filter for gaps
         gap_threshold = 0.005 # 0.5%
-        
-        # Merge back to df so we can flag the first candle
-        df['Prev_Close'] = pd.Series(index=df.index, dtype=float)
-        df.loc[first_candles.index, 'Prev_Close'] = first_candles['Prev_Close']
+        gap_pct = (df['Open'] - df['Prev_Close']) / df['Prev_Close']
 
-        for i in range(1, len(df)):
-            prev_close = df['Prev_Close'].iloc[i]
-            
-            # If it's not the first candle of the day (prev_close is NaN), skip
-            if pd.isna(prev_close):
-                continue
-                
-            open_price = df['Open'].iloc[i]
-            close_price = df['Close'].iloc[i]
-            high_price = df['High'].iloc[i]
-            low_price = df['Low'].iloc[i]
+        # We only consider the FIRST candle of the day
+        is_first = df.groupby('Date').cumcount() == 0
 
-            gap_pct = (open_price - prev_close) / prev_close
+        # Bullish Gap
+        bullish_gap = (gap_pct >= gap_threshold) & is_first
+        bullish_cond = bullish_gap & (df['Close'] > df['Open'])
 
-            # Bullish Gap
-            if gap_pct >= gap_threshold:
-                # If first candle closes bullish (closes above open)
-                if close_price > open_price:
-                    df.at[df.index[i], 'signal'] = 1
-                    df.at[df.index[i], 'stop_loss'] = low_price # Stop loss below the first candle
-                    risk = close_price - low_price
-                    df.at[df.index[i], 'target'] = close_price + (risk * 2)
+        # Bearish Gap
+        bearish_gap = (gap_pct <= -gap_threshold) & is_first
+        bearish_cond = bearish_gap & (df['Close'] < df['Open'])
 
-            # Bearish Gap
-            elif gap_pct <= -gap_threshold:
-                # If first candle closes bearish (closes below open)
-                if close_price < open_price:
-                    df.at[df.index[i], 'signal'] = -1
-                    df.at[df.index[i], 'stop_loss'] = high_price
-                    risk = high_price - close_price
-                    df.at[df.index[i], 'target'] = close_price - (risk * 2)
+        df.loc[bullish_cond, 'signal'] = 1
+        df.loc[bullish_cond, 'stop_loss'] = df['Low'][bullish_cond]
+        df.loc[bullish_cond, 'target'] = df['Close'][bullish_cond] + 2 * (df['Close'][bullish_cond] - df['Low'][bullish_cond])
+
+        df.loc[bearish_cond, 'signal'] = -1
+        df.loc[bearish_cond, 'stop_loss'] = df['High'][bearish_cond]
+        df.loc[bearish_cond, 'target'] = df['Close'][bearish_cond] - 2 * (df['High'][bearish_cond] - df['Close'][bearish_cond])
 
         df.drop(columns=['Date', 'Prev_Close'], inplace=True)
         return df

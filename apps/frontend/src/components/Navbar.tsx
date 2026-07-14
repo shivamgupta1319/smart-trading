@@ -53,6 +53,12 @@ export function Navbar() {
         >
           🗂️ Sectors
         </NavLink>
+        <NavLink
+          to="/backtesting"
+          className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+        >
+          ⚡ Backtesting
+        </NavLink>
         <div className="market-status">
           <span className={`market-dot ${open ? "open" : ""}`}></span>
           <span>{open ? "MARKET OPEN" : "MARKET CLOSED"}</span>
