@@ -11,7 +11,7 @@ import httpx
 import pandas as pd
 import pandas_ta as ta
 import yfinance as yf
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timezone, date
 import pytz
 from sqlalchemy import text
 from dotenv import load_dotenv
@@ -23,18 +23,65 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from db.client import engine
 from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
+# Shared intraday-exit primitives — same source of truth the backtest models.
+from intraday_exits import (
+    calculate_progress,
+    detect_reversal,
+    MIN_QTY_FOR_PARTIAL,
+    REVERSAL_ZONE_START,
+)
 
 NESTJS_URL = os.getenv("NESTJS_SIGNAL_URL", "http://localhost:3000/api/signals/new")
+# Shared API key sent to the NestJS API (no-op when unset / API auth disabled).
+NEST_HEADERS = {"x-api-key": os.getenv("API_KEY")} if os.getenv("API_KEY") else {}
 IST = pytz.timezone("Asia/Kolkata")
+
+
+def _signals_base() -> str:
+    return NESTJS_URL.replace("/signals/new", "/signals")
+
+
+def book_partial(signal_id, percent, exit_price, reason) -> bool:
+    """Book a partial exit and RECONCILE: only return True if the API confirms it.
+    Prevents the scanner's in-memory state from advancing past a failed PATCH."""
+    try:
+        r = httpx.patch(
+            f"{_signals_base()}/{signal_id}/partial-close",
+            json={"percent": percent, "exitPrice": exit_price, "reason": reason},
+            headers=NEST_HEADERS, timeout=10,
+        )
+        if r.status_code == 200:
+            return True
+        print(f"    ⚠️ partial-close #{signal_id} failed: HTTP {r.status_code} — will retry next poll")
+        return False
+    except Exception as e:
+        print(f"    [ERROR] partial-close #{signal_id}: {e} — will retry next poll")
+        return False
+
+
+def close_trade(signal_id, exit_price) -> bool:
+    try:
+        r = httpx.patch(
+            f"{_signals_base()}/{signal_id}/close",
+            json={"exitPrice": exit_price}, headers=NEST_HEADERS, timeout=10,
+        )
+        if r.status_code == 200:
+            return True
+        print(f"    ⚠️ close #{signal_id} failed: HTTP {r.status_code} — will retry next poll")
+        return False
+    except Exception as e:
+        print(f"    [ERROR] close #{signal_id}: {e} — will retry next poll")
+        return False
 MARKET_OPEN = dtime(9, 15)
 MARKET_CLOSE = dtime(15, 30)
 POLL_INTERVAL = 100  # seconds
 
 # ── Smart Trailing SL Configuration ──
+# Phase triggers (50%/75%) and REVERSAL_ZONE_START (80%) now live in
+# `intraday_exits` so the backtest models the exact same thresholds.
 BREAKEVEN_THRESHOLD = 0.50   # Move SL to breakeven at 50% of target distance
 PROFIT_LOCK_THRESHOLD = 0.75 # Lock profit at 75% of target distance
 PROFIT_LOCK_PERCENT = 0.40   # Lock 40% of unrealized profit
-REVERSAL_ZONE_START = 0.80   # Start checking for reversals at 80% of target distance
 
 # Track trailing state per signal to avoid redundant API calls
 # {signal_id: "INITIAL" | "BREAKEVEN" | "PROFIT_LOCK"}
@@ -58,13 +105,31 @@ def get_active_configs():
     return rows
 
 
+# Longest lookback any strategy needs before it will emit a signal: MTF_Alignment and
+# Volume_Climax guard at 250 bars, the 200-SMA family (SMA44_Pullback, EMA200_MACD,
+# Golden_Cross) at 200. test_live_fetch_covers_every_strategy_lookback pins this to the
+# real guards in strategies/, so adding a hungrier strategy fails the build rather than
+# going quietly dead in live.
+MAX_STRATEGY_LOOKBACK_BARS = 250
+# ~252 NSE trading days per calendar year — for checking a yfinance period covers the above.
+TRADING_DAYS_PER_YEAR = 252
+
+# The 1D window MUST exceed MAX_STRATEGY_LOOKBACK_BARS or the hungry strategies hit their
+# `len(df) < N` guard, silently return all-zeros, and can NEVER fire a live signal. That is
+# exactly what happened: "150d" ≈ 103 trading bars (−1 for the forming candle ≈ 102) vs a
+# 200–250 bar need, so 20 active cells produced 0 live signals for the system's entire life
+# while their backtests traded happily (audit 2026-07-15 F1). "2y" ≈ 500 bars leaves room
+# for indicator warmup on top of the guard — a 200-SMA is NaN for its first 200 bars, so
+# clearing the guard alone is not enough for the newest bar to carry a valid value.
+LIVE_PERIOD_BY_TF = {"1D": "2y", "15m": "10d", "5m": "5d"}
+
+
 def fetch_live_candles(symbol: str, timeframe: str) -> pd.DataFrame:
     yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
     interval_map = {"1D": "1d", "15m": "15m", "5m": "5m"}
-    period_map = {"1D": "150d", "15m": "10d", "5m": "5d"}
 
     interval = interval_map.get(timeframe, "15m")
-    period = period_map.get(timeframe, "10d")
+    period = LIVE_PERIOD_BY_TF.get(timeframe, "10d")
 
     df = yf.download(yf_symbol, period=period, interval=interval, progress=False, auto_adjust=True)
     if df.empty:
@@ -99,6 +164,7 @@ def check_and_fire_signal(config, cache, last_fired_times):
             return
 
         df = strategy.generate_signals(df)
+        df = strategy._apply_bucket_target(df)  # bucket reward:risk override (matches backtest)
         latest = df.iloc[-1]
         candle_time = latest.name
 
@@ -120,6 +186,11 @@ def check_and_fire_signal(config, cache, last_fired_times):
             return
 
         signal_type = "BUY" if latest['signal'] == 1 else "SELL"
+        # Long-only for swing/positional (equity delivery can't hold shorts overnight).
+        # base._apply_bucket_target already zeroes these, but guard here too.
+        if signal_type == "SELL" and hold_duration != "INTRADAY":
+            print(f"  [INFO] {symbol} ({strategy_name}): Dropped SELL for non-intraday ({hold_duration}) — long-only")
+            return
         payload = {
             "stockId": stock_id,
             "strategyName": strategy_name,
@@ -131,7 +202,7 @@ def check_and_fire_signal(config, cache, last_fired_times):
         }
 
         print(f"  🚨 SIGNAL: {signal_type} {symbol} @ ₹{payload['entryPrice']} ({strategy_name})")
-        response = httpx.post(NESTJS_URL, json=payload, timeout=10)
+        response = httpx.post(NESTJS_URL, json=payload, headers=NEST_HEADERS, timeout=10)
         print(f"  ✅ Posted to NestJS: {response.status_code}")
         
         # Mark this candle as fired
@@ -142,17 +213,20 @@ def check_and_fire_signal(config, cache, last_fired_times):
 
 
 def get_live_price(symbol: str) -> float:
-    yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
+    # Routes to the configured broker (Dhan/Upstox) when available, else yfinance.
     try:
-        ticker = yf.Ticker(yf_symbol)
-        return ticker.fast_info.last_price
+        from brokers import get_live_price as _broker_live_price
+        q = _broker_live_price(symbol)
+        if q and q.get("price"):
+            return q["price"]
+        return None
     except Exception as e:
         print(f"  [ERROR] fetching live price for {symbol}: {e}")
         return None
 
 
 def get_recent_candles(symbol: str, n: int = 10) -> pd.DataFrame:
-    """Fetch the most recent N completed candles for reversal detection."""
+    """Fetch the most recent N completed 15m candles for intraday reversal detection."""
     yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
     try:
         df = yf.download(yf_symbol, period="5d", interval="15m", progress=False, auto_adjust=True)
@@ -166,121 +240,40 @@ def get_recent_candles(symbol: str, n: int = 10) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def detect_reversal(df: pd.DataFrame, is_buy: bool) -> tuple[bool, str]:
+def get_recent_daily_candles(symbol: str, n: int = 30) -> pd.DataFrame:
+    """Most recent N completed DAILY candles — for the swing/mid/long ATR chandelier
+    trail. The 15m series from get_recent_candles is the wrong timeframe for a daily
+    trail (a length-14 ATR on ~10 rows is all-NaN, so the trail silently never moves)."""
+    yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
+    try:
+        df = yf.download(yf_symbol, period="90d", interval="1d", progress=False, auto_adjust=True)
+        if df.empty:
+            return df
+        df = df.iloc[:-1]  # Exclude today's still-forming candle
+        df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        return df.tail(n)
+    except Exception as e:
+        print(f"  [ERROR] fetching recent daily candles for {symbol}: {e}")
+        return pd.DataFrame()
+
+
+def entry_date_ist(entry_time_raw) -> date | None:
+    """IST calendar date of a trade's entry, from the API's ISO timestamp.
+
+    The API serialises `Trade.entryTime` as UTC ISO ('...Z'); the swing time-stop
+    counts DAILY candles, whose index is IST trading days, so the two must be
+    compared in the same zone. Returns None if unparseable (caller skips the stop
+    rather than guessing a date and closing a trade early).
     """
-    Detect reversal patterns in recent candles.
-    Returns (is_reversal, reason_string).
-    
-    Checks for:
-    1. Bearish/Bullish Engulfing
-    2. Pin bar / long wick rejection
-    3. RSI divergence (price new high but RSI lower)
-    4. Volume spike + opposite direction candle
-    """
-    if df.empty or len(df) < 3:
-        return False, ""
-
-    latest = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    body_latest = abs(latest['Close'] - latest['Open'])
-    body_prev = abs(prev['Close'] - prev['Open'])
-    
-    # Avoid division by zero
-    if body_latest == 0:
-        body_latest = 0.001
-
-    # ── Check 1: Engulfing Pattern ──
-    if is_buy:
-        # Bearish engulfing: prev was green, latest is red and body covers prev body
-        prev_green = prev['Close'] > prev['Open']
-        latest_red = latest['Close'] < latest['Open']
-        engulfing = (
-            prev_green and latest_red and
-            latest['Open'] >= prev['Close'] and
-            latest['Close'] <= prev['Open'] and
-            body_latest > body_prev
-        )
-        if engulfing:
-            return True, "Bearish Engulfing candle"
-    else:
-        # Bullish engulfing: prev was red, latest is green and body covers prev body
-        prev_red = prev['Close'] < prev['Open']
-        latest_green = latest['Close'] > latest['Open']
-        engulfing = (
-            prev_red and latest_green and
-            latest['Open'] <= prev['Close'] and
-            latest['Close'] >= prev['Open'] and
-            body_latest > body_prev
-        )
-        if engulfing:
-            return True, "Bullish Engulfing candle (reversal for SELL)"
-
-    # ── Check 2: Pin Bar / Long Wick Rejection ──
-    if is_buy:
-        # Upper wick much longer than body = rejection from highs
-        upper_wick = latest['High'] - max(latest['Open'], latest['Close'])
-        if upper_wick >= 2 * body_latest and latest['Close'] < latest['Open']:
-            return True, "Pin bar rejection from highs"
-    else:
-        # Lower wick much longer than body = rejection from lows
-        lower_wick = min(latest['Open'], latest['Close']) - latest['Low']
-        if lower_wick >= 2 * body_latest and latest['Close'] > latest['Open']:
-            return True, "Pin bar rejection from lows"
-
-    # ── Check 3: RSI Divergence (simplified) ──
-    if len(df) >= 5:
-        try:
-            rsi = ta.rsi(df['Close'], length=5)
-            if rsi is not None and len(rsi) >= 2:
-                rsi_latest = rsi.iloc[-1]
-                rsi_prev_max = rsi.iloc[:-1].max()
-                price_latest = latest['Close']
-                price_prev_max = df['Close'].iloc[:-1].max()
-                price_prev_min = df['Close'].iloc[:-1].min()
-                
-                if is_buy:
-                    # Price making new high but RSI not → bearish divergence
-                    if price_latest >= price_prev_max and rsi_latest < rsi_prev_max - 5:
-                        return True, "RSI bearish divergence"
-                else:
-                    # Price making new low but RSI not → bullish divergence
-                    rsi_prev_min = rsi.iloc[:-1].min()
-                    if price_latest <= price_prev_min and rsi_latest > rsi_prev_min + 5:
-                        return True, "RSI bullish divergence (reversal for SELL)"
-        except Exception:
-            pass  # RSI calculation can fail with insufficient data
-
-    # ── Check 4: Volume Exhaustion ──
-    if len(df) >= 5:
-        avg_vol = df['Volume'].iloc[:-1].mean()
-        if avg_vol > 0:
-            latest_vol = latest['Volume']
-            prev_vol = prev['Volume']
-            if latest_vol >= 1.8 * avg_vol or prev_vol >= 1.8 * avg_vol:
-                if is_buy and latest['Close'] < latest['Open']:
-                    return True, "Volume exhaustion (Bearish)"
-                elif not is_buy and latest['Close'] > latest['Open']:
-                    return True, "Volume exhaustion (Bullish)"
-
-    return False, ""
-
-
-def calculate_progress(entry: float, target: float, current: float, is_buy: bool) -> float:
-    """
-    Calculate how far price has moved from entry toward target (0.0 to 1.0+).
-    Returns negative if price moved against the trade.
-    """
-    total_distance = abs(target - entry)
-    if total_distance == 0:
-        return 0.0
-    
-    if is_buy:
-        moved = current - entry
-    else:
-        moved = entry - current
-    
-    return moved / total_distance
+    if not entry_time_raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(entry_time_raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(IST).date()
+    except (TypeError, ValueError):
+        return None
 
 
 def update_trailing_sl(signal_id: int, new_sl: float, state: str, peak_price: float = None):
@@ -294,7 +287,7 @@ def update_trailing_sl(signal_id: int, new_sl: float, state: str, peak_price: fl
         payload["peakPrice"] = round(peak_price, 2)
     
     try:
-        r = httpx.patch(f"{base_url}/{signal_id}/update-sl", json=payload, timeout=10)
+        r = httpx.patch(f"{base_url}/{signal_id}/update-sl", json=payload, headers=NEST_HEADERS, timeout=10)
         if r.status_code == 200:
             print(f"    ✅ Trailing SL updated: #{signal_id} → ₹{new_sl:.2f} ({state})")
         else:
@@ -316,7 +309,7 @@ def auto_close_signals(cache):
     is_square_off_time = now_time >= dtime(15, 15)
 
     try:
-        r = httpx.get(api_url, timeout=10)
+        r = httpx.get(api_url, headers=NEST_HEADERS, timeout=10)
         if r.status_code != 200:
             return
         active_signals = r.json()
@@ -361,60 +354,114 @@ def auto_close_signals(cache):
                 prev_low = latest_price
                 prev_high = latest_price
             
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # PHASE 1 -> PHASE 2 (50%+)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if current_state == "INITIAL" and progress >= 0.50:
-                current_state = "PHASE2"
-                be_sl = entry + (entry * 0.001) if is_buy else entry - (entry * 0.001)
-                sl_better = (is_buy and be_sl > sl) or (not is_buy and be_sl < sl)
-                
-                new_sl = be_sl if sl_better else sl
-                update_trailing_sl(signal_id, new_sl, "PHASE2", latest_price)
-                sl = new_sl
-                
-                if qty >= 3:
-                    print(f"  💰 PHASE 2 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
-                    httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{signal_id}/partial-close",
-                                json={"percent": 0.35, "exitPrice": latest_price, "reason": "Phase 2 Partial (50% Target)"}, timeout=10)
+            # NOTE: gate every transition on the state at the START of this poll
+            # (`original_state`) and use elif, so a single poll advances AT MOST
+            # one phase. The old code mutated current_state then re-checked it in
+            # the same poll, cascading INITIAL→PHASE2→PHASE3 and booking 70% at
+            # one price. Partials are also reconciled: SL/state only advance if
+            # the partial-close PATCH actually succeeded.
+            original_state = current_state
+            hold_duration = sig.get('holdDuration') or "UNKNOWN"
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # PHASE 2 -> PHASE 3 (75%+)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if current_state == "PHASE2" and progress >= 0.75:
-                current_state = "PHASE3"
-                trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
-                sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
-                
-                new_sl = trail_sl if sl_better else sl
-                update_trailing_sl(signal_id, new_sl, "PHASE3", latest_price)
-                sl = new_sl
-                
-                if qty >= 3:
-                    print(f"  💰 PHASE 3 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
-                    httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{signal_id}/partial-close",
-                                json={"percent": 0.35, "exitPrice": latest_price, "reason": "Phase 3 Partial (75% Target)"}, timeout=10)
+            if hold_duration == "INTRADAY":
+                # ── INTRADAY: 3-phase partial booking + breakeven + trail + reversal ──
+                # ── PHASE 1 -> PHASE 2 (50%+): SL to breakeven, book 35% ──
+                if original_state == "INITIAL" and progress >= 0.50:
+                    booked = True
+                    if qty >= MIN_QTY_FOR_PARTIAL:
+                        print(f"  💰 PHASE 2 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
+                        booked = book_partial(signal_id, 0.35, latest_price, "Phase 2 Partial (50% Target)")
+                    if booked:
+                        be_sl = entry + (entry * 0.001) if is_buy else entry - (entry * 0.001)
+                        sl_better = (is_buy and be_sl > sl) or (not is_buy and be_sl < sl)
+                        new_sl = be_sl if sl_better else sl
+                        update_trailing_sl(signal_id, new_sl, "PHASE2", latest_price)
+                        sl = new_sl
+                        current_state = "PHASE2"
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # PHASE 3 TRAILING (Update SL with candle lows)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if current_state == "PHASE3":
-                trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
-                sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
-                if sl_better:
-                    update_trailing_sl(signal_id, trail_sl, "PHASE3", latest_price)
-                    sl = trail_sl
+                # ── PHASE 2 -> PHASE 3 (75%+): trail below candle, book another 35% ──
+                elif original_state == "PHASE2" and progress >= 0.75:
+                    booked = True
+                    if qty >= MIN_QTY_FOR_PARTIAL:
+                        print(f"  💰 PHASE 3 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
+                        booked = book_partial(signal_id, 0.35, latest_price, "Phase 3 Partial (75% Target)")
+                    if booked:
+                        trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
+                        sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
+                        new_sl = trail_sl if sl_better else sl
+                        update_trailing_sl(signal_id, new_sl, "PHASE3", latest_price)
+                        sl = new_sl
+                        current_state = "PHASE3"
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # LAYER 3: Reversal Detection (80%+)
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if progress >= REVERSAL_ZONE_START and not should_close:
-                if not recent_df.empty:
-                    is_reversal, reason = detect_reversal(recent_df, is_buy)
-                    if is_reversal:
+                # PHASE 3 TRAILING (update SL with candle lows)
+                if current_state == "PHASE3":
+                    trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
+                    sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
+                    if sl_better:
+                        update_trailing_sl(signal_id, trail_sl, "PHASE3", latest_price)
+                        sl = trail_sl
+
+                # LAYER 3: Reversal Detection (80%+)
+                if progress >= REVERSAL_ZONE_START and not should_close:
+                    if not recent_df.empty:
+                        is_reversal, reason = detect_reversal(recent_df, is_buy)
+                        if is_reversal:
+                            should_close = True
+                            exit_price = latest_price
+                            close_reason = f"REVERSAL DETECTED ({reason}) at {progress*100:.0f}%"
+
+            else:
+                # ── SWING / MID / LONG: ATR chandelier trailing stop, no partials,
+                # no reversal. Exit happens below at the fixed target OR trailed SL.
+                peak = float(trade.get('peakPrice') or entry)
+                peak = max(peak, latest_price) if is_buy else min(peak, latest_price)
+                atr_val = None
+                # DAILY ATR — not the 15m recent_df — so the chandelier trail matches
+                # the backtest (SWING_TRAIL_ATR_PERIOD on daily bars). Previously this
+                # read the 15m series and produced an all-NaN ATR, so the trail was dead.
+                from backtest_config import (
+                    trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD, time_stop_bars_for_bucket,
+                )
+                # n=90 (not the 30 default): LONG_POSITIONAL's time-stop counts up to
+                # 40 bars, so a 30-bar window could never reach it.
+                daily_df = get_recent_daily_candles(symbol, n=90)
+                if not daily_df.empty and len(daily_df) > SWING_TRAIL_ATR_PERIOD:
+                    try:
+                        atr_series = ta.atr(
+                            daily_df['High'], daily_df['Low'], daily_df['Close'],
+                            length=SWING_TRAIL_ATR_PERIOD,
+                        )
+                        if atr_series is not None and not atr_series.dropna().empty:
+                            atr_val = float(atr_series.dropna().iloc[-1])
+                    except Exception:
+                        atr_val = None
+                if atr_val and atr_val > 0:
+                    mult = trail_mult_for_bucket(hold_duration)
+                    new_sl = peak - mult * atr_val if is_buy else peak + mult * atr_val
+                    sl_better = (is_buy and new_sl > sl) or (not is_buy and new_sl < sl)
+                    if sl_better:
+                        update_trailing_sl(signal_id, new_sl, "TRAILING", peak)
+                        sl = new_sl
+
+                # ── Time-stop (F3): exit flat after N daily bars held ──
+                # Mirrors the swing walk in strategies/base.py. "N bars held, neither
+                # stop nor target hit" is only knowable once bar N has CLOSED, so this
+                # fires on the next session — the backtest's o[entry_idx + N + 1].
+                # Deliberately BEFORE the SL/TP block below (which is gated on
+                # `not should_close`) so both sides agree on which bar ends the trade.
+                # Needs a parseable entry date and real candles; without either we
+                # leave the trade alone rather than close it on a guess.
+                time_stop_bars = time_stop_bars_for_bucket(hold_duration)
+                entry_day = entry_date_ist(trade.get('entryTime'))
+                if time_stop_bars is not None and entry_day and not daily_df.empty:
+                    bars_held = int((daily_df.index.date > entry_day).sum())
+                    if bars_held >= time_stop_bars:
                         should_close = True
                         exit_price = latest_price
-                        close_reason = f"REVERSAL DETECTED ({reason}) at {progress*100:.0f}%"
+                        close_reason = (
+                            f"TIME-STOP ({hold_duration}: held {bars_held} bars "
+                            f">= {time_stop_bars})"
+                        )
 
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             # SL / TP / Intraday Hit Check
@@ -446,11 +493,7 @@ def auto_close_signals(cache):
                     
             if should_close:
                 print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{exit_price} {close_reason} (progress: {progress*100:.0f}%)")
-                httpx.patch(
-                    f"{NESTJS_URL.replace('/signals/new', '/signals')}/{signal_id}/close",
-                    json={"exitPrice": exit_price},
-                    timeout=10
-                )
+                close_trade(signal_id, exit_price)
                 
     except Exception as e:
         print(f"  [ERROR] auto-closing signals: {e}")
@@ -460,14 +503,19 @@ def main():
     print("🚀 Live Scanner started (Smart Trailing SL v2)")
     print(f"📡 Will POST signals to: {NESTJS_URL}")
     print(f"⏰ Market hours: {MARKET_OPEN} – {MARKET_CLOSE} IST")
-    print(f"📐 Trailing config: Breakeven@{BREAKEVEN_THRESHOLD*100:.0f}% | ProfitLock@{PROFIT_LOCK_THRESHOLD*100:.0f}% (lock {PROFIT_LOCK_PERCENT*100:.0f}%) | Reversal@{REVERSAL_ZONE_START*100:.0f}%+")
+    # Actual exit system (3-phase): SL→breakeven & book 35% at 50%, trail below
+    # candles & book 35% at 75%, reversal-exit the remainder at 80%+.
+    print(f"📐 3-Phase exit: BE+35%@50% | Trail+35%@75% | Reversal@{REVERSAL_ZONE_START*100:.0f}%+ | min qty for partials: {MIN_QTY_FOR_PARTIAL}")
     print("-" * 60)
 
     last_fired_times = {}
+    cycle = 0
 
     while True:
         now = datetime.now(IST)
-        print(f"\n[{now.strftime('%H:%M:%S')} IST] Scanning...")
+        cycle += 1
+        cycle_start = time.monotonic()
+        print(f"\n[{now.strftime('%H:%M:%S')} IST] ❤️  heartbeat cycle #{cycle} — scanning...")
 
         if not is_market_open():
             print("  Market is CLOSED. Sleeping 60s...")
@@ -476,10 +524,10 @@ def main():
 
         configs = get_active_configs()
         cache = {}
-        
+
         # 1. Smart auto-close with trailing SL + reversal detection
         auto_close_signals(cache)
-        
+
         # 2. Check for new setups
         if now.time() < dtime(9, 30):
             print("  Skipping new setups before 9:30 AM IST (avoiding fake opening moves).")
@@ -493,7 +541,13 @@ def main():
                 check_and_fire_signal(config, cache, last_fired_times)
                 time.sleep(1)  # Brief pause between stocks
 
-        print(f"  Done. Sleeping {POLL_INTERVAL}s...")
+        elapsed = time.monotonic() - cycle_start
+        # Stall detection: if a cycle takes longer than the poll interval, the
+        # scanner is falling behind (too many configs / slow yfinance).
+        if elapsed > POLL_INTERVAL:
+            print(f"  ⚠️ STALL: cycle #{cycle} took {elapsed:.0f}s > poll interval {POLL_INTERVAL}s — scanner is behind.")
+        else:
+            print(f"  Done in {elapsed:.1f}s ({len(configs)} configs). Sleeping {POLL_INTERVAL}s...")
         time.sleep(POLL_INTERVAL)
 
 

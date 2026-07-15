@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import { AddStockModal } from '../components/AddStockModal';
-
-const API = 'http://localhost:3000';
+import { API } from '../config';
 
 interface Stock {
   id: number;

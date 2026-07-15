@@ -16,6 +16,9 @@ class BBMeanReversionIntradayStrategy(BaseStrategy):
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
+        df['signal'] = 0
+        df['stop_loss'] = 0.0
+        df['target'] = 0.0
         if df.empty or len(df) < 25:
             return df
 
@@ -23,7 +26,7 @@ class BBMeanReversionIntradayStrategy(BaseStrategy):
         bb = ta.bbands(df['Close'], length=20, std=2)
         if bb is None:
             return df
-            
+
         bb_lower_col = [c for c in bb.columns if c.startswith('BBL_')][0]
         bb_mid_col = [c for c in bb.columns if c.startswith('BBM_')][0]
         bb_upper_col = [c for c in bb.columns if c.startswith('BBU_')][0]
@@ -32,15 +35,24 @@ class BBMeanReversionIntradayStrategy(BaseStrategy):
         df['BBM'] = bb[bb_mid_col]
         df['BBU'] = bb[bb_upper_col]
 
-        df['signal'] = 0
-        df['stop_loss'] = 0.0
-        df['target'] = 0.0
+        # Long Setup: pierces lower band but closes back inside (bullish). The
+        # close must still sit BELOW the mid band, otherwise the target (BBM)
+        # would be below entry and the trade gets skipped for invalid geometry.
+        bullish_cond = (
+            (df['Low'] < df['BBL']) & (df['Close'] > df['BBL'])
+            & (df['Close'] > df['Open']) & (df['Close'] < df['BBM'])
+        )
 
-        # Long Setup: Pierces lower band but closes above it (and bullish)
-        bullish_cond = (df['Low'] < df['BBL']) & (df['Close'] > df['BBL']) & (df['Close'] > df['Open'])
+        # Short Setup: pierces upper band but closes back inside (bearish), with
+        # the close still ABOVE the mid band so the target (BBM) sits below entry.
+        bearish_cond = (
+            (df['High'] > df['BBU']) & (df['Close'] < df['BBU'])
+            & (df['Close'] < df['Open']) & (df['Close'] > df['BBM'])
+        )
 
-        # Short Setup: Pierces upper band but closes below it (and bearish)
-        bearish_cond = (df['High'] > df['BBU']) & (df['Close'] < df['BBU']) & (df['Close'] < df['Open'])
+        # Edge-trigger: fire only on the bar the setup first appears.
+        bullish_cond = bullish_cond & ~bullish_cond.shift(1, fill_value=False)
+        bearish_cond = bearish_cond & ~bearish_cond.shift(1, fill_value=False)
 
         df.loc[bullish_cond, 'signal'] = 1
         df.loc[bullish_cond, 'stop_loss'] = df['Low'][bullish_cond] - (df['Close'][bullish_cond] * 0.002)

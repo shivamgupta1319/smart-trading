@@ -1,0 +1,93 @@
+{
+  "updatedAt": "2026-07-14",
+  "legend": {
+    "priority": {
+      "P0": "Keystone \u2014 blocks trustworthy numbers for everything downstream; build first.",
+      "P1": "High \u2014 directly corrupts metrics the user reads daily; independent, cheap.",
+      "P2": "Medium \u2014 residual risk / hardening; smaller blast radius.",
+      "P3": "Low \u2014 analysis/validation; depends on an upstream fix landing first."
+    },
+    "status": {
+      "DOCS_DRAFTED": "Feature docs written, not yet reviewed (/review-docs pending).",
+      "DOCS_REVIEWED": "Docs reviewed and scope approved; ready to implement.",
+      "IN_PROGRESS": "At least one phase under implementation.",
+      "BLOCKED": "Cannot start until a dependency lands.",
+      "DONE": "All acceptance criteria verified; analyst re-run confirms fix."
+    },
+    "docsReviewed": "true when the docs passed /review-docs even if status is BLOCKED (impl can't start yet). See the feature's review-notes.md."
+  },
+  "features": [
+    {
+      "id": "FEAT-001",
+      "title": "Backtest Report Trust",
+      "slug": "backtest-report-trust",
+      "path": "docs/features/backtest-report-trust",
+      "priority": "P0",
+      "status": "DONE",
+      "note": "2026-07-13 audit: the dead max_position_value cap is now enforced (BT_CAP_POSITION_VALUE) \u2014 the ROI-inflation part is DONE (2458%\u2192358% on a test cell). Remaining: BacktestReport table dedup / UPSERT / engineVersion. See agent-reports/2026-07-13-trust-and-correctness-audit.md F1.",
+      "dependsOn": [],
+      "origin": "2026-06-12 report F1/F2 + sizing note; reconfirmed 2026-06-16 F2/F3 (artifacts still live in DB)",
+      "summary": "Make BacktestReport latest-per-cell (UPSERT + unique key + engineVersion), dedup the leaderboard and exclude 0-trade rows, and enforce the dead max_position_value cap so single-cell ROI/DD stays within one \u20b910k slot. Keystone: every downstream ranking depends on it.",
+      "createdAt": "2026-06-12T07:21:30Z"
+    },
+    {
+      "id": "FEAT-002",
+      "title": "Live Trade Bookkeeping Hygiene",
+      "slug": "live-trade-bookkeeping-hygiene",
+      "path": "docs/features/live-trade-bookkeeping-hygiene",
+      "priority": "P1",
+      "status": "DONE",
+      "note": "2026-07-13: 0.1R BREAKEVEN band (classifyOutcome), realizedPnl:=pnl on close, margin-based per-trade %. History backfilled (SUM(realizedPnl)==SUM(pnl)). See agent-reports/2026-07-13-trust-and-correctness-audit.md F6.",
+      "docsReviewed": true,
+      "dependsOn": [],
+      "origin": "2026-06-12 F5 + 2026-06-16 F5 (firmed up on 40-trade sample)",
+      "summary": "Fix the live metrics the user actually reads: (a) add a BREAKEVEN band so sub-0.1R scratches stop inflating win-rate, and (b) write the final-leg P&L back to realizedPnl (or deprecate it) so SUM(realizedPnl) reconciles to SUM(pnl) \u2014 currently an \u20b9813 gap. Independent of FEAT-001.",
+      "createdAt": "2026-06-16T00:00:00Z"
+    },
+    {
+      "id": "FEAT-003",
+      "title": "Strategy-Level Selection Guard",
+      "slug": "strategy-selection-guard",
+      "path": "docs/features/strategy-selection-guard",
+      "priority": "P2",
+      "status": "IN_PROGRESS",
+      "note": "2026-07-13: intent substantially addressed \u2014 persistent AUTOSELECT_DENYLIST stops re-promotion of pruned losers, and selection now ranks by NET avg-R with tighter gates (PF 1.3, DD 25%, OOS consistency). Remaining (optional): an explicit strategy-level guard on deduped reliable-sample average ROI.",
+      "docsReviewed": true,
+      "dependsOn": [
+        "FEAT-001"
+      ],
+      "origin": "2026-06-12 F4 + 2026-06-16 F4 (refined: broken cells already quarantined; risk is future re-promotion of a lucky cell)",
+      "summary": "Per-cell gates already quarantine negative cells, but a lucky positive cell of a structurally-broken strategy (e.g. Bollinger, whose reliable-sample average is -15% to -21%) can still be auto-selected. Add a strategy-level guard: block any cell whose strategy's deduped reliable-sample average ROI is negative. Needs FEAT-001's deduped table to compute a trustworthy strategy average.",
+      "createdAt": "2026-06-16T00:00:00Z"
+    },
+    {
+      "id": "FEAT-004",
+      "title": "Live-vs-Backtest Reconciliation",
+      "slug": "live-vs-backtest-reconciliation",
+      "path": "docs/features/live-vs-backtest-reconciliation",
+      "priority": "P3",
+      "status": "BLOCKED",
+      "docsReviewed": true,
+      "dependsOn": [
+        "FEAT-001",
+        "FEAT-002"
+      ],
+      "origin": "2026-06-12 F3 + 2026-06-16 F1/F3 (every big live loser cell backtested positive)",
+      "summary": "Every live-loss cell carries positive backtest expectancy \u2014 the system trades on numbers the market contradicts. This is a validation/reporting feature (walk-forward + Monte-Carlo bands per live-traded cell, surfaced so auto-select stops trusting inflated cells). BLOCKED until FEAT-001 makes backtest numbers trustworthy and FEAT-002 makes live numbers trustworthy.",
+      "createdAt": "2026-06-16T00:00:00Z"
+    },
+    {
+      "id": "FEAT-005",
+      "title": "Risk-Normalized Sizing (per-trade risk cap)",
+      "slug": "risk-normalized-sizing",
+      "path": "docs/features/risk-normalized-sizing",
+      "priority": "P1",
+      "status": "DOCS_DRAFTED",
+      "docsReviewed": false,
+      "dependsOn": [],
+      "origin": "2026-07-14 audit F1 \u2014 owner observed avg profit < avg loss (payoff 0.921)",
+      "summary": "Root cause of the payoff-ratio leak: sizing is pure notional, so per-trade rupee-risk is unequal (intraday losers carried Rs 582 avg risk vs Rs 486 on winners) even though per-trade R is positive (+1.77R expectancy). Add a per-trade risk cap qty=max(1,min(notionalQty, floor(cellCapital\u00d7RISK_PER_TRADE_PCT/riskPerShare))) in risk.ts + signals.service.ts, MIRRORED identically in engine base.py/backtest_config.py (backtest/live parity is the key constraint). Plus a guarded backfill (off originalStopLoss, re-book net costs) to restate the existing work-pc equity curve. Swing per-bucket time-stop (F3) is a follow-up phase.",
+      "createdAt": "2026-07-14T00:00:00Z"
+    }
+  ]
+}

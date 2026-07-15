@@ -12,6 +12,7 @@ import { SignalsService } from "./signals.service";
 import { SignalsGateway } from "./signals.gateway";
 import { TelegramService } from "../telegram/telegram.service";
 import { CreateSignalDto } from "./dto/create-signal.dto";
+import { toNum, normalizeTradeMoney } from "../common/money";
 
 @Controller("api/signals")
 export class SignalsController {
@@ -35,10 +36,13 @@ export class SignalsController {
   @HttpCode(201)
   async create(@Body() dto: CreateSignalDto) {
     const { signal, isNew } = await this.signalsService.create(dto);
-    // Emit WebSocket event to all connected clients only if the signal is new
+    // Every new signal is a real trade now (no funding gate) — alert on all of them.
     if (isNew) {
+      // Prisma returns money columns as Decimal objects which serialize to
+      // strings over the socket; coerce them to plain numbers so the UI can
+      // call .toFixed() on entryPrice/stopLoss/target.
       const payload = {
-        ...signal,
+        ...normalizeTradeMoney(signal),
         symbol: signal.stock?.symbol,
       };
       this.signalsGateway.emitNewAlert(payload);
@@ -75,10 +79,17 @@ export class SignalsController {
         symbol: result.stock?.symbol || trade.symbol,
         signalType: trade.signalType,
         strategyName: trade.strategyName,
-        entryPrice: trade.entryPrice,
-        exitPrice: trade.exitPrice || trade.entryPrice,
-        pnl: trade.pnl || 0,
-        pnlPercent: trade.pnlPercent || 0,
+        entryPrice: toNum(trade.entryPrice),
+        exitPrice: toNum(trade.exitPrice ?? trade.entryPrice),
+        pnl: toNum(trade.pnl),
+        pnlPercent: toNum(trade.pnlPercent),
+        outcome: trade.outcome || "BREAKEVEN",
+      });
+      this.signalsGateway.emitTradeUpdate("CLOSED", {
+        signalId: id,
+        symbol: result.stock?.symbol || trade.symbol,
+        pnl: toNum(trade.pnl),
+        pnlPercent: toNum(trade.pnlPercent),
         outcome: trade.outcome || "BREAKEVEN",
       });
     }
@@ -118,6 +129,13 @@ export class SignalsController {
           newStopLoss: body.newStopLoss,
         });
       }
+
+      this.signalsGateway.emitTradeUpdate("SL_UPDATED", {
+        signalId: id,
+        symbol,
+        newStopLoss: body.newStopLoss,
+        trailingState: body.trailingState,
+      });
     }
 
     return result;
@@ -147,10 +165,10 @@ export class SignalsController {
           symbol: symbol || trade.symbol,
           signalType: trade.signalType,
           strategyName: trade.strategyName,
-          entryPrice: trade.entryPrice,
-          exitPrice: trade.exitPrice || body.exitPrice,
-          pnl: trade.pnl || 0,
-          pnlPercent: trade.pnlPercent || 0,
+          entryPrice: toNum(trade.entryPrice),
+          exitPrice: toNum(trade.exitPrice ?? body.exitPrice),
+          pnl: toNum(trade.pnl),
+          pnlPercent: toNum(trade.pnlPercent),
           outcome: trade.outcome || "BREAKEVEN",
         });
       } else if ("lotPnl" in result) {
@@ -160,6 +178,12 @@ export class SignalsController {
           percent: body.percent,
           exitPrice: body.exitPrice,
           reason: body.reason,
+          lotPnl: result.lotPnl,
+          remainingQty: result.newRemainingQty,
+        });
+        this.signalsGateway.emitTradeUpdate("PARTIAL", {
+          signalId: id,
+          symbol,
           lotPnl: result.lotPnl,
           remainingQty: result.newRemainingQty,
         });

@@ -1,10 +1,16 @@
 """FastAPI main application for the trading engine."""
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from auth import require_api_key, llm_rate_limiter
 from routers.history import router as history_router
 from routers.backtest import router as backtest_router
+from routers.advanced_backtest import router as advanced_backtest_router
+from routers.auto_select import router as auto_select_router
+from routers.custom_strategy import router as custom_strategy_router
+from routers.broker import router as broker_router
+from routers.regime import router as regime_router
 from routers.analysis import router as analysis_router
 
 load_dotenv()
@@ -15,17 +21,54 @@ app = FastAPI(
     version="1.0.0",
 )
 
+_cors_origins = [
+    o.strip()
+    for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(history_router, prefix="/api/engine", tags=["history"])
-app.include_router(backtest_router, prefix="/api/engine", tags=["backtest"])
-app.include_router(analysis_router, prefix="/api/engine/analysis", tags=["analysis"])
+# All engine routers require the shared API key (no-op when API_KEY is unset).
+app.include_router(
+    history_router, prefix="/api/engine", tags=["history"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    backtest_router, prefix="/api/engine", tags=["backtest"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    advanced_backtest_router, prefix="/api/engine", tags=["advanced-backtest"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    auto_select_router, prefix="/api/engine", tags=["auto-select"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    custom_strategy_router, prefix="/api/engine", tags=["custom-strategy"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    broker_router, prefix="/api/engine/broker", tags=["broker"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    regime_router, prefix="/api/engine", tags=["regime"],
+    dependencies=[Depends(require_api_key)],
+)
+# Analysis hits paid LLMs — also rate-limited per IP.
+app.include_router(
+    analysis_router, prefix="/api/engine/analysis", tags=["analysis"],
+    dependencies=[Depends(require_api_key), Depends(llm_rate_limiter)],
+)
 
 
 @app.get("/health")

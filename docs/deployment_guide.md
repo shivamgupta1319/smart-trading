@@ -1,5 +1,7 @@
 # Free Deployment Guide: Oracle Cloud Always Free Tier
 
+> ⚠️ **HISTORICAL — describes the original v1 prototype; do NOT trust as the current system.** Retained for history only. The live v2 system uses a per-cell ₹10k compounding fund (no FUNDED/SHADOW, no ₹1L/2% rule), ports 5174/3001/8001/5471, net-of-cost P&L, and ~31 strategies. See **[architecture.md](architecture.md)** and **[work-pc-deployment.md](work-pc-deployment.md)**; latest audit: **[2026-07-13 trust & correctness audit](agent-reports/2026-07-13-trust-and-correctness-audit.md)**.
+
 Oracle Cloud provides an "Always Free" tier that includes an ARM Ampere A1 Compute instance with up to 4 vCPUs and 24 GB of RAM. This is incredibly generous and the absolute best way to run your entire `docker-compose.yml` stack (API, Engine, Frontend, Scanner, and Postgres) for $0/month.
 
 Here is the step-by-step guide to get your trading app live.

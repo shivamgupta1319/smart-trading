@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, roadmap-v2]
+  pull_request:
+
+jobs:
+  engine-tests:
+    name: Python engine — pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install -r requirements-dev.txt
+      - name: Run backtest engine tests
+        run: python -m pytest test/test_backtest_engine.py -q
+
+  api-build:
+    name: NestJS API — build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --legacy-peer-deps
+      - run: npx prisma generate --schema=apps/api/prisma/schema.prisma
+      - run: npx nx build api --prod
+
+  frontend-build:
+    name: React frontend — build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --legacy-peer-deps
+      - run: npx nx build frontend --prod
+        env:
+          VITE_API_URL: http://localhost:3000

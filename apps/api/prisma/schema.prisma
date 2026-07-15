@@ -7,6 +7,9 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // No `url` here on purpose: the connection is supplied at runtime by the
+  // @prisma/adapter-pg driver adapter (see PrismaService). Adding a url breaks
+  // `prisma generate` at image-build time (no DATABASE_URL in the build env).
 }
 
 model NseStock {
@@ -21,6 +24,7 @@ model Stock {
   id           Int                  @id @default(autoincrement())
   symbol       String               @unique
   isActive     Boolean              @default(true)
+  sector       String?              // GICS-style sector tag (backfilled from yfinance) for risk concentration
   createdAt    DateTime             @default(now())
 
   historicalData      HistoricalData[]
@@ -57,10 +61,30 @@ model BacktestReport {
   netProfit    Float
   maxDrawdown  Float
   roiPercentage Float
+  // Edge metrics (audit 2026-07-15 F3). The engine always computed these; they were
+  // dropped on write, leaving roiPercentage — raw-cumulative and window-dependent —
+  // as the only column anything could rank on. avgRMultiple is the honest one: net
+  // P&L per rupee risked, independent of compounding, horizon and position size.
+  // Nullable because pre-existing rows genuinely don't know them (0 would assert
+  // "zero edge"); they fill in on the next backtest run.
+  avgRMultiple   Float?
+  profitFactor   Float?
+  maxDrawdownPct Float?
+  expectancy     Float?
+  // Calendar years the cell's bars actually span, measured from the data rather than
+  // assumed per timeframe — so ROI can be annualised honestly (1D ≈ 5.1y vs 15m/5m
+  // ≈ 4.7mo made raw ROI ~13× incomparable across buckets).
+  spanYears      Float?
+  // Engine model version that produced these numbers. Bumped when the fill/exit
+  // model changes (e.g. C3), so stored reports that won't reproduce are identifiable.
+  engineVersion String  @default("unversioned")
   createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
 
   stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
 
+  // Exactly one report row per cell; every writer UPSERTs on this key.
+  @@unique([stockId, strategyName, timeframe])
   @@index([stockId, strategyName])
 }
 
@@ -82,9 +106,9 @@ model LiveSignal {
   stockId      Int
   strategyName String
   signalType   String   // "BUY" | "SELL"
-  entryPrice   Float
-  stopLoss     Float
-  target       Float
+  entryPrice   Decimal  @db.Decimal(18, 4)
+  stopLoss     Decimal  @db.Decimal(18, 4)
+  target       Decimal  @db.Decimal(18, 4)
   holdDuration String?  // "INTRADAY" | "SHORT_SWING" | "MID_SWING" | "LONG_POSITIONAL"
   timestamp    DateTime @default(now())
   status       String   @default("ACTIVE") // "ACTIVE" | "CLOSED"
@@ -93,6 +117,9 @@ model LiveSignal {
   trade Trade?
 
   @@index([stockId, status])
+  // NOTE: a PARTIAL unique index `(stockId, strategyName) WHERE status='ACTIVE'`
+  // is also enforced at the DB level (see migrations) to prevent duplicate
+  // active signals. Prisma can't express partial uniques, so it lives in SQL.
 }
 
 model Trade {
@@ -103,24 +130,24 @@ model Trade {
   strategyName  String
   signalType    String    // "BUY" | "SELL"
   holdDuration  String    // "INTRADAY" | "SHORT_SWING" | "MID_SWING" | "LONG_POSITIONAL"
-  entryPrice    Float
-  exitPrice     Float?
-  stopLoss      Float
-  target        Float
+  entryPrice    Decimal   @db.Decimal(18, 4)
+  exitPrice     Decimal?  @db.Decimal(18, 4)
+  stopLoss      Decimal   @db.Decimal(18, 4)
+  target        Decimal   @db.Decimal(18, 4)
   quantity      Int       @default(1)
-  capitalUsed   Float     @default(0) // Amount of capital allocated to this trade
-  riskAmount    Float     @default(0) // Amount at risk (entry - SL) * quantity
-  pnl           Float?
-  pnlPercent    Float?
+  capitalUsed   Decimal   @default(0) @db.Decimal(18, 4) // Capital allocated to this trade
+  riskAmount    Decimal   @default(0) @db.Decimal(18, 4) // Amount at risk (entry - SL) * quantity
+  pnl           Decimal?  @db.Decimal(18, 4)
+  pnlPercent    Float?    // a ratio, not money — kept as Float
   outcome       String?   // "WIN" | "LOSS" | "BREAKEVEN"
   entryTime     DateTime
   exitTime      DateTime?
   status        String    @default("OPEN") // "OPEN" | "CLOSED"
   notes         String?
-  originalStopLoss Float? // Original SL before any trailing adjustments
+  originalStopLoss Decimal? @db.Decimal(18, 4) // Original SL before any trailing adjustments
   trailingState String    @default("INITIAL") // "INITIAL" | "PHASE1" | "PHASE2" | "PHASE3" | "REVERSAL_EXIT"
-  peakPrice     Float?    // Best favorable price reached during the trade
-  realizedPnl   Float     @default(0) // PnL accumulated from partial exits
+  peakPrice     Decimal?  @db.Decimal(18, 4)   // Best favorable price reached during the trade
+  realizedPnl   Decimal   @default(0) @db.Decimal(18, 4) // PnL accumulated from partial exits
   remainingQty  Int       @default(1) // Remaining quantity after partials
   createdAt     DateTime  @default(now())
 

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from db.client import engine
 from strategies import STRATEGY_REGISTRY
+from reports import save_report as _upsert_report
 
 router = APIRouter()
 
@@ -48,17 +49,9 @@ def load_historical(stock_id: int, timeframe: str) -> pd.DataFrame:
 
 
 def save_report(stock_id: int, strategy_name: str, timeframe: str, metrics: dict):
+    """UPSERT one BacktestReport row for this cell via the shared writer."""
     with engine.connect() as conn:
-        conn.execute(text("""
-            INSERT INTO "BacktestReport"
-              ("stockId", "strategyName", "timeframe", "winRate", "totalTrades", "maxDrawdown", "netProfit", "roiPercentage", "createdAt")
-            VALUES (:sid, :sn, :tf, :wr, :tt, :md, :np, :roi, NOW())
-        """), {
-            "sid": stock_id, "sn": strategy_name, "tf": timeframe,
-            "wr": float(metrics['winRate']), "tt": int(metrics['totalTrades']),
-            "md": float(metrics['maxDrawdown']), "np": float(metrics['netProfit']),
-            "roi": float(metrics['roiPercentage'])
-        })
+        _upsert_report(conn, stock_id, strategy_name, timeframe, metrics)
         conn.commit()
 
 
@@ -74,6 +67,15 @@ def run_backtest(req: BacktestRequest):
 
     stock_id = get_stock_id(symbol)
     strategy = STRATEGY_REGISTRY[req.strategy]
+
+    # Pull the latest candles before backtesting (full download if this stock has
+    # no data yet, incremental top-up otherwise). A fetch failure must not block a
+    # backtest on already-stored data, so swallow errors and fall through to load.
+    try:
+        from routers.history import fetch_and_store
+        fetch_and_store(symbol, [req.timeframe])
+    except Exception:
+        pass
 
     df = load_historical(stock_id, req.timeframe)
 
@@ -163,11 +165,23 @@ def run_strategy_all_stocks(req: RunStrategyAllStocksRequest):
         except Exception:
             pass
 
-    # Sort results by roiPercentage descending
-    results.sort(key=lambda x: x['metrics']['roiPercentage'], reverse=True)
+    # NOTE: We deliberately do NOT rank by raw ROI — that cherry-picks the single
+    # best in-sample performer and invites overfitting. Sort by profit factor
+    # (a risk-adjusted measure) and surface a disclaimer so the UI can warn that
+    # in-sample ranking does not predict out-of-sample performance. Use the
+    # walk-forward endpoint for an honest estimate.
+    results.sort(
+        key=lambda x: (x['metrics'].get('profitFactor', 0), x['metrics'].get('expectancy', 0)),
+        reverse=True,
+    )
 
     return {
         "strategy": req.strategy,
         "timeframe": timeframe,
-        "results": results
+        "results": results,
+        "disclaimer": (
+            "Ranked by in-sample profit factor (net of costs & slippage). "
+            "In-sample ranking is NOT a predictor of future returns — validate "
+            "with walk-forward / out-of-sample testing before trusting a name."
+        ),
     }

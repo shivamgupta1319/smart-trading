@@ -1,4 +1,8 @@
 import os
+import asyncio
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
+
 import httpx
 import yfinance as yf
 from fastapi import APIRouter, HTTPException
@@ -6,6 +10,53 @@ from pydantic import BaseModel
 from datetime import datetime
 
 router = APIRouter()
+
+# Indian market RSS feeds — free, no API key. yfinance's .news is thin/stale for India
+# (~1 item/day over 5 tickers), so we aggregate several publishers instead. Env-tunable.
+NEWS_RSS_FEEDS = [
+    ("Moneycontrol", "https://www.moneycontrol.com/rss/latestnews.xml"),
+    ("Moneycontrol Markets", "https://www.moneycontrol.com/rss/marketreports.xml"),
+    ("Economic Times", "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"),
+    ("Business Standard", "https://www.business-standard.com/rss/markets-106.rss"),
+    ("Livemint", "https://www.livemint.com/rss/markets"),
+]
+if os.getenv("NEWS_RSS_FEEDS"):
+    # "Name|url,Name|url" override.
+    NEWS_RSS_FEEDS = [
+        (p.split("|", 1)[0], p.split("|", 1)[1])
+        for p in os.getenv("NEWS_RSS_FEEDS", "").split(",")
+        if "|" in p
+    ]
+NEWS_MAX_ITEMS = int(os.getenv("NEWS_MAX_ITEMS", "36"))
+
+
+async def _fetch_rss(client: httpx.AsyncClient, source: str, url: str):
+    """Fetch one RSS feed and return a list of parsed article dicts (best-effort)."""
+    items = []
+    try:
+        resp = await client.get(url, timeout=8, follow_redirects=True)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        for it in root.iter("item"):
+            title = (it.findtext("title") or "").strip()
+            if not title:
+                continue
+            link = (it.findtext("link") or "").strip()
+            pub_raw = (it.findtext("pubDate") or "").strip()
+            try:
+                ts = int(parsedate_to_datetime(pub_raw).timestamp()) if pub_raw else 0
+            except (TypeError, ValueError):
+                ts = 0
+            items.append({
+                "title": title,
+                "publisher": source,
+                "source": source,
+                "link": link,
+                "providerPublishTime": ts,
+            })
+    except Exception as e:  # noqa: BLE001 — a single dead feed must not sink the rest
+        print(f"  [news] feed failed ({source}): {e}")
+    return items
 
 def parse_news_item(item):
     if not isinstance(item, dict):
@@ -43,17 +94,33 @@ class LLMClient:
         self.gemini_key = os.getenv("GEMINI_API_KEY")
 
     async def generate(self, prompt: str) -> str:
+        # Try providers in order, falling back on any failure so a single dead
+        # key (e.g. a revoked OpenRouter key) doesn't take AI analysis down when
+        # another working provider is configured.
+        errors = []
         if self.openrouter_key:
-            return await self._call_openrouter(prompt)
-        elif self.gemini_key:
-            return await self._call_gemini(prompt)
-        else:
+            try:
+                return await self._call_openrouter(prompt)
+            except Exception as e:
+                errors.append(f"OpenRouter: {e}")
+        if self.gemini_key:
+            try:
+                return await self._call_gemini(prompt)
+            except Exception as e:
+                errors.append(f"Gemini: {e}")
+        if errors:
             return (
-                "> [!WARNING]\n> **Missing API Keys!**\n\n"
-                "To enable AI Research & Analysis, please add `OPENROUTER_API_KEY` or `GEMINI_API_KEY` "
-                "to your `apps/engine/.env` file and restart the engine container.\n\n"
-                "Example:\n```env\nOPENROUTER_API_KEY=\"sk-or-v1-...\"\n```\n"
+                "> [!WARNING]\n> **AI analysis unavailable.**\n\n"
+                "All configured LLM providers failed:\n\n- "
+                + "\n- ".join(errors)
+                + "\n\nCheck your `OPENROUTER_API_KEY` / `GEMINI_API_KEY` in the engine `.env`."
             )
+        return (
+            "> [!WARNING]\n> **Missing API Keys!**\n\n"
+            "To enable AI Research & Analysis, please add `OPENROUTER_API_KEY` or `GEMINI_API_KEY` "
+            "to your `apps/engine/.env` file and restart the engine container.\n\n"
+            "Example:\n```env\nOPENROUTER_API_KEY=\"sk-or-v1-...\"\n```\n"
+        )
 
     async def _call_openrouter(self, prompt: str) -> str:
         url = "https://openrouter.ai/api/v1/chat/completions"
@@ -76,10 +143,10 @@ class LLMClient:
                 data = resp.json()
                 return data["choices"][0]["message"]["content"]
             else:
-                return f"Error from OpenRouter: {resp.text}"
+                raise RuntimeError(f"HTTP {resp.status_code} {resp.text}")
 
     async def _call_gemini(self, prompt: str) -> str:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.gemini_key}"
         headers = {"Content-Type": "application/json"}
         payload = {
             "contents": [{
@@ -138,34 +205,28 @@ async def get_dashboard_analysis():
 @router.get("/news")
 async def get_market_news():
     try:
-        nifty = yf.Ticker("^NSEI")
-        sensex = yf.Ticker("^BSESN")
-        
-        nifty_news = nifty.news or []
-        sensex_news = sensex.news or []
-        
-        # Also fetch news for top constituents to ensure we have enough data
-        reliance = yf.Ticker("RELIANCE.NS").news or []
-        hdfc = yf.Ticker("HDFCBANK.NS").news or []
-        tcs = yf.Ticker("TCS.NS").news or []
-        
-        # Combine and deduplicate based on title, limit to top 10 recent
+        # Fetch all RSS feeds concurrently.
+        async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0 (SmartTrader)"}) as client:
+            results = await asyncio.gather(
+                *[_fetch_rss(client, name, url) for name, url in NEWS_RSS_FEEDS]
+            )
+        combined = [a for feed in results for a in feed]
+
+        # Sort newest-first FIRST, then dedup by title keeping the newest, then cap.
+        combined.sort(key=lambda x: x["providerPublishTime"], reverse=True)
         seen_titles = set()
         all_news = []
-        raw_news_combined = nifty_news + sensex_news + reliance + hdfc + tcs
-        
-        for item in raw_news_combined:
-            parsed = parse_news_item(item)
-            title = parsed["title"]
-            if title and title not in seen_titles:
-                seen_titles.add(title)
-                all_news.append(parsed)
-                if len(all_news) >= 10:
-                    break
+        for a in combined:
+            key = a["title"].strip().lower()
+            if key in seen_titles:
+                continue
+            seen_titles.add(key)
+            all_news.append(a)
+            if len(all_news) >= NEWS_MAX_ITEMS:
+                break
 
-        all_news.sort(key=lambda x: x["providerPublishTime"], reverse=True)
         news_titles = [item["title"] for item in all_news]
-        
+
         if not news_titles:
             return {"status": "success", "analysis": "No recent news found for the Indian Stock Market.", "articles": []}
 
@@ -173,7 +234,7 @@ async def get_market_news():
         You are an expert Indian Stock Market Quantitative Analyst.
         
         Here are the latest breaking news headlines affecting the Indian Stock Market:
-        {chr(10).join(news_titles)}
+        {chr(10).join(news_titles[:15])}
         
         Provide a concise, 3-paragraph summary of how these news events might impact the overall market sentiment today. Format as markdown. Use bullet points if discussing specific sectors.
         """
@@ -252,35 +313,51 @@ async def get_sectors_analysis():
             "Nifty Realty": "^CNXREALTY"
         }
         
-        sector_data = []
+        # Real per-sector performance (today's % change of each NSE sectoral index),
+        # returned as STRUCTURED data so the UI can render up/down/%/color — not just
+        # an AI narrative. `sector_lines` is the text form fed to the LLM summary.
+        sector_perf = []
+        sector_lines = []
         for name, ticker_str in sector_indices.items():
             ticker = yf.Ticker(ticker_str)
             hist = ticker.history(period="5d")
             if not hist.empty and len(hist) >= 2:
-                current = hist["Close"].iloc[-1]
-                prev = hist["Close"].iloc[-2]
+                current = float(hist["Close"].iloc[-1])
+                prev = float(hist["Close"].iloc[-2])
                 change_pct = ((current - prev) / prev) * 100
-                
-                status = "Neutral"
-                if change_pct > 0.5:
-                    status = "Up"
-                elif change_pct < -0.5:
-                    status = "Down"
-                
-                sector_data.append(f"- {name}: {change_pct:.2f}% ({status})")
+
+                status = "Up" if change_pct > 0.5 else "Down" if change_pct < -0.5 else "Neutral"
+                sector_perf.append({
+                    "name": name,
+                    "ticker": ticker_str,
+                    "changePct": round(change_pct, 2),
+                    "status": status,
+                })
+                sector_lines.append(f"- {name}: {change_pct:.2f}% ({status})")
+
+        # Leading/lagging ranking derived from the same numbers.
+        ranked = sorted(sector_perf, key=lambda s: s["changePct"], reverse=True)
+        leading = ranked[:3]
+        lagging = list(reversed(ranked[-3:])) if len(ranked) >= 3 else []
 
         prompt = f"""
         You are an expert Indian Stock Market Quantitative Analyst.
-        
+
         Here is the daily performance of major Indian sector indices:
-        {chr(10).join(sector_data)}
-        
-        Provide a concise 2-paragraph overall Sector Analysis. 
+        {chr(10).join(sector_lines)}
+
+        Provide a concise 2-paragraph overall Sector Analysis.
         Identify which sectors are leading (Up), lagging (Down), or In Focus, and give brief reasons why based on typical market dynamics. Format as markdown.
         """
-        
+
         analysis = await llm.generate(prompt)
-        return {"status": "success", "analysis": analysis, "data": sector_data}
+        return {
+            "status": "success",
+            "analysis": analysis,
+            "data": sector_perf,
+            "leading": leading,
+            "lagging": lagging,
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

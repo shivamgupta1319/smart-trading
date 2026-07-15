@@ -1,8 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { createChart, ColorType, type IChartApi, AreaSeries } from 'lightweight-charts';
-
-const API = 'http://localhost:3000';
+import { API } from '../config';
 
 const HOLD_LABELS: Record<string, { label: string; color: string; icon: string }> = {
   INTRADAY: { label: 'Intraday', color: '#22d3ee', icon: '⏱' },
@@ -10,6 +9,15 @@ const HOLD_LABELS: Record<string, { label: string; color: string; icon: string }
   MID_SWING: { label: 'Mid Swing', color: '#a78bfa', icon: '📆' },
   LONG_POSITIONAL: { label: 'Long Term', color: '#60a5fa', icon: '🗓' },
   UNKNOWN: { label: 'Unknown', color: '#4b5563', icon: '❓' },
+};
+
+// Mirrors MIN_TRADES_FOR_CONFIDENCE on the API (default 20) — a (stock×strategy) cell is
+// only "reliable" above this many closed trades.
+const CONFIDENCE_MIN_TRADES = 20;
+const CONFIDENCE_COLOR: Record<string, string> = {
+  HIGH: '#10b981',
+  MEDIUM: '#fbbf24',
+  LOW: '#4b5563',
 };
 
 interface Trade {
@@ -41,11 +49,36 @@ interface Trade {
   peakPrice: number | null;
 }
 
+// Decision-grade edge metrics computed per (stock×strategy) and per strategy cell.
+interface EdgeMetrics {
+  trades: number;
+  wins: number;
+  winRate: number;
+  totalPnl: number;
+  avgWin: number;
+  avgLoss: number;
+  expectancy: number;
+  avgRMultiple: number;
+  profitFactor: number;
+  maxDrawdown: number;
+  cellCapital: number;
+  cellRoiPct: number;
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
+  reliable: boolean;
+}
+
 interface PortfolioStats {
   totalTrades: number;
   openTrades: number;
   closedTrades: number;
   totalPnl: number;
+  netPnl: number;
+  investedNow: number;
+  notionalNow: number;
+  openPositions: number;
+  activeCells: number;
+  totalDeployedBase: number;
+  roiPct: number;
   winRate: number;
   wins: number;
   losses: number;
@@ -53,25 +86,13 @@ interface PortfolioStats {
   avgLoss: number;
   profitFactor: number;
   bestStrategy: string;
-  strategyBreakdown: {
-    strategy: string;
-    totalPnl: number;
-    trades: number;
-    wins: number;
-    winRate: number;
-  }[];
-  stockWiseStrategyBreakdown: {
-    symbol: string;
-    strategy: string;
-    totalPnl: number;
-    trades: number;
-    wins: number;
-    winRate: number;
-  }[];
+  bestCell: ({ symbol: string; strategy: string } & EdgeMetrics) | null;
+  leaderboard: ({ symbol: string; strategy: string } & EdgeMetrics)[];
+  strategyBreakdown: ({ strategy: string } & EdgeMetrics)[];
+  stockWiseStrategyBreakdown: ({ symbol: string; strategy: string } & EdgeMetrics)[];
   equityCurve: { time: number; value: number }[];
   holdDurationStats: Record<string, { trades: number; pnl: number }>;
-  initialCapital: number;
-  currentCapital: number;
+  windowDays: number | null;
 }
 
 export function Portfolio() {
@@ -81,7 +102,21 @@ export function Portfolio() {
   const [filter, setFilter] = useState<'ALL' | 'OPEN' | 'CLOSED'>('ALL');
   const [holdFilter, setHoldFilter] = useState<string>('ALL');
   const [livePrices, setLivePrices] = useState<Record<string, number | null>>({});
-  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'ANALYSIS'>('PORTFOLIO');
+  const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'MONITORED' | 'ANALYSIS' | 'RISK'>('PORTFOLIO');
+  const [configs, setConfigs] = useState<any[]>([]);
+  const [windowDays, setWindowDays] = useState<number | null>(null);
+  const [risk, setRisk] = useState<any | null>(null);
+  const [riskLoading, setRiskLoading] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== 'RISK') return;
+    setRiskLoading(true);
+    axios
+      .get(`${API}/api/trades/risk`)
+      .then((r) => setRisk(r.data))
+      .catch(() => setRisk(null))
+      .finally(() => setRiskLoading(false));
+  }, [activeTab]);
   const equityRef = useRef<HTMLDivElement>(null);
   const chartInstanceRef = useRef<IChartApi | null>(null);
 
@@ -132,19 +167,24 @@ export function Portfolio() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [statsRes, tradesRes] = await Promise.all([
-        axios.get(`${API}/api/trades/stats`),
+      const statsUrl = windowDays
+        ? `${API}/api/trades/stats?window=${windowDays}`
+        : `${API}/api/trades/stats`;
+      const [statsRes, tradesRes, configsRes] = await Promise.all([
+        axios.get(statsUrl),
         axios.get(`${API}/api/trades`),
+        axios.get(`${API}/api/configs`),
       ]);
       setStats(statsRes.data);
       setTrades(tradesRes.data);
+      setConfigs(Array.isArray(configsRes.data) ? configsRes.data : []);
       fetchLivePrices(tradesRes.data);
     } catch (e) {
       console.error('Failed to fetch portfolio data', e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [windowDays]);
 
   useEffect(() => {
     fetchData();
@@ -214,6 +254,37 @@ export function Portfolio() {
     return true;
   });
 
+  // ── Monitored cells: every active (stock × strategy) pair being scanned, merged with
+  // its live fund/trade metrics. Untested pairs show the ₹10k base fund + 0 trades. ──
+  const cellMetricsMap = new Map<string, { symbol: string; strategy: string } & EdgeMetrics>();
+  (stats?.stockWiseStrategyBreakdown ?? []).forEach((s) =>
+    cellMetricsMap.set(`${s.symbol}|${s.strategy}`, s),
+  );
+  const monitoredCells = configs
+    .map((c: any) => {
+      const symbol = c.stock?.symbol ?? c.symbol ?? '—';
+      const strategy = c.strategyName;
+      const m = cellMetricsMap.get(`${symbol}|${strategy}`);
+      return {
+        id: c.id,
+        symbol,
+        strategy,
+        timeframe: c.timeframe ?? '—',
+        fund: m?.cellCapital ?? 10000,
+        growth: m?.cellRoiPct ?? 0,
+        trades: m?.trades ?? 0,
+        wins: m?.wins ?? 0,
+        winRate: m?.winRate ?? 0,
+        totalPnl: m?.totalPnl ?? 0,
+        avgR: m?.avgRMultiple ?? 0,
+        confidence: m?.confidence ?? null,
+        traded: !!m,
+      };
+    })
+    .sort((a, b) => b.fund - a.fund);
+  const monitoredFundTotal = monitoredCells.reduce((s, c) => s + c.fund, 0);
+  const monitoredTradedCount = monitoredCells.filter((c) => c.traded).length;
+
   if (loading) {
     return (
       <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
@@ -230,7 +301,7 @@ export function Portfolio() {
       <div className="page-header">
         <h1 className="page-title">💼 <span>Portfolio</span> Tracker</h1>
         <p className="page-subtitle">
-          Track trades from live signals • ₹1,00,000 capital • 2% risk per trade
+          Strategy-testing lab • each stock×strategy runs its own ₹10k fund (compounding) • intraday 5× / swing 1×
         </p>
       </div>
 
@@ -254,6 +325,23 @@ export function Portfolio() {
           Actual Portfolio
         </button>
         <button
+          className={`tab-btn ${activeTab === 'MONITORED' ? 'active' : ''}`}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: activeTab === 'MONITORED' ? 'var(--cyan)' : 'var(--text-muted)',
+            padding: '0.75rem 1rem',
+            fontSize: '1rem',
+            fontWeight: activeTab === 'MONITORED' ? 600 : 400,
+            borderBottom: activeTab === 'MONITORED' ? '2px solid var(--cyan)' : '2px solid transparent',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => setActiveTab('MONITORED')}
+        >
+          Monitored Stocks
+        </button>
+        <button
           className={`tab-btn ${activeTab === 'ANALYSIS' ? 'active' : ''}`}
           style={{
             background: 'transparent',
@@ -270,22 +358,264 @@ export function Portfolio() {
         >
           Strategy Performance Analysis
         </button>
+        <button
+          className={`tab-btn ${activeTab === 'RISK' ? 'active' : ''}`}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: activeTab === 'RISK' ? 'var(--cyan)' : 'var(--text-muted)',
+            padding: '0.75rem 1rem',
+            fontSize: '1rem',
+            fontWeight: activeTab === 'RISK' ? 600 : 400,
+            borderBottom: activeTab === 'RISK' ? '2px solid var(--cyan)' : '2px solid transparent',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+          onClick={() => setActiveTab('RISK')}
+        >
+          Risk Engine
+        </button>
       </div>
+
+      {activeTab === 'MONITORED' && (
+        <div className="animate-fade-in">
+          {/* Summary — reconciles to the Actual Portfolio net.
+              active-cell growth + deactivated-cell P&L = portfolio net. */}
+          {(() => {
+            const activeGrowth = monitoredFundTotal - monitoredCells.length * 10000; // Σ active cells' realized P&L
+            const portfolioNet = stats?.netPnl ?? 0;                                  // ALL closed trades (Actual Portfolio)
+            const deactivated = portfolioNet - activeGrowth;                          // pruned cells still in history
+            return (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '0.75rem' }}>
+                  <div className="metric-card">
+                    <p className="metric-label">Monitored Pairs</p>
+                    <p className="metric-value" style={{ fontSize: '1.3rem' }}>{monitoredCells.length}</p>
+                    <p className="metric-label">{monitoredTradedCount} traded · {monitoredCells.length - monitoredTradedCount} untested</p>
+                  </div>
+                  <div className="metric-card">
+                    <p className="metric-label">Active-Cell Growth</p>
+                    <p className={`metric-value ${activeGrowth >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
+                      {activeGrowth >= 0 ? '+' : ''}₹{Math.round(activeGrowth).toLocaleString('en-IN')}
+                    </p>
+                    <p className="metric-label">{monitoredTradedCount} traded active cells only</p>
+                  </div>
+                  <div className="metric-card">
+                    <p className="metric-label">Deactivated Cells</p>
+                    <p className={`metric-value ${deactivated >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
+                      {deactivated >= 0 ? '+' : ''}₹{Math.round(deactivated).toLocaleString('en-IN')}
+                    </p>
+                    <p className="metric-label">pruned pairs, still in portfolio history</p>
+                  </div>
+                  <div className="metric-card" style={{ border: '1px solid rgba(34, 197, 94, 0.25)' }}>
+                    <p className="metric-label">Portfolio Net (all trades)</p>
+                    <p className={`metric-value ${portfolioNet >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
+                      {portfolioNet >= 0 ? '+' : ''}₹{Math.round(portfolioNet).toLocaleString('en-IN')}
+                    </p>
+                    <p className="metric-label">matches Actual Portfolio ✓</p>
+                  </div>
+                </div>
+                <p className="page-subtitle" style={{ marginTop: 0, marginBottom: '1.5rem', fontSize: '0.78rem' }}>
+                  Reconciliation: active-cell growth ({activeGrowth >= 0 ? '+' : ''}₹{Math.round(activeGrowth).toLocaleString('en-IN')})
+                  {' '}+ deactivated cells ({deactivated >= 0 ? '+' : ''}₹{Math.round(deactivated).toLocaleString('en-IN')})
+                  {' '}= portfolio net ({portfolioNet >= 0 ? '+' : ''}₹{Math.round(portfolioNet).toLocaleString('en-IN')}).
+                  The table below lists only the <strong>{monitoredCells.length} currently-monitored</strong> pairs — the
+                  losers were pruned, so the survivors read positive; the deactivated pairs' realized P&L still sits in the
+                  Actual Portfolio total.
+                </p>
+              </>
+            );
+          })()}
+
+          {/* Monitored cells table */}
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: '0.5rem' }}>📡 Monitored Stock × Strategy Cells</h3>
+            <p className="page-subtitle" style={{ marginTop: 0, marginBottom: '1rem', fontSize: '0.8rem' }}>
+              Every (stock × strategy) pair the scanner is watching. Each runs its own ₹10k fund (compounding),
+              intraday 5× / swing 1× leverage. Untested pairs sit at the ₹10k base. Sorted by fund size.
+            </p>
+            {monitoredCells.length === 0 ? (
+              <p className="page-subtitle" style={{ margin: 0 }}>
+                No active cells — the roster is empty. Run auto-select or add pairs on the Live Scanner page.
+              </p>
+            ) : (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Symbol</th>
+                      <th>Strategy</th>
+                      <th>TF</th>
+                      <th style={{ textAlign: 'right' }}>Fund (₹10k →)</th>
+                      <th style={{ textAlign: 'right' }}>Growth</th>
+                      <th style={{ textAlign: 'right' }}>Trades</th>
+                      <th style={{ textAlign: 'right' }}>Win Rate</th>
+                      <th style={{ textAlign: 'right' }}>Total P&L</th>
+                      <th style={{ textAlign: 'right' }}>Avg R</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monitoredCells.map((c, i) => (
+                      <tr key={`mon-${c.id}`} style={{ opacity: c.traded ? 1 : 0.55 }}>
+                        <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                        <td><span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-primary)' }}>{c.symbol}</span></td>
+                        <td><span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)', fontSize: '0.8rem' }}>{c.strategy}</span></td>
+                        <td><span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{c.timeframe}</span></td>
+                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>₹{Math.round(c.fund).toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: c.growth >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                          {c.traded ? `${c.growth >= 0 ? '+' : ''}${c.growth}%` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{c.trades}</td>
+                        <td style={{ textAlign: 'right', color: c.trades === 0 ? 'var(--text-muted)' : c.winRate >= 50 ? 'var(--green)' : 'var(--red)' }}>
+                          {c.traded ? `${c.winRate}%` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: c.totalPnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                          {c.traded ? `${c.totalPnl >= 0 ? '+' : ''}₹${c.totalPnl.toLocaleString('en-IN')}` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: c.avgR >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                          {c.traded ? `${c.avgR >= 0 ? '+' : ''}${c.avgR}R` : '—'}
+                        </td>
+                        <td>
+                          {c.traded && c.confidence ? (
+                            <span className="badge" style={{ background: `${CONFIDENCE_COLOR[c.confidence]}22`, color: CONFIDENCE_COLOR[c.confidence], border: `1px solid ${CONFIDENCE_COLOR[c.confidence]}55` }}>
+                              {c.confidence}
+                            </span>
+                          ) : (
+                            <span className="badge" style={{ background: 'var(--bg-input)', color: 'var(--text-muted)', border: '1px solid var(--border-light)' }}>
+                              UNTESTED
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'RISK' && (
+        <div className="animate-fade-in">
+          {riskLoading ? (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}><div className="spinner"></div></div>
+          ) : !risk ? (
+            <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
+              <p className="page-subtitle">No risk data.</p>
+            </div>
+          ) : (
+            <>
+              {/* Flags */}
+              {risk.flags?.length > 0 && (
+                <div className="card" style={{ padding: '1rem 1.25rem', marginBottom: '1.5rem', borderLeft: '4px solid var(--red)' }}>
+                  {risk.flags.map((f: string, i: number) => (
+                    <p key={i} style={{ margin: '0.25rem 0', color: 'var(--red)' }}>⚠️ {f}</p>
+                  ))}
+                </div>
+              )}
+              {risk.openPositions === 0 && (!risk.flags || risk.flags.length === 0) && (
+                <div className="card" style={{ padding: '1rem 1.25rem', marginBottom: '1.5rem' }}>
+                  <p className="page-subtitle" style={{ margin: 0 }}>No open positions — book is flat (zero risk deployed).</p>
+                </div>
+              )}
+
+              {/* Top metrics */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+                <div className="metric-card">
+                  <p className="metric-label">Open Positions</p>
+                  <p className="metric-value">{risk.openPositions}</p>
+                  <p className="metric-label">₹{Number(risk.deployedBase).toLocaleString('en-IN')} deployed base</p>
+                </div>
+                <div className="metric-card">
+                  <p className="metric-label">Margin Used</p>
+                  <p className="metric-value">₹{Number(risk.marginUsed).toLocaleString('en-IN')}</p>
+                  <p className="metric-label">{risk.marginUsedPct}% of base · ₹{Number(risk.notional).toLocaleString('en-IN')} notional</p>
+                </div>
+                <div className="metric-card">
+                  <p className="metric-label">Total Heat (risk-at-stop)</p>
+                  <p className="metric-value" style={{ color: risk.heatPct > 6 ? 'var(--red)' : 'var(--text-primary)' }}>₹{Number(risk.totalHeat).toLocaleString('en-IN')}</p>
+                  <p className="metric-label">{risk.heatPct}% of deployed base</p>
+                </div>
+                <div className="metric-card">
+                  <p className="metric-label">Notional Deployed</p>
+                  <p className="metric-value">₹{Number(risk.notional).toLocaleString('en-IN')}</p>
+                </div>
+              </div>
+
+              {/* Sector concentration */}
+              {risk.sectorConcentration?.length > 0 && (
+                <div style={{ marginBottom: '2rem' }}>
+                  <h3 style={{ marginBottom: '1rem' }}>Sector Concentration</h3>
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead><tr><th>Sector</th><th style={{ textAlign: 'right' }}>Exposure</th><th style={{ textAlign: 'right' }}>% of Book</th></tr></thead>
+                      <tbody>
+                        {risk.sectorConcentration.map((s: any, i: number) => (
+                          <tr key={i}>
+                            <td>{s.sector}</td>
+                            <td style={{ textAlign: 'right' }}>₹{Number(s.exposure).toLocaleString('en-IN')}</td>
+                            <td style={{ textAlign: 'right' }} className={s.pctOfBook > 40 ? 'negative' : ''}>{s.pctOfBook}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Per-position */}
+              {risk.positions?.length > 0 && (
+                <div>
+                  <h3 style={{ marginBottom: '1rem' }}>Open Positions</h3>
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead><tr><th>Symbol</th><th>Strategy</th><th>Sector</th><th style={{ textAlign: 'right' }}>Qty</th><th style={{ textAlign: 'right' }}>Notional</th><th style={{ textAlign: 'right' }}>Margin</th><th style={{ textAlign: 'right' }}>Risk @ Stop</th></tr></thead>
+                      <tbody>
+                        {risk.positions.map((p: any, i: number) => (
+                          <tr key={i}>
+                            <td><span className="stock-symbol" style={{ fontWeight: 600 }}>{p.symbol}</span></td>
+                            <td>{p.strategy}</td>
+                            <td>{p.sector}</td>
+                            <td style={{ textAlign: 'right' }}>{p.qty}</td>
+                            <td style={{ textAlign: 'right' }}>₹{Number(p.exposure).toLocaleString('en-IN')}</td>
+                            <td style={{ textAlign: 'right' }}>₹{Number(p.margin).toLocaleString('en-IN')}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--red)' }}>₹{Number(p.riskAtStop).toLocaleString('en-IN')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Summary cards */}
       {stats && activeTab === 'PORTFOLIO' && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
             <div className="metric-card">
-              <p className="metric-label">Current Capital</p>
-              <p className={`metric-value ${stats.currentCapital >= stats.initialCapital ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
-                ₹{stats.currentCapital.toLocaleString('en-IN')}
+              <p className="metric-label">Net P&L (realized)</p>
+              <p className={`metric-value ${stats.netPnl >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
+                {stats.netPnl >= 0 ? '+' : ''}₹{stats.netPnl.toLocaleString('en-IN')}
+              </p>
+              <p className={`metric-label ${stats.roiPct >= 0 ? 'positive' : 'negative'}`}>
+                {stats.roiPct >= 0 ? '+' : ''}{stats.roiPct}% on ₹{stats.totalDeployedBase.toLocaleString('en-IN')} base
               </p>
             </div>
             <div className="metric-card">
-              <p className="metric-label">Total P&L</p>
-              <p className={`metric-value ${stats.totalPnl >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
-                {stats.totalPnl >= 0 ? '+' : ''}₹{stats.totalPnl.toLocaleString('en-IN')}
+              <p className="metric-label">Invested Now</p>
+              <p className="metric-value" style={{ fontSize: '1.3rem' }}>
+                ₹{stats.investedNow.toLocaleString('en-IN')}
+              </p>
+              <p className="metric-label">
+                {stats.openPositions} open · {stats.activeCells} cells
+                {stats.notionalNow != null ? ` · ₹${stats.notionalNow.toLocaleString('en-IN')} notional` : ''}
               </p>
             </div>
             <div className="metric-card">
@@ -443,37 +773,117 @@ export function Portfolio() {
             </div>
           )}
 
-          {/* Stock-wise Strategy Performance */}
+          {/* Leaderboard — best (stock × strategy) cells by fund growth */}
+          <div className="card" style={{ marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <h3 className="card-title" style={{ margin: 0 }}>🏆 Leaderboard — best stock × strategy</h3>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                {([['All', null], ['90d', 90], ['30d', 30]] as const).map(([label, days]) => (
+                  <button
+                    key={label}
+                    onClick={() => setWindowDays(days)}
+                    className="tab-btn"
+                    style={{
+                      padding: '0.3rem 0.7rem', borderRadius: '6px', cursor: 'pointer',
+                      border: '1px solid var(--border-light)', fontSize: '0.8rem',
+                      background: windowDays === days ? 'var(--cyan)' : 'transparent',
+                      color: windowDays === days ? '#000' : 'var(--text-muted)',
+                    }}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+            <p className="page-subtitle" style={{ marginTop: 0, marginBottom: '1rem', fontSize: '0.8rem' }}>
+              Each cell trades its own ₹10k fund (compounding). Ranked by fund growth among reliable
+              pairs (≥ {CONFIDENCE_MIN_TRADES} trades){windowDays ? ` over the last ${windowDays} days` : ''}.
+            </p>
+            {stats.leaderboard && stats.leaderboard.length > 0 ? (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th><th>Symbol</th><th>Strategy</th>
+                      <th style={{ textAlign: 'right' }}>Fund (₹10k →)</th>
+                      <th style={{ textAlign: 'right' }}>Growth</th>
+                      <th style={{ textAlign: 'right' }}>Avg R</th>
+                      <th style={{ textAlign: 'right' }}>Win Rate</th>
+                      <th style={{ textAlign: 'right' }}>Trades</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.leaderboard.slice(0, 15).map((s, i) => (
+                      <tr key={`lb-${s.symbol}-${s.strategy}`}>
+                        <td style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                        <td><span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{s.symbol}</span></td>
+                        <td><span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)' }}>{s.strategy}</span></td>
+                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>₹{s.cellCapital.toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign: 'right', color: s.cellRoiPct >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                          {s.cellRoiPct >= 0 ? '+' : ''}{s.cellRoiPct}%
+                        </td>
+                        <td style={{ textAlign: 'right', color: s.avgRMultiple >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>
+                          {s.avgRMultiple >= 0 ? '+' : ''}{s.avgRMultiple}R
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{s.winRate}%</td>
+                        <td style={{ textAlign: 'right' }}>{s.trades}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="page-subtitle" style={{ margin: 0 }}>
+                No reliable cells yet — need ≥ {CONFIDENCE_MIN_TRADES} closed trades per pair. Keep forward-testing.
+              </p>
+            )}
+          </div>
+
+          {/* Stock-wise Strategy Performance — decision-grade edge metrics */}
           {stats.stockWiseStrategyBreakdown && stats.stockWiseStrategyBreakdown.length > 0 && (
             <div className="card" style={{ marginBottom: '2rem' }}>
-              <h3 className="card-title" style={{ marginBottom: '1rem' }}>Stock-wise Strategy Performance</h3>
+              <h3 className="card-title" style={{ marginBottom: '0.5rem' }}>Stock-wise Strategy Performance</h3>
+              <p className="page-subtitle" style={{ marginTop: 0, marginBottom: '1rem', fontSize: '0.8rem' }}>
+                Rank by <strong>Avg R</strong> and <strong>Expectancy</strong> among <strong>reliable</strong> pairs
+                (≥ {CONFIDENCE_MIN_TRADES} trades). Low-confidence rows are dimmed — don't trust real money to them yet.
+              </p>
               <div className="table-wrapper">
                 <table>
                   <thead>
                     <tr>
                       <th>Symbol</th>
                       <th>Strategy</th>
-                      <th>Trades</th>
-                      <th>Wins</th>
-                      <th>Win Rate</th>
-                      <th>Total P&L</th>
+                      <th style={{ textAlign: 'right' }}>Trades</th>
+                      <th style={{ textAlign: 'right' }}>Win Rate</th>
+                      <th style={{ textAlign: 'right' }}>Expectancy</th>
+                      <th style={{ textAlign: 'right' }}>Avg R</th>
+                      <th style={{ textAlign: 'right' }}>Profit Factor</th>
+                      <th style={{ textAlign: 'right' }}>Max DD</th>
+                      <th style={{ textAlign: 'right' }}>Total P&L</th>
+                      <th>Confidence</th>
                     </tr>
                   </thead>
                   <tbody>
                     {stats.stockWiseStrategyBreakdown.map((s) => (
-                      <tr key={`${s.symbol}-${s.strategy}`}>
+                      <tr key={`${s.symbol}-${s.strategy}`} style={{ opacity: s.reliable ? 1 : 0.45 }}>
                         <td><span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-primary)' }}>{s.symbol}</span></td>
                         <td><span style={{ fontFamily: 'var(--font-mono)', color: 'var(--cyan)', fontWeight: 600 }}>{s.strategy}</span></td>
-                        <td>{s.trades}</td>
-                        <td>{s.wins}</td>
-                        <td>
-                          <span style={{ color: s.winRate >= 50 ? 'var(--green)' : 'var(--red)' }}>
-                            {s.winRate}%
+                        <td style={{ textAlign: 'right' }}>{s.trades}</td>
+                        <td style={{ textAlign: 'right', color: s.winRate >= 50 ? 'var(--green)' : 'var(--red)' }}>{s.winRate}%</td>
+                        <td style={{ textAlign: 'right', color: s.expectancy >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>
+                          {s.expectancy >= 0 ? '+' : ''}₹{s.expectancy.toLocaleString('en-IN')}
+                        </td>
+                        <td style={{ textAlign: 'right', color: s.avgRMultiple >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                          {s.avgRMultiple >= 0 ? '+' : ''}{s.avgRMultiple}R
+                        </td>
+                        <td style={{ textAlign: 'right', color: s.profitFactor >= 1 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>{s.profitFactor}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--red)', fontFamily: 'var(--font-mono)' }}>-₹{s.maxDrawdown.toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <span style={{ color: s.totalPnl >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                            {s.totalPnl >= 0 ? '+' : ''}₹{s.totalPnl.toLocaleString('en-IN')}
                           </span>
                         </td>
                         <td>
-                          <span style={{ color: s.totalPnl >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                            {s.totalPnl >= 0 ? '+' : ''}₹{s.totalPnl.toLocaleString('en-IN')}
+                          <span className="badge" style={{ background: `${CONFIDENCE_COLOR[s.confidence]}22`, color: CONFIDENCE_COLOR[s.confidence], border: `1px solid ${CONFIDENCE_COLOR[s.confidence]}55` }}>
+                            {s.confidence}
                           </span>
                         </td>
                       </tr>

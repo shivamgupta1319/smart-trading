@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-
-const API = 'http://localhost:3000';
+import { API } from '../config';
 
 interface NseStock {
   id: number;
@@ -9,7 +8,19 @@ interface NseStock {
   companyName: string;
 }
 
-export function AddStockModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onClose: () => void; onAdd: (symbol: string) => void }) {
+export function AddStockModal({
+  isOpen,
+  onClose,
+  onAdd,
+  title = 'Add NSE Stock',
+  actionLabel = 'Add',
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onAdd: (symbol: string, companyName?: string) => void;
+  title?: string;
+  actionLabel?: string;
+}) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<NseStock[]>([]);
   const [loading, setLoading] = useState(false);
@@ -44,7 +55,7 @@ export function AddStockModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onC
     <div className="modal-overlay">
       <div className="modal-content card">
         <div className="modal-header">
-          <h2 className="page-title" style={{ fontSize: '1.25rem' }}>Add NSE Stock</h2>
+          <h2 className="page-title" style={{ fontSize: '1.25rem' }}>{title}</h2>
           <button onClick={onClose} className="btn-close">
             <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
@@ -71,14 +82,14 @@ export function AddStockModal({ isOpen, onClose, onAdd }: { isOpen: boolean; onC
                   <div 
                     key={stock.id} 
                     className="stock-list-item"
-                    onClick={() => onAdd(stock.symbol)}
+                    onClick={() => onAdd(stock.symbol, stock.companyName)}
                   >
                     <div>
                       <div className="stock-symbol">{stock.symbol}</div>
                       <div className="stock-company">{stock.companyName}</div>
                     </div>
                     <button className="btn btn-sm btn-primary">
-                      Add
+                      {actionLabel}
                     </button>
                   </div>
                 ))}

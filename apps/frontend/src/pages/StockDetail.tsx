@@ -3,8 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import { CandlestickChart } from '../components/CandlestickChart';
-
-const API = 'http://localhost:3000';
+import { API } from '../config';
 
 interface BacktestResult {
   strategy: string;

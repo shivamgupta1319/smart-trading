@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsNumber, IsInt, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsNumber, IsInt, IsOptional, IsIn } from 'class-validator';
 
 export class CreateSignalDto {
   @IsInt()
@@ -8,9 +8,8 @@ export class CreateSignalDto {
   @IsNotEmpty()
   strategyName!: string;
 
-  @IsString()
-  @IsNotEmpty()
-  signalType!: string; // "BUY" | "SELL"
+  @IsIn(['BUY', 'SELL'])
+  signalType!: string;
 
   @IsNumber()
   entryPrice!: number;
@@ -21,9 +20,9 @@ export class CreateSignalDto {
   @IsNumber()
   target!: number;
 
-  @IsString()
+  @IsIn(['INTRADAY', 'SHORT_SWING', 'MID_SWING', 'LONG_POSITIONAL'])
   @IsOptional()
-  holdDuration?: string; // "INTRADAY" | "SHORT_SWING" | "MID_SWING" | "LONG_POSITIONAL"
+  holdDuration?: string;
 }
 
 
