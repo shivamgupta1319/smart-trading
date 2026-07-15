@@ -28,10 +28,10 @@ Status legend: `TODO` · `IN_PROGRESS` · `DONE`
 - [ ] `TODO` — Re-run `scratchpad/audit.sql`: avg win ≥ avg loss, PF > 1, losers no longer out-risk winners
 
 ## Phase 4 — Swing time-stop (follow-up; may become FEAT-006)
-- [ ] `TODO` — `TIME_STOP_BARS_BY_BUCKET` in backtest_config.py (SHORT 10 / MID 20 / LONG 40, env)
-- [ ] `TODO` — Apply in live_scanner.auto_close_signals AND base.simulate() swing walk (parity)
+- [x] `DONE` — `TIME_STOP_BARS_BY_BUCKET` in backtest_config.py (SHORT 10 / MID 20 / LONG 40, env)
+- [x] `DONE` — Apply in live_scanner.auto_close_signals AND base.simulate() swing walk (parity)
 - [ ] `TODO` — Exclude swing buckets from real-money candidacy until swing R-expectancy positive
-- [ ] `TODO` — Parity test: time-stop fires identically live + backtest
+- [x] `DONE` — Parity test: time-stop fires identically live + backtest (697665f, deployed 2026-07-15)
 
 ## Close-out (`verify-feature`)
 - [ ] `TODO` — All ACs traced green
