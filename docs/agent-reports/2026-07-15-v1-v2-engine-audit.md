@@ -189,6 +189,71 @@ All 60 backfilled (41 OK / 0 fail; 462k bars, no stock missing 1D). Applied via
 `infra/scripts/expand-stock-universe-2026-07-15.sql`. Note this multiplies the F1/F2/F7 dead cells
 too, and a full Run All is now ~1,860 cells (60 × 31).
 
+### F14 (new, P1) — intraday: friction is ~2× the edge. V1's "best strategies" are a costing artifact
+
+Closes the gap this report originally listed as *"not covered"*. Owner challenge: **MACD_Zero and
+EMA_RSI are V1's best performers but select 0 stocks in V2, where all 60 go negative.** Both numbers
+check out (MACD_Zero V1 **+6.84** → V2 **−44.22**; EMA_RSI **+10.14** → **−45.13**).
+
+Same ladder, 114 intraday cells, 6,772 trades — V1 had no C3 exit model either, so M0–M4 isolate the
+V1 fantasies without re-porting C3:
+
+| Rung | Mean ROI | Δ |
+|---|---:|---:|
+| M0 V1-as-is | **+10.13** | — |
+| M1 +book open-at-end | +10.72 | +0.60 |
+| M2 +next-bar entry (lookahead removed) | +11.18 | **+0.45** |
+| M3 +intrabar stops | +7.33 | −3.84 |
+| **M4 +costs/slippage** | **−5.42** | **−12.75** |
+
+**Friction is the whole story** — and note this is at V1's *full ₹1L* sizing, so the risk cap (F-B)
+is **not** the cause here. Split cleanly, from +7.33 with no friction:
+
+- **broker charges only** → **+1.40** (−5.93pp)
+- **slippage only** → **+0.34** (−6.99pp)
+- **both** → **−5.42** (−12.75pp)
+
+Either alone leaves them marginally positive; together they sink. Mean avgR **0.122 → −0.187**: the
+edge is real but **smaller than the friction**. Mechanically: ~72 trades per cell in 4.7 months ×
+(~₹82 charges + ~₹100 slippage) ≈ **₹13k of friction against ~₹7.3k of gross edge — ~₹2 spent per
+₹1 earned.**
+
+**Tested against my own assumption, not just asserted.** `BT_SLIPPAGE_BPS=5` is *our choice*, so the
+obvious objection is that it's too harsh. Sensitivity: 5bps → −5.42, 3bps → −2.73, 2bps → −1.36,
+**1bp → +0.01**. **Even at a near-perfect 1bp fill these are breakeven.** Slippage tuning does not
+rescue them; the verdict is robust.
+
+**A real modelling defect found on the way (worth fixing regardless):** a flat 5bps is wrong in both
+directions — on RELIANCE (₹1,300) it is **13 NSE ticks**, far too harsh; on SUZLON (₹52) it is
+**0.5 ticks**, physically impossible (you cannot slip less than one tick). Slippage should be
+`max(1 tick, k × spread)` per instrument, not a constant. This changes per-cell fairness — **it does
+not change the verdict above.**
+
+**Conclusion (bounded — read the caveat):** MACD_Zero/EMA_RSI are **not** the winners V1 claimed;
+their apparent edge is substantially a costing artifact, and no plausible slippage rescues them.
+
+**BUT friction does not explain V2's actual numbers, and the gap is large.** M4 (V1 sizing + honest
+fills + full friction) vs V2's real result, same 19 stocks — so this is **not** the 60-stock universe:
+
+| strategy | M4 | V2 real | **unattributed** |
+|---|---:|---:|---:|
+| MACD_Zero | −15.12 | −44.22 | **−29.10** |
+| EMA_RSI | −8.75 | −45.13 | **−36.38** |
+| CPR_Breakout | −9.21 | −48.72 | **−39.51** |
+| SMC_FVG | **+2.12** | −44.45 | **−46.57** |
+| 15m_ORB | **+2.29** | −19.39 | **−21.68** |
+| VWAP_Supertrend | −3.81 | −15.91 | −12.10 |
+
+Two rungs remain unmeasured for intraday — **risk-cap sizing (F-B)** and the **C3 exit model**
+(3-phase partials / breakeven / candle-trail / reversal / 15:15 square-off). Together they cost
+**−12 to −47pp**, i.e. *more than friction does*, and SMC_FVG/15m_ORB are **positive at M4 and deeply
+negative in V2**. Given the swing time-stop turned out to be a −3.57pp regression that looked
+reasonable when shipped, **C3 must not be assumed correct.** Re-porting C3 into the ladder is the
+single highest-value open item.
+
+So: auto-select rejecting these is **defensible on current evidence**, but "the intraday book is
+just costs" would be **overclaiming** — a large majority of V2's intraday loss is still unexplained.
+
 ### RETRACTED — F6 ("the R-target override destroys structural targets")
 
 **Wrong.** I predicted it would wreck mean-reversion strategies. Measured: it **helps +2.71pp**
@@ -226,6 +291,9 @@ today's engine converts into a loss.
 - **High** on F1/F2/F3 (mechanical + DB-proven). **High** on F-A (15/16 strategies, consistent sign).
 - **Medium** on magnitudes: single 5.14y window, 19 stocks, no OOS split. Many cells have <10 trades
   — per-cell numbers are noise; per-strategy aggregates are the trustworthy unit.
-- **Not covered:** intraday (15m/5m) attribution — V2's C3 exit model is a different code path and
-  needs its own ladder. The V1/V2 intraday gap is large (15m_ORB +36.53pp) and unexplained here.
+- **Intraday PARTLY covered — see F14** (added after the owner challenged MACD_Zero/EMA_RSI). Proven:
+  V1's intraday edge is substantially a costing artifact (friction flips +7.33 → −5.42, robust down
+  to a 1bp fill). **Not proven:** the −12 to −47pp between M4 and V2's real numbers — the risk cap
+  and the C3 exit model are still unmeasured for intraday, and cost *more than friction does*.
+  Re-porting C3 into the ladder is the top open item; don't call the intraday book "just costs" yet.
 - Reproduce: `scratchpad/attribute.py` + `ladder.py` (read-only; no prod writes).
