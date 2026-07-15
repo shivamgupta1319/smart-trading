@@ -62,19 +62,23 @@ class EpisodicPivotStrategy(BaseStrategy):
             # If we have an active gap, check consolidation
             if active_gap_idx != -1:
                 days_since_gap = i - active_gap_idx
-                
-                # Update consolidation high
-                if high > consolidation_high:
-                    consolidation_high = high
-                    
+
                 # If gap is filled (price drops below the gap day's low), invalidate
                 if close < consolidation_low:
                     active_gap_idx = -1
                     continue
-                    
-                # 2. Wait 3-5 days for consolidation, then look for breakout
+
+                # 2. Wait 3-5 days for consolidation, then look for breakout.
+                # NOTE the ordering: the breakout is tested against the range formed by
+                # the gap day and the bars BEFORE this one, and only then is this bar
+                # folded into that range (below). The original code raised
+                # consolidation_high to include highs[i] FIRST, which made this test
+                # `close > consolidation_high >= high[i]` — i.e. `close[i] > high[i]`,
+                # impossible by OHLC definition. The strategy could therefore never emit
+                # a single signal: 15 stored reports, 0 trades, ever (audit F2).
                 if 3 <= days_since_gap <= 8:
-                    # Breakout above consolidation high
+                    # Breakout above the consolidation high, and not already broken out
+                    # on the previous bar (edge trigger, not a level-held state).
                     if close > consolidation_high and closes[i-1] <= consolidation_high:
                         signals[i] = 1
                         # Stop loss at the bottom of the gap day or a 5% stop
@@ -83,10 +87,17 @@ class EpisodicPivotStrategy(BaseStrategy):
                         targets[i] = close + (close - sl) * 3
                         # Reset
                         active_gap_idx = -1
-                
+                        continue
+
                 # If too many days pass, invalidate
                 elif days_since_gap > 8:
                     active_gap_idx = -1
+                    continue
+
+                # Extend the consolidation range with THIS bar — after the test above,
+                # never before it.
+                if high > consolidation_high:
+                    consolidation_high = high
 
         df['signal'] = signals
         df['stop_loss'] = stop_losses

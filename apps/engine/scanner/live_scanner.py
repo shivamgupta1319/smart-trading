@@ -105,13 +105,31 @@ def get_active_configs():
     return rows
 
 
+# Longest lookback any strategy needs before it will emit a signal: MTF_Alignment and
+# Volume_Climax guard at 250 bars, the 200-SMA family (SMA44_Pullback, EMA200_MACD,
+# Golden_Cross) at 200. test_live_fetch_covers_every_strategy_lookback pins this to the
+# real guards in strategies/, so adding a hungrier strategy fails the build rather than
+# going quietly dead in live.
+MAX_STRATEGY_LOOKBACK_BARS = 250
+# ~252 NSE trading days per calendar year — for checking a yfinance period covers the above.
+TRADING_DAYS_PER_YEAR = 252
+
+# The 1D window MUST exceed MAX_STRATEGY_LOOKBACK_BARS or the hungry strategies hit their
+# `len(df) < N` guard, silently return all-zeros, and can NEVER fire a live signal. That is
+# exactly what happened: "150d" ≈ 103 trading bars (−1 for the forming candle ≈ 102) vs a
+# 200–250 bar need, so 20 active cells produced 0 live signals for the system's entire life
+# while their backtests traded happily (audit 2026-07-15 F1). "2y" ≈ 500 bars leaves room
+# for indicator warmup on top of the guard — a 200-SMA is NaN for its first 200 bars, so
+# clearing the guard alone is not enough for the newest bar to carry a valid value.
+LIVE_PERIOD_BY_TF = {"1D": "2y", "15m": "10d", "5m": "5d"}
+
+
 def fetch_live_candles(symbol: str, timeframe: str) -> pd.DataFrame:
     yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
     interval_map = {"1D": "1d", "15m": "15m", "5m": "5m"}
-    period_map = {"1D": "150d", "15m": "10d", "5m": "5d"}
 
     interval = interval_map.get(timeframe, "15m")
-    period = period_map.get(timeframe, "10d")
+    period = LIVE_PERIOD_BY_TF.get(timeframe, "10d")
 
     df = yf.download(yf_symbol, period=period, interval=interval, progress=False, auto_adjust=True)
     if df.empty:

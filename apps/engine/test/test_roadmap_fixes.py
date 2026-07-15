@@ -283,3 +283,98 @@ def test_zero_trade_cell_still_reports_every_field():
     assert m["totalTrades"] == 0
     for k in ("avgRMultiple", "profitFactor", "maxDrawdownPct", "expectancy", "spanYears"):
         assert k in m
+
+
+# ── Audit 2026-07-15 F1 — the live fetch must feed every strategy ─────────────
+
+def test_live_fetch_covers_every_strategy_lookback():
+    """The live 1D window must exceed the hungriest strategy's bar guard.
+
+    Regression for F1, the worst defect the audit found: the scanner fetched "150d"
+    (≈103 trading bars, −1 for the forming candle ≈ 102) while MTF_Alignment and
+    Volume_Climax guard at 250 bars and the 200-SMA family at 200. Those strategies
+    hit the guard, returned all-zeros, and could NEVER fire a live signal — 20 active
+    cells sat at 0 live signals for the system's entire life while their backtests
+    traded normally. Nothing failed; it was silent.
+
+    So this asserts the invariant against the REAL guards parsed out of strategies/,
+    not a copy of them: add a strategy needing more bars and this fails here rather
+    than in production silence.
+    """
+    import re
+    from pathlib import Path
+
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scanner"))
+    from scanner.live_scanner import (  # noqa: E402
+        MAX_STRATEGY_LOOKBACK_BARS, LIVE_PERIOD_BY_TF, TRADING_DAYS_PER_YEAR,
+    )
+
+    root = Path(__file__).resolve().parents[1] / "strategies"
+    guards = {}
+    for f in root.rglob("*.py"):
+        for m in re.finditer(r"len\(df\)\s*<\s*(\d+)", f.read_text()):
+            guards[f.name] = max(guards.get(f.name, 0), int(m.group(1)))
+    assert guards, "no `len(df) < N` guards found — did the guard style change?"
+
+    worst_file, worst = max(guards.items(), key=lambda kv: kv[1])
+    assert worst <= MAX_STRATEGY_LOOKBACK_BARS, (
+        f"{worst_file} needs {worst} bars but MAX_STRATEGY_LOOKBACK_BARS is "
+        f"{MAX_STRATEGY_LOOKBACK_BARS}. Raise the live 1D period AND this constant, "
+        f"or that strategy can never fire live."
+    )
+
+    period = LIVE_PERIOD_BY_TF["1D"]
+    m = re.fullmatch(r"(\d+)(y|d)", period)
+    assert m, f"unparseable 1D period {period!r}"
+    n, unit = int(m.group(1)), m.group(2)
+    # Calendar → trading days. yfinance periods are calendar-based; only ~69% are sessions.
+    bars = n * TRADING_DAYS_PER_YEAR if unit == "y" else int(n * TRADING_DAYS_PER_YEAR / 365)
+    bars -= 1  # the forming candle is dropped (df.iloc[:-1])
+    assert bars > MAX_STRATEGY_LOOKBACK_BARS, (
+        f"live 1D period {period!r} yields ~{bars} bars, which does not cover the "
+        f"{MAX_STRATEGY_LOOKBACK_BARS}-bar guard — the F1 bug is back."
+    )
+    # The old value must not creep back: "150d" ≈ 102 bars was the actual bug.
+    assert bars >= 2 * MAX_STRATEGY_LOOKBACK_BARS, (
+        f"{period!r} ≈ {bars} bars only just clears the guard; indicators need warmup "
+        f"beyond it (a 200-SMA is NaN for its first 200 bars)."
+    )
+
+
+# ── Audit 2026-07-15 F2 — Episodic_Pivot could never emit a signal ────────────
+
+def test_episodic_pivot_can_emit_a_signal():
+    """F2: the breakout test must run BEFORE this bar's high joins the consolidation range.
+
+    The original code raised `consolidation_high` to include `highs[i]` and then tested
+    `close > consolidation_high`, which reduces to `close[i] > high[i]` — impossible by
+    OHLC definition. The strategy was mathematically incapable of a signal: 15 stored
+    reports, 0 trades, ever. Nothing errored; it just silently did nothing.
+
+    Fixture: a clean gap-and-go — big gap up, a few quiet consolidation days, then a
+    close above the consolidation high. That MUST produce a signal.
+    """
+    from strategies.swing.episodic_pivot import EpisodicPivotStrategy
+
+    o = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100]
+    h = [101, 101, 101, 101, 101, 101, 101, 101, 101, 101]
+    l = [ 99,  99,  99,  99,  99,  99,  99,  99,  99,  99]
+    c = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100]
+    # bar 10: gap up ~20% and hold; bars 11-13 consolidate under 126; bar 14 breaks out.
+    o += [120, 123, 122, 123, 124]
+    h += [125, 126, 125, 126, 130]
+    l += [119, 121, 121, 122, 123]
+    c += [124, 123, 123, 124, 129]   # 129 > the 126 consolidation high -> breakout
+    idx = pd.date_range("2024-01-01", periods=len(o), freq="B")
+    df = pd.DataFrame({"Open": o, "High": h, "Low": l, "Close": c,
+                       "Volume": [10000] * len(o)}, index=idx)
+
+    out = EpisodicPivotStrategy().generate_signals(df)
+    sig = out["signal"].to_numpy()
+    assert (sig > 0).any(), (
+        "Episodic_Pivot emitted no signal on a textbook gap-and-go — the F2 bug is back "
+        "(the breakout test is comparing close against a high that already includes this bar)."
+    )
+    # Geometry must be executable or simulate() discards it as invalid anyway.
+    i = int(np.argmax(sig > 0))
+    assert out["stop_loss"].to_numpy()[i] < df["Close"].to_numpy()[i] < out["target"].to_numpy()[i]
