@@ -63,6 +63,14 @@ services:
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5174,https://trading-v2.pseo.cloud}"
       # Auto-select persistent denylist (strategies / SYMBOL|STRATEGY cells never re-promoted).
       AUTOSELECT_DENYLIST: ${AUTOSELECT_DENYLIST:-}
+      # Swing time-stop DISABLED (0). The 2026-07-15 V1-vs-V2 attribution measured it at
+      # -3.57pp mean ROI, hurting 15/16 strategies and cutting mean avgR 0.354 -> 0.108:
+      # a 3R target needs ~7.5 ATR, unreachable within 10 bars, so it exits flat on trades
+      # that were still working. Code default is 10/20/40 (backtest_config.py); this pins it
+      # off until N is re-tuned against the target. See agent-reports/2026-07-15-v1-v2-engine-audit.md.
+      TIME_STOP_BARS_SHORT_SWING: ${TIME_STOP_BARS_SHORT_SWING:-0}
+      TIME_STOP_BARS_MID_SWING: ${TIME_STOP_BARS_MID_SWING:-0}
+      TIME_STOP_BARS_LONG_POSITIONAL: ${TIME_STOP_BARS_LONG_POSITIONAL:-0}
       BROKER: ${BROKER:-dhan}
       DATA_SOURCE: ${DATA_SOURCE:-auto}
       DHAN_ACCESS_TOKEN: ${DHAN_ACCESS_TOKEN:-}
@@ -99,6 +107,11 @@ services:
       NESTJS_SIGNAL_URL: http://api:3000/api/signals/new
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
       API_KEY: ${API_KEY}
+      # Swing time-stop DISABLED (0) — must match the engine's value or live exits diverge
+      # from the backtest. See the engine service above for the rationale.
+      TIME_STOP_BARS_SHORT_SWING: ${TIME_STOP_BARS_SHORT_SWING:-0}
+      TIME_STOP_BARS_MID_SWING: ${TIME_STOP_BARS_MID_SWING:-0}
+      TIME_STOP_BARS_LONG_POSITIONAL: ${TIME_STOP_BARS_LONG_POSITIONAL:-0}
       BROKER: ${BROKER:-dhan}
       DATA_SOURCE: ${DATA_SOURCE:-auto}
       DHAN_ACCESS_TOKEN: ${DHAN_ACCESS_TOKEN:-}
