@@ -11,7 +11,7 @@ import httpx
 import pandas as pd
 import pandas_ta as ta
 import yfinance as yf
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timezone, date
 import pytz
 from sqlalchemy import text
 from dotenv import load_dotenv
@@ -239,6 +239,25 @@ def get_recent_daily_candles(symbol: str, n: int = 30) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def entry_date_ist(entry_time_raw) -> date | None:
+    """IST calendar date of a trade's entry, from the API's ISO timestamp.
+
+    The API serialises `Trade.entryTime` as UTC ISO ('...Z'); the swing time-stop
+    counts DAILY candles, whose index is IST trading days, so the two must be
+    compared in the same zone. Returns None if unparseable (caller skips the stop
+    rather than guessing a date and closing a trade early).
+    """
+    if not entry_time_raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(entry_time_raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(IST).date()
+    except (TypeError, ValueError):
+        return None
+
+
 def update_trailing_sl(signal_id: int, new_sl: float, state: str, peak_price: float = None):
     """Send PATCH request to NestJS to update the trailing stop loss."""
     base_url = NESTJS_URL.replace('/signals/new', '/signals')
@@ -382,8 +401,12 @@ def auto_close_signals(cache):
                 # DAILY ATR — not the 15m recent_df — so the chandelier trail matches
                 # the backtest (SWING_TRAIL_ATR_PERIOD on daily bars). Previously this
                 # read the 15m series and produced an all-NaN ATR, so the trail was dead.
-                from backtest_config import trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD
-                daily_df = get_recent_daily_candles(symbol)
+                from backtest_config import (
+                    trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD, time_stop_bars_for_bucket,
+                )
+                # n=90 (not the 30 default): LONG_POSITIONAL's time-stop counts up to
+                # 40 bars, so a 30-bar window could never reach it.
+                daily_df = get_recent_daily_candles(symbol, n=90)
                 if not daily_df.empty and len(daily_df) > SWING_TRAIL_ATR_PERIOD:
                     try:
                         atr_series = ta.atr(
@@ -401,6 +424,26 @@ def auto_close_signals(cache):
                     if sl_better:
                         update_trailing_sl(signal_id, new_sl, "TRAILING", peak)
                         sl = new_sl
+
+                # ── Time-stop (F3): exit flat after N daily bars held ──
+                # Mirrors the swing walk in strategies/base.py. "N bars held, neither
+                # stop nor target hit" is only knowable once bar N has CLOSED, so this
+                # fires on the next session — the backtest's o[entry_idx + N + 1].
+                # Deliberately BEFORE the SL/TP block below (which is gated on
+                # `not should_close`) so both sides agree on which bar ends the trade.
+                # Needs a parseable entry date and real candles; without either we
+                # leave the trade alone rather than close it on a guess.
+                time_stop_bars = time_stop_bars_for_bucket(hold_duration)
+                entry_day = entry_date_ist(trade.get('entryTime'))
+                if time_stop_bars is not None and entry_day and not daily_df.empty:
+                    bars_held = int((daily_df.index.date > entry_day).sum())
+                    if bars_held >= time_stop_bars:
+                        should_close = True
+                        exit_price = latest_price
+                        close_reason = (
+                            f"TIME-STOP ({hold_duration}: held {bars_held} bars "
+                            f">= {time_stop_bars})"
+                        )
 
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             # SL / TP / Intraday Hit Check

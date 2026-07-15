@@ -33,8 +33,9 @@ def _i(name: str, default: int) -> int:
 
 # Version tag stamped on every BacktestReport (see reports.save_report). BUMP this
 # whenever the fill/exit model changes so stored reports produced by an older engine
-# are identifiable — they won't reproduce. Current model: C3 (live intraday exits).
-ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.07.13-c3")
+# are identifiable — they won't reproduce. Current model: C3 (live intraday exits) + F3
+# (swing time-stop).
+ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.07.15-f3")
 
 
 # Buying-power multiple by hold bucket. Intraday (MIS) deploys ~5× the cell fund as
@@ -205,3 +206,32 @@ def uses_trailing_exit(bucket: str | None) -> bool:
 
 def trail_mult_for_bucket(bucket: str | None) -> float:
     return TRAIL_ATR_MULT_BY_BUCKET.get(bucket, 5.0)
+
+
+# --- Swing time-stop by hold bucket (audit F3) --------------------------------
+# A swing that neither stops out nor reaches target just hogs its cell's fund
+# (INFY·Channel_Oscillation sat open 3 weeks). Exit flat after N bars held.
+# Every swing/mid/long strategy is 1D (see strategies.STRATEGY_TIMEFRAMES), so
+# "N bars" == "N trading days" — which is what lets live count completed daily
+# candles and stay in parity with the backtest's bar walk.
+# INTRADAY is deliberately absent: the 15:15 square-off already bounds it.
+# 0 / negative disables the stop for that bucket. Env: TIME_STOP_BARS_MID_SWING=0.
+# MUST stay mirrored in scanner/live_scanner.auto_close_signals or backtest≠live.
+TIME_STOP_BARS_BY_BUCKET = {
+    "SHORT_SWING": _i("TIME_STOP_BARS_SHORT_SWING", 10),
+    "MID_SWING": _i("TIME_STOP_BARS_MID_SWING", 20),
+    "LONG_POSITIONAL": _i("TIME_STOP_BARS_LONG_POSITIONAL", 40),
+}
+
+
+def time_stop_bars_for_bucket(bucket: str | None) -> int | None:
+    """Bars to hold a swing before exiting flat, or None if this bucket is unbounded.
+
+    Exit convention (backtest AND live): the condition "N bars held, neither stop
+    nor target hit" is only knowable once bar N has CLOSED, so the exit lands on
+    bar N+1 — same reasoning as RiskConfig.next_bar_entry. Backtest exits at
+    o[entry_idx + N + 1]; live exits at the first poll once N completed daily
+    candles exist after the entry date, which is that same session.
+    """
+    n = TIME_STOP_BARS_BY_BUCKET.get(bucket) if bucket else None
+    return n if n and n > 0 else None

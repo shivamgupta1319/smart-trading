@@ -6,7 +6,7 @@ import pandas as pd
 
 from backtest_config import (
     RISK, CostModel, uses_trailing_exit, trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD,
-    LEVERAGE_INTRADAY, LEVERAGE_DELIVERY, RISK_PER_TRADE_PCT,
+    LEVERAGE_INTRADAY, LEVERAGE_DELIVERY, RISK_PER_TRADE_PCT, time_stop_bars_for_bucket,
 )
 from intraday_exits import (
     PHASE2_TRIGGER, PHASE3_TRIGGER, REVERSAL_ZONE_START,
@@ -131,6 +131,9 @@ class BaseStrategy(ABC):
         trailing = uses_trailing_exit(_bucket)
         atr = _atr_array(h, low, c, SWING_TRAIL_ATR_PERIOD) if trailing else None
         trail_mult = trail_mult_for_bucket(_bucket)
+        # Bars to hold a swing before exiting flat (None = unbounded). Mirrored in
+        # scanner/live_scanner.auto_close_signals — see backtest_config (audit F3).
+        time_stop_bars = time_stop_bars_for_bucket(_bucket)
         # A single-cell backtest simulates ONE portfolio slot (₹10k) traded
         # repeatedly, so its P&L/ROI is comparable to one live slot rather than
         # to the whole ₹1L account.
@@ -226,6 +229,18 @@ class BaseStrategy(ABC):
                         break
                     if hit_tp:
                         exit_price, exit_idx = tp, j
+                        break
+                    # Time-stop (F3): N bars held, neither stop nor target hit. The
+                    # condition is only knowable once bar j has CLOSED, so the exit
+                    # lands on the NEXT bar's open — the session in which live's first
+                    # poll fires it. live_scanner.auto_close_signals mirrors this by
+                    # checking the time-stop BEFORE its SL/TP check, so the two agree
+                    # on which bar ends the trade.
+                    if time_stop_bars is not None and (j - entry_idx) >= time_stop_bars:
+                        if j + 1 < n:
+                            exit_price, exit_idx = o[j + 1], j + 1
+                        else:
+                            exit_price, exit_idx = c[j], j  # series ends → mark to close
                         break
                     # Ratchet the trailing stop using THIS bar's extreme, applied to
                     # the NEXT bar (so no intrabar lookahead).
