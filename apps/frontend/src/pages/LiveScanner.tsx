@@ -18,11 +18,23 @@ interface BacktestSnapshot {
   createdAt: string;
 }
 
+/** Mirrors AUTOSELECT_MIN_TRADES (auto_select.py, default 10) — the sample size below
+ *  which auto-select refuses to promote a cell. Under it, avgR is noise, not edge:
+ *  Golden_Cross showed avgR 4.722 off ONE trade in five years. The UI must not present
+ *  that as a cell's best number just because it sorts highest. */
+const MIN_TRADES_FOR_EDGE = 10;
+
 /** Net profit per rupee risked. Unlike ROI it's independent of position size, holding
  *  period and compounding, so it's the only column comparable across buckets — a 1D
  *  cell's ROI covers ~5y while a 15m cell's covers ~4.7mo. */
-const edgeColor = (r: number) =>
-  r >= 0.3 ? "var(--green)" : r > 0.05 ? "var(--text)" : "var(--red)";
+const edgeColor = (r: number, trades: number) =>
+  trades < MIN_TRADES_FOR_EDGE
+    ? "var(--text-muted)" // too few trades to mean anything — don't dress it up
+    : r >= 0.3
+      ? "var(--green)"
+      : r > 0.05
+        ? "var(--text)"
+        : "var(--red)";
 
 /** Raw ROI is cumulative over whatever history is stored, so it is NOT comparable
  *  between a 5-year swing cell and a 4.7-month intraday one. Divide by the measured
@@ -731,18 +743,26 @@ export function LiveScanner() {
                                   textAlign: "right",
                                   color:
                                     bt.avgRMultiple === null
-                                      ? "var(--muted)"
-                                      : edgeColor(bt.avgRMultiple),
+                                      ? "var(--text-muted)"
+                                      : edgeColor(bt.avgRMultiple, bt.totalTrades),
                                 }}
                                 title={
                                   bt.avgRMultiple === null
                                     ? "Not stored yet — re-run this backtest to compute it."
-                                    : `${bt.avgRMultiple >= 0 ? "Gains" : "Loses"} ₹${Math.abs(bt.avgRMultiple).toFixed(3)} per ₹1 risked, per trade.`
+                                    : bt.totalTrades < MIN_TRADES_FOR_EDGE
+                                      ? `Only ${bt.totalTrades} trade(s) — too few to mean anything, however good the number looks. Auto-select ignores cells under ${MIN_TRADES_FOR_EDGE}.`
+                                      : `${bt.avgRMultiple >= 0 ? "Gains" : "Loses"} ₹${Math.abs(bt.avgRMultiple).toFixed(3)} per ₹1 risked, per trade.`
                                 }
                               >
                                 {bt.avgRMultiple === null
                                   ? "—"
                                   : `${bt.avgRMultiple >= 0 ? "+" : ""}${bt.avgRMultiple.toFixed(3)}R`}
+                                {bt.avgRMultiple !== null &&
+                                  bt.totalTrades < MIN_TRADES_FOR_EDGE && (
+                                    <div style={{ fontSize: "0.7em", opacity: 0.8 }}>
+                                      low sample
+                                    </div>
+                                  )}
                               </td>
                               <td
                                 className="mono"
