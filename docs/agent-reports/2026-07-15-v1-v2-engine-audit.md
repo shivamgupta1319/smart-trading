@@ -152,9 +152,42 @@ Calmar uses annualised return.
   ÷5 ⇒ ~50 usable bars, ÷12 ⇒ 0 signals) ⇒ spurious OOS rejection. Plausibly why only 4/589 passed.
 - **F9** — SHORT_SWING trail starts at `entry−6×ATR`, **below** a ~2.5 ATR stop ⇒ near-dead; costs
   −0.63pp overall (and −2.98 on SuperTrend_EMA).
-- **F10** `qty = max(1, …)` breaches the risk cap on high-priced stocks. **F11** bare `except` in
-  `_hold_bucket` silently disables long-only+time-stop+trail+target-R. **F12**
-  `backtest_config.py:57-62` cites an API constant that no longer exists.
+- **F11** bare `except` in `_hold_bucket` silently disables long-only+time-stop+trail+target-R.
+  **F12** `backtest_config.py:57-62` cites an API constant that no longer exists.
+
+### F10 — **re-rated P3 → P1**: the risk cap is already being breached today
+
+Not theoretical. `base.py:200` forces at least one share, so on a ₹10k cell at 1× (swing) any
+stock priced above `₹200 / stop%` risks more than the 2% cap. **3 of the original 19 already
+breach it**: MTARTECH (₹6,640 → 3.3% risked), NETWEB (₹4,372 → 2.2%), DATAPATTNS (₹4,190 →
+2.1%). It degrades fast with price — POWERINDIA at **₹33,980 is 3.4× the entire fund for one
+share** and would risk **₹1,699 = 17% of the cell** in a single trade, 8.5× the cap.
+
+Found while expanding the universe, which therefore applies a **₹4,000 price ceiling**
+(= `200 / 0.05`, a typical 5% swing stop) as a stopgap — excluding 9 otherwise-liquid names
+(MARUTI, DIXON, TITAN, ULTRACEMCO, INDIGO, HAL, EICHERMOT, POWERINDIA, PERSISTENT).
+
+**Fix:** let `qty = 0` skip the trade instead of forcing a share — a trade that cannot be sized
+within the risk budget is a trade that should not be taken — or scale the cell fund by price.
+Then drop the ceiling. Until then the ceiling must stay or sizing silently lies.
+
+### F13 (new, P2) — the universe was too small to tell edge from luck
+
+19 stocks meant every per-strategy verdict rested on 19 samples, so any strategy's best cell is
+mostly noise — exactly how `SMA44_Pullback`'s "12.94% on MTARTECH" got read as good when the
+strategy averages **−1.15%** across all 19.
+
+**Resolved 2026-07-15: universe expanded 19 → 60.** Chosen by *measured* median daily traded
+value (price × volume — raw share volume misleads; median so one news-day spike can't fake it)
+over 6 months across all **2,316** NSE names, not by reputation. Findings: the original 19 were
+mostly genuinely liquid (**HDFCBANK ranks #1 in all of NSE**) but omitted nearly every blue chip
+(ICICIBANK #2, RELIANCE #3, SBIN #4, TCS #10, LT #12, ITC #25) — now added. **`AETHER` is a clear
+outlier at rank #427 / ₹27cr per day** when the next-worst holding is #176; worth reconsidering.
+
+Stock rows only — `ActiveConfiguration` stayed at **65**, so nothing went live and no money moved.
+All 60 backfilled (41 OK / 0 fail; 462k bars, no stock missing 1D). Applied via
+`infra/scripts/expand-stock-universe-2026-07-15.sql`. Note this multiplies the F1/F2/F7 dead cells
+too, and a full Run All is now ~1,860 cells (60 × 31).
 
 ### RETRACTED — F6 ("the R-target override destroys structural targets")
 
