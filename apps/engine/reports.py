@@ -17,22 +17,47 @@ from backtest_config import ENGINE_VERSION
 _UPSERT = text("""
     INSERT INTO "BacktestReport"
       ("stockId", "strategyName", "timeframe", "winRate", "totalTrades",
-       "maxDrawdown", "netProfit", "roiPercentage", "engineVersion",
+       "maxDrawdown", "netProfit", "roiPercentage", "avgRMultiple", "profitFactor",
+       "maxDrawdownPct", "expectancy", "spanYears", "engineVersion",
        "createdAt", "updatedAt")
-    VALUES (:sid, :sn, :tf, :wr, :tt, :md, :np, :roi, :ev, NOW(), NOW())
+    VALUES (:sid, :sn, :tf, :wr, :tt, :md, :np, :roi, :ar, :pf, :mdp, :ex, :sy, :ev,
+            NOW(), NOW())
     ON CONFLICT ("stockId", "strategyName", "timeframe") DO UPDATE SET
-      "winRate"       = EXCLUDED."winRate",
-      "totalTrades"   = EXCLUDED."totalTrades",
-      "maxDrawdown"   = EXCLUDED."maxDrawdown",
-      "netProfit"     = EXCLUDED."netProfit",
-      "roiPercentage" = EXCLUDED."roiPercentage",
-      "engineVersion" = EXCLUDED."engineVersion",
-      "updatedAt"     = NOW()
+      "winRate"        = EXCLUDED."winRate",
+      "totalTrades"    = EXCLUDED."totalTrades",
+      "maxDrawdown"    = EXCLUDED."maxDrawdown",
+      "netProfit"      = EXCLUDED."netProfit",
+      "roiPercentage"  = EXCLUDED."roiPercentage",
+      "avgRMultiple"   = EXCLUDED."avgRMultiple",
+      "profitFactor"   = EXCLUDED."profitFactor",
+      "maxDrawdownPct" = EXCLUDED."maxDrawdownPct",
+      "expectancy"     = EXCLUDED."expectancy",
+      "spanYears"      = EXCLUDED."spanYears",
+      "engineVersion"  = EXCLUDED."engineVersion",
+      "updatedAt"      = NOW()
 """)
 
 
+def _f(metrics: dict, key: str):
+    """Optional float — None (not 0.0) when a writer didn't supply the metric, so the
+    column reads as "not computed" rather than asserting a zero edge / zero drawdown."""
+    v = metrics.get(key)
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def save_report(conn, stock_id: int, strategy_name: str, timeframe: str, metrics: dict) -> None:
-    """UPSERT the latest backtest metrics for one cell, stamped ENGINE_VERSION."""
+    """UPSERT the latest backtest metrics for one cell, stamped ENGINE_VERSION.
+
+    Persists the EDGE metrics too (avgRMultiple/profitFactor/maxDrawdownPct/expectancy
+    + spanYears). They were computed and dropped before — leaving roiPercentage, which
+    is raw-cumulative and window-dependent, as the only thing the UI and leaderboard
+    could rank on (audit 2026-07-15 F3).
+    """
     conn.execute(_UPSERT, {
         "sid": stock_id,
         "sn": strategy_name,
@@ -42,5 +67,10 @@ def save_report(conn, stock_id: int, strategy_name: str, timeframe: str, metrics
         "md": float(metrics["maxDrawdown"]),
         "np": float(metrics["netProfit"]),
         "roi": float(metrics["roiPercentage"]),
+        "ar": _f(metrics, "avgRMultiple"),
+        "pf": _f(metrics, "profitFactor"),
+        "mdp": _f(metrics, "maxDrawdownPct"),
+        "ex": _f(metrics, "expectancy"),
+        "sy": _f(metrics, "spanYears"),
         "ev": ENGINE_VERSION,
     })

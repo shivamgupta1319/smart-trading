@@ -83,11 +83,31 @@ class BaseStrategy(ABC):
     def run_backtest(self, df: pd.DataFrame) -> dict:
         """Run a realistic backtest and return aggregate metrics."""
         sim = self.simulate(df)
-        return self._metrics(
+        m = self._metrics(
             sim["net_trades"], sim["gross_trades"], sim["total_costs"],
             sim["max_dd"], sim["max_dd_pct"], sim["skipped_invalid"],
             sim["r_trades"],
         )
+        m["spanYears"] = self._span_years(df)
+        return m
+
+    @staticmethod
+    def _span_years(df: pd.DataFrame) -> float:
+        """Calendar years the bars actually cover — measured, not assumed per timeframe.
+
+        roiPercentage is raw cumulative over whatever history happens to be stored, and
+        that window differs ~13× between buckets (1D fetches 5y, 15m/5m 60d), so the
+        same "19%" is ~3.7%/yr on a swing cell but ~49%/yr on an intraday one. Reporting
+        this alongside lets ROI be annualised honestly and compared across buckets.
+        Returns 0.0 when the span isn't derivable (callers must treat it as unknown).
+        """
+        try:
+            if len(df) < 2 or not isinstance(df.index, pd.DatetimeIndex):
+                return 0.0
+            days = (df.index[-1] - df.index[0]).total_seconds() / 86400.0
+            return round(days / 365.25, 4) if days > 0 else 0.0
+        except (TypeError, ValueError, AttributeError):
+            return 0.0
 
     def simulate(self, df: pd.DataFrame) -> dict:
         """Run the realistic fill simulation and return per-trade P&L lists.

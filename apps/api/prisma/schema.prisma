@@ -61,6 +61,20 @@ model BacktestReport {
   netProfit    Float
   maxDrawdown  Float
   roiPercentage Float
+  // Edge metrics (audit 2026-07-15 F3). The engine always computed these; they were
+  // dropped on write, leaving roiPercentage — raw-cumulative and window-dependent —
+  // as the only column anything could rank on. avgRMultiple is the honest one: net
+  // P&L per rupee risked, independent of compounding, horizon and position size.
+  // Nullable because pre-existing rows genuinely don't know them (0 would assert
+  // "zero edge"); they fill in on the next backtest run.
+  avgRMultiple   Float?
+  profitFactor   Float?
+  maxDrawdownPct Float?
+  expectancy     Float?
+  // Calendar years the cell's bars actually span, measured from the data rather than
+  // assumed per timeframe — so ROI can be annualised honestly (1D ≈ 5.1y vs 15m/5m
+  // ≈ 4.7mo made raw ROI ~13× incomparable across buckets).
+  spanYears      Float?
   // Engine model version that produced these numbers. Bumped when the fill/exit
   // model changes (e.g. C3), so stored reports that won't reproduce are identifiable.
   engineVersion String  @default("unversioned")

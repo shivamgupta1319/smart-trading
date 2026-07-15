@@ -11,8 +11,24 @@ interface BacktestSnapshot {
   netProfit: number;
   maxDrawdown: number;
   roiPercentage: number;
+  // Nullable: rows written before the 2026-07-15 fix never stored these — they fill
+  // in on the next re-run. Render "—" rather than 0, which would read as "no edge".
+  avgRMultiple: number | null;
+  spanYears: number | null;
   createdAt: string;
 }
+
+/** Net profit per rupee risked. Unlike ROI it's independent of position size, holding
+ *  period and compounding, so it's the only column comparable across buckets — a 1D
+ *  cell's ROI covers ~5y while a 15m cell's covers ~4.7mo. */
+const edgeColor = (r: number) =>
+  r >= 0.3 ? "var(--green)" : r > 0.05 ? "var(--text)" : "var(--red)";
+
+/** Raw ROI is cumulative over whatever history is stored, so it is NOT comparable
+ *  between a 5-year swing cell and a 4.7-month intraday one. Divide by the measured
+ *  span. Returns null when the span is unknown (old rows) — never guess. */
+const roiPerYear = (bt: BacktestSnapshot) =>
+  bt.spanYears && bt.spanYears > 0 ? bt.roiPercentage / bt.spanYears : null;
 
 interface Config {
   id: number;
@@ -647,8 +663,19 @@ export function LiveScanner() {
                       <th>Timeframe</th>
                       <th style={{ textAlign: "right" }}>Win Rate</th>
                       <th style={{ textAlign: "right" }}>Trades</th>
+                      <th
+                        style={{ textAlign: "right" }}
+                        title="Average R-multiple: net profit per ₹1 risked. The honest edge metric — independent of position size, holding period and compounding, so it's comparable across strategies and timeframes (ROI is not). Above 0.05 = real edge."
+                      >
+                        Edge (avgR)
+                      </th>
                       <th style={{ textAlign: "right" }}>Net Profit</th>
-                      <th style={{ textAlign: "right" }}>ROI</th>
+                      <th
+                        style={{ textAlign: "right" }}
+                        title="Cumulative ROI over the cell's whole stored history, with the per-year rate beneath. 1D cells cover ~5 years and 15m/5m cells ~4.7 months, so only the per-year figure is comparable between them."
+                      >
+                        ROI
+                      </th>
                       <th style={{ textAlign: "right" }}>Max DD</th>
                       <th>Last Tested</th>
                       <th>Actions</th>
@@ -703,6 +730,25 @@ export function LiveScanner() {
                                 style={{
                                   textAlign: "right",
                                   color:
+                                    bt.avgRMultiple === null
+                                      ? "var(--muted)"
+                                      : edgeColor(bt.avgRMultiple),
+                                }}
+                                title={
+                                  bt.avgRMultiple === null
+                                    ? "Not stored yet — re-run this backtest to compute it."
+                                    : `${bt.avgRMultiple >= 0 ? "Gains" : "Loses"} ₹${Math.abs(bt.avgRMultiple).toFixed(3)} per ₹1 risked, per trade.`
+                                }
+                              >
+                                {bt.avgRMultiple === null
+                                  ? "—"
+                                  : `${bt.avgRMultiple >= 0 ? "+" : ""}${bt.avgRMultiple.toFixed(3)}R`}
+                              </td>
+                              <td
+                                className="mono"
+                                style={{
+                                  textAlign: "right",
+                                  color:
                                     bt.netProfit >= 0
                                       ? "var(--green)"
                                       : "var(--red)",
@@ -723,6 +769,17 @@ export function LiveScanner() {
                               >
                                 {bt.roiPercentage >= 0 ? "+" : ""}
                                 {bt.roiPercentage}%
+                                {roiPerYear(bt) !== null && (
+                                  <div
+                                    style={{
+                                      fontSize: "0.75em",
+                                      opacity: 0.7,
+                                      color: "var(--text)",
+                                    }}
+                                  >
+                                    {roiPerYear(bt)!.toFixed(1)}%/yr
+                                  </div>
+                                )}
                               </td>
                               <td
                                 className="mono"
@@ -746,7 +803,7 @@ export function LiveScanner() {
                             </>
                           ) : (
                             <td
-                              colSpan={6}
+                              colSpan={7}
                               style={{
                                 color: "var(--text-muted)",
                                 fontSize: "0.8rem",

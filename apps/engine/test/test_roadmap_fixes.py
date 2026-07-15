@@ -222,3 +222,64 @@ def test_intraday_is_untouched_by_the_time_stop():
     import backtest_config as bc
 
     assert "INTRADAY" not in bc.TIME_STOP_BARS_BY_BUCKET
+
+
+# ── Audit 2026-07-15 F3 — persist the honest edge metrics ─────────────────────
+
+def test_run_backtest_reports_measured_span_years():
+    """spanYears must be MEASURED from the bars, not assumed per timeframe: raw ROI is
+    cumulative over whatever history is stored (1D ≈ 5.1y vs 15m/5m ≈ 4.7mo), so the UI
+    can only annualise honestly if the engine reports the actual span."""
+    class _Noop(BaseStrategy):
+        name, timeframe = "SPAN_PROBE", "1D"
+
+        def generate_signals(self, df):
+            df = df.copy()
+            df["signal"] = 0
+            df["stop_loss"] = 0.0
+            df["target"] = 0.0
+            return df
+
+    idx = pd.date_range("2021-01-01", "2026-01-01", freq="D")
+    df = pd.DataFrame({"Open": 100.0, "High": 101.0, "Low": 99.0, "Close": 100.0,
+                       "Volume": 1000}, index=idx)
+    assert _Noop().run_backtest(df)["spanYears"] == pytest.approx(5.0, abs=0.02)
+
+    # Unknown rather than a wrong guess: no usable index → 0.0, and never raises
+    # (a backtest must not die because the span can't be derived).
+    assert _Noop().run_backtest(df.reset_index(drop=True))["spanYears"] == 0.0
+    assert _Noop().run_backtest(df.iloc[:1])["spanYears"] == 0.0
+
+
+def test_metrics_expose_the_edge_fields_reports_persists():
+    """The four edge metrics + spanYears must be present on EVERY run_backtest result —
+    reports.save_report writes exactly these, and they were silently dropped before
+    (F3), leaving roiPercentage as the only rankable column."""
+    df = _flat_swing_frame()
+    m = _SwingHold().run_backtest(df)
+    for k in ("avgRMultiple", "profitFactor", "maxDrawdownPct", "expectancy",
+              "spanYears", "roiPercentage", "totalTrades"):
+        assert k in m, f"{k} missing from run_backtest metrics"
+    assert m["totalTrades"] == 1
+    # avgR is net ÷ rupees risked — sign must agree with the trade's P&L, and it is
+    # NOT the ROI (different denominators: risk vs the ₹10k fund).
+    assert m["avgRMultiple"] > 0
+    assert m["avgRMultiple"] != m["roiPercentage"]
+
+
+def test_zero_trade_cell_still_reports_every_field():
+    """A 0-trade cell must not omit keys — save_report would KeyError on the UPSERT."""
+    class _NoSignal(BaseStrategy):
+        name, timeframe = "NO_SIGNAL", "1D"
+
+        def generate_signals(self, df):
+            df = df.copy()
+            df["signal"] = 0
+            df["stop_loss"] = 0.0
+            df["target"] = 0.0
+            return df
+
+    m = _NoSignal().run_backtest(_flat_swing_frame())
+    assert m["totalTrades"] == 0
+    for k in ("avgRMultiple", "profitFactor", "maxDrawdownPct", "expectancy", "spanYears"):
+        assert k in m
