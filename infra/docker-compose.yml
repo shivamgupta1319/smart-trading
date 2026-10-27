@@ -80,6 +80,8 @@ services:
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ${HTPASSWD_FILE:-../../edge/.htpasswd}:/etc/nginx/.htpasswd:ro
+      # Public landing page served at / (see nginx/default.conf).
+      - ./landing:/usr/share/nginx/landing:ro
 
   scanner:
     image: shivam13gupta/smart-trading-engine:latest   # same image as engine, different command
