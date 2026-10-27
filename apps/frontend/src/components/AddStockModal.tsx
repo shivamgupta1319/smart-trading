@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API = 'http://localhost:3000';
+const API = '';
 
 interface NseStock {
   id: number;

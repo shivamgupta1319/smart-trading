@@ -14,6 +14,7 @@ class PDHPDLBreakoutStrategy(BaseStrategy):
     timeframe = "5m"
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
         if df.empty or len(df) < 10:
             return df
 
@@ -23,46 +24,33 @@ class PDHPDLBreakoutStrategy(BaseStrategy):
         df['Date'] = df.index.date
         
         # Calculate daily aggregates
-        daily_data = df.groupby('Date').agg({
-            'High': 'max',
-            'Low': 'min'
-        }).shift(1) # Shift 1 to get previous day's data
+        daily_highs = df.groupby('Date')['High'].max().shift(1)
+        daily_lows = df.groupby('Date')['Low'].min().shift(1)
         
-        df['PDH'] = pd.Series(index=df.index, dtype=float)
-        df['PDL'] = pd.Series(index=df.index, dtype=float)
-        
-        for date, row in daily_data.iterrows():
-            mask = df['Date'] == date
-            df.loc[mask, 'PDH'] = row['High']
-            df.loc[mask, 'PDL'] = row['Low']
+        df['PDH'] = df['Date'].map(daily_highs)
+        df['PDL'] = df['Date'].map(daily_lows)
 
         df['signal'] = 0
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        for i in range(1, len(df)):
-            pdh = df['PDH'].iloc[i]
-            pdl = df['PDL'].iloc[i]
-            
-            if pd.isna(pdh) or pd.isna(pdl):
-                continue
-                
-            close = df['Close'].iloc[i]
-            prev_close = df['Close'].iloc[i-1]
-            low = df['Low'].iloc[i]
-            high = df['High'].iloc[i]
+        prev_close = df['Close'].shift(1)
 
-            # Long breakout: previous close below PDH, current close above PDH
-            if prev_close <= pdh and close > pdh:
-                df.at[df.index[i], 'signal'] = 1
-                df.at[df.index[i], 'stop_loss'] = low - (close * 0.002) # Stop below entry candle
-                df.at[df.index[i], 'target'] = close + (close - df.at[df.index[i], 'stop_loss']) * 2
+        # Long breakout: previous close below PDH, current close above PDH
+        bullish_cond = (prev_close <= df['PDH']) & (df['Close'] > df['PDH'])
 
-            # Short breakout: previous close above PDL, current close below PDL
-            elif prev_close >= pdl and close < pdl:
-                df.at[df.index[i], 'signal'] = -1
-                df.at[df.index[i], 'stop_loss'] = high + (close * 0.002) # Stop above entry candle
-                df.at[df.index[i], 'target'] = close - (df.at[df.index[i], 'stop_loss'] - close) * 2
+        # Short breakout: previous close above PDL, current close below PDL
+        bearish_cond = (prev_close >= df['PDL']) & (df['Close'] < df['PDL'])
+
+        df.loc[bullish_cond, 'signal'] = 1
+        sl_bull = df['Low'] - (df['Close'] * 0.002)
+        df.loc[bullish_cond, 'stop_loss'] = sl_bull[bullish_cond]
+        df.loc[bullish_cond, 'target'] = df['Close'][bullish_cond] + (df['Close'][bullish_cond] - sl_bull[bullish_cond]) * 2
+
+        df.loc[bearish_cond, 'signal'] = -1
+        sl_bear = df['High'] + (df['Close'] * 0.002)
+        df.loc[bearish_cond, 'stop_loss'] = sl_bear[bearish_cond]
+        df.loc[bearish_cond, 'target'] = df['Close'][bearish_cond] - (sl_bear[bearish_cond] - df['Close'][bearish_cond]) * 2
 
         df.drop(columns=['Date', 'PDH', 'PDL'], inplace=True)
         return df

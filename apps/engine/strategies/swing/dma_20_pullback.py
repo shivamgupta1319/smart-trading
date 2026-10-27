@@ -15,7 +15,11 @@ class DMA20PullbackStrategy(BaseStrategy):
     timeframe = "1D"
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
         if df.empty or len(df) < 50:
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
             return df
 
         df['SMA_20'] = ta.sma(df['Close'], length=20)
@@ -26,27 +30,23 @@ class DMA20PullbackStrategy(BaseStrategy):
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        for i in range(1, len(df)):
-            close = df['Close'].iloc[i]
-            open_p = df['Open'].iloc[i]
-            low = df['Low'].iloc[i]
-            vol = df['Volume'].iloc[i]
-            
-            sma20 = df['SMA_20'].iloc[i]
-            sma50 = df['SMA_50'].iloc[i]
-            vol_sma = df['Vol_SMA'].iloc[i]
+        # Uptrend condition
+        uptrend = (df['SMA_20'] > df['SMA_50']) & (df['Close'] > df['SMA_50'])
+        
+        # Pullback to 20 DMA
+        pullback = (df['Low'] <= df['SMA_20']) & (df['Close'] > df['SMA_20']) & (df['Close'] > df['Open'])
+        
+        # Lower than average volume
+        low_vol = df['Volume'] < (df['Vol_SMA'] * 1.2)
 
-            if pd.isna(sma50):
-                continue
+        bullish_cond = uptrend & pullback & low_vol
 
-            # Uptrend condition
-            if sma20 > sma50 and close > sma50:
-                # Pullback to 20 DMA
-                if low <= sma20 and close > sma20 and close > open_p:
-                    # Lower than average volume
-                    if vol < vol_sma * 1.2:
-                        df.at[df.index[i], 'signal'] = 1
-                        df.at[df.index[i], 'stop_loss'] = low * 0.98 # 2% below the low
-                        df.at[df.index[i], 'target'] = close + (close - df.at[df.index[i], 'stop_loss']) * 2
+        # Edge-trigger
+        prev_bullish = bullish_cond.shift(1, fill_value=False)
+        valid_bull = bullish_cond & ~prev_bullish
+
+        df.loc[valid_bull, 'signal'] = 1
+        df.loc[valid_bull, 'stop_loss'] = df['Low'][valid_bull] * 0.98
+        df.loc[valid_bull, 'target'] = df['Close'][valid_bull] + (df['Close'][valid_bull] - df['stop_loss'][valid_bull]) * 2
 
         return df

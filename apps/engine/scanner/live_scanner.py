@@ -1,4 +1,10 @@
-"""Live Scanner — polls yfinance every 60s during NSE market hours and fires signals."""
+"""Live Scanner — polls yfinance every 60s during NSE market hours and fires signals.
+
+Implements a 3-Layer Smart Exit System:
+  Layer 1 (Breakeven):    At 50% of target distance → SL moves to entry price
+  Layer 2 (Profit Lock):  At 75% of target distance → SL locks 40% of unrealized profit
+  Layer 3 (Reversal):     At 80%+ of target distance → detect reversal candle patterns → exit early
+"""
 import os
 import time
 import httpx
@@ -22,7 +28,34 @@ NESTJS_URL = os.getenv("NESTJS_SIGNAL_URL", "http://localhost:3000/api/signals/n
 IST = pytz.timezone("Asia/Kolkata")
 MARKET_OPEN = dtime(9, 15)
 MARKET_CLOSE = dtime(15, 30)
+# Square off intraday positions ourselves BEFORE Dhan's broker auto-square window
+# (starts ~15:18, forces close by 15:20 with a ₹20 penalty). Closing at 15:10 leaves
+# a comfortable margin so our own MARKET exit fills first and avoids that fee.
+SQUARE_OFF_TIME = dtime(15, 10)
 POLL_INTERVAL = 100  # seconds
+
+# ── Smart Trailing SL Configuration ──
+BREAKEVEN_THRESHOLD = 0.50   # Move SL to breakeven at 50% of target distance
+PROFIT_LOCK_THRESHOLD = 0.75 # Lock profit at 75% of target distance
+PROFIT_LOCK_PERCENT = 0.40   # Lock 40% of unrealized profit
+REVERSAL_ZONE_START = 0.80   # Start checking for reversals at 80% of target distance
+
+# Track trailing state per signal to avoid redundant API calls
+# {signal_id: "INITIAL" | "BREAKEVEN" | "PROFIT_LOCK"}
+trailing_state_cache = {}
+
+# ── Max-hold time-stop (calendar days) ──
+# Swings get a hard time-stop so positions can't drift open indefinitely;
+# INTRADAY/UNKNOWN get a safety net in case the 15:10 square-off was missed
+# (scanner down 15:15-15:30). Calendar-day based — weekends count, so limits
+# are a bit generous vs trading days. LONG_POSITIONAL is intentionally omitted
+# (no time-stop). Values chosen to flush the current stale opens immediately.
+MAX_HOLD_DAYS = {
+    "INTRADAY": 1,
+    "UNKNOWN": 1,
+    "SHORT_SWING": 5,
+    "MID_SWING": 20,
+}
 
 
 def is_market_open() -> bool:
@@ -45,7 +78,8 @@ def get_active_configs():
 def fetch_live_candles(symbol: str, timeframe: str) -> pd.DataFrame:
     yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
     interval_map = {"1D": "1d", "15m": "15m", "5m": "5m"}
-    period_map = {"1D": "150d", "15m": "10d", "5m": "5d"}
+    # 1D needs >=200 bars for sma200/ema200 indicators; "1y" ≈ 250 trading days.
+    period_map = {"1D": "1y", "15m": "10d", "5m": "5d"}
 
     interval = interval_map.get(timeframe, "15m")
     period = period_map.get(timeframe, "10d")
@@ -98,12 +132,19 @@ def check_and_fire_signal(config, cache, last_fired_times):
 
         hold_duration = STRATEGY_HOLD_DURATIONS.get(strategy_name, "UNKNOWN")
         
-        now = datetime.now()
-        if hold_duration == "INTRADAY" and now.hour >= 15:
+        now_ist = datetime.now(IST)
+        if hold_duration == "INTRADAY" and now_ist.hour >= 15:
             print(f"  [INFO] {symbol} ({strategy_name}): Skipped INTRADAY signal after 3:00 PM")
             return
 
         signal_type = "BUY" if latest['signal'] == 1 else "SELL"
+
+        # Cash-equity rule: no overnight shorts. Only INTRADAY strategies may go SELL
+        # (MIS, squared off same day); swing/positional strategies are long-only.
+        if signal_type == "SELL" and hold_duration != "INTRADAY":
+            print(f"  [SKIP] {symbol} ({strategy_name}): swing/positional SELL suppressed (cannot hold short overnight in cash equity)")
+            return
+
         payload = {
             "stockId": stock_id,
             "strategyName": strategy_name,
@@ -134,16 +175,190 @@ def get_live_price(symbol: str) -> float:
         print(f"  [ERROR] fetching live price for {symbol}: {e}")
         return None
 
+
+def get_recent_candles(symbol: str, n: int = 10) -> pd.DataFrame:
+    """Fetch the most recent N completed candles for reversal detection."""
+    yf_symbol = symbol if symbol.endswith(".NS") else symbol + ".NS"
+    try:
+        df = yf.download(yf_symbol, period="5d", interval="15m", progress=False, auto_adjust=True)
+        if df.empty:
+            return df
+        df = df.iloc[:-1]  # Exclude currently forming candle
+        df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        return df.tail(n)
+    except Exception as e:
+        print(f"  [ERROR] fetching recent candles for {symbol}: {e}")
+        return pd.DataFrame()
+
+
+def detect_reversal(df: pd.DataFrame, is_buy: bool) -> tuple[bool, str]:
+    """
+    Detect reversal patterns in recent candles.
+    Returns (is_reversal, reason_string).
+    
+    Checks for:
+    1. Bearish/Bullish Engulfing
+    2. Pin bar / long wick rejection
+    3. RSI divergence (price new high but RSI lower)
+    4. Volume spike + opposite direction candle
+    """
+    if df.empty or len(df) < 3:
+        return False, ""
+
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    body_latest = abs(latest['Close'] - latest['Open'])
+    body_prev = abs(prev['Close'] - prev['Open'])
+    
+    # Avoid division by zero
+    if body_latest == 0:
+        body_latest = 0.001
+
+    # ── Check 1: Engulfing Pattern ──
+    if is_buy:
+        # Bearish engulfing: prev was green, latest is red and body covers prev body
+        prev_green = prev['Close'] > prev['Open']
+        latest_red = latest['Close'] < latest['Open']
+        engulfing = (
+            prev_green and latest_red and
+            latest['Open'] >= prev['Close'] and
+            latest['Close'] <= prev['Open'] and
+            body_latest > body_prev
+        )
+        if engulfing:
+            return True, "Bearish Engulfing candle"
+    else:
+        # Bullish engulfing: prev was red, latest is green and body covers prev body
+        prev_red = prev['Close'] < prev['Open']
+        latest_green = latest['Close'] > latest['Open']
+        engulfing = (
+            prev_red and latest_green and
+            latest['Open'] <= prev['Close'] and
+            latest['Close'] >= prev['Open'] and
+            body_latest > body_prev
+        )
+        if engulfing:
+            return True, "Bullish Engulfing candle (reversal for SELL)"
+
+    # ── Check 2: Pin Bar / Long Wick Rejection ──
+    if is_buy:
+        # Upper wick much longer than body = rejection from highs
+        upper_wick = latest['High'] - max(latest['Open'], latest['Close'])
+        if upper_wick >= 2 * body_latest and latest['Close'] < latest['Open']:
+            return True, "Pin bar rejection from highs"
+    else:
+        # Lower wick much longer than body = rejection from lows
+        lower_wick = min(latest['Open'], latest['Close']) - latest['Low']
+        if lower_wick >= 2 * body_latest and latest['Close'] > latest['Open']:
+            return True, "Pin bar rejection from lows"
+
+    # ── Check 3: RSI Divergence (simplified) ──
+    if len(df) >= 5:
+        try:
+            rsi = ta.rsi(df['Close'], length=5)
+            if rsi is not None and len(rsi) >= 2:
+                rsi_latest = rsi.iloc[-1]
+                rsi_prev_max = rsi.iloc[:-1].max()
+                price_latest = latest['Close']
+                price_prev_max = df['Close'].iloc[:-1].max()
+                price_prev_min = df['Close'].iloc[:-1].min()
+                
+                if is_buy:
+                    # Price making new high but RSI not → bearish divergence
+                    if price_latest >= price_prev_max and rsi_latest < rsi_prev_max - 5:
+                        return True, "RSI bearish divergence"
+                else:
+                    # Price making new low but RSI not → bullish divergence
+                    rsi_prev_min = rsi.iloc[:-1].min()
+                    if price_latest <= price_prev_min and rsi_latest > rsi_prev_min + 5:
+                        return True, "RSI bullish divergence (reversal for SELL)"
+        except Exception:
+            pass  # RSI calculation can fail with insufficient data
+
+    # ── Check 4: Volume Exhaustion ──
+    if len(df) >= 5:
+        avg_vol = df['Volume'].iloc[:-1].mean()
+        if avg_vol > 0:
+            latest_vol = latest['Volume']
+            prev_vol = prev['Volume']
+            if latest_vol >= 1.8 * avg_vol or prev_vol >= 1.8 * avg_vol:
+                if is_buy and latest['Close'] < latest['Open']:
+                    return True, "Volume exhaustion (Bearish)"
+                elif not is_buy and latest['Close'] > latest['Open']:
+                    return True, "Volume exhaustion (Bullish)"
+
+    return False, ""
+
+
+def calculate_progress(entry: float, target: float, current: float, is_buy: bool) -> float:
+    """
+    Calculate how far price has moved from entry toward target (0.0 to 1.0+).
+    Returns negative if price moved against the trade.
+    """
+    total_distance = abs(target - entry)
+    if total_distance == 0:
+        return 0.0
+    
+    if is_buy:
+        moved = current - entry
+    else:
+        moved = entry - current
+    
+    return moved / total_distance
+
+
+def update_trailing_sl(signal_id: int, new_sl: float, state: str, peak_price: float = None):
+    """Send PATCH request to NestJS to update the trailing stop loss."""
+    base_url = NESTJS_URL.replace('/signals/new', '/signals')
+    payload = {
+        "newStopLoss": round(new_sl, 2),
+        "trailingState": state,
+    }
+    if peak_price is not None:
+        payload["peakPrice"] = round(peak_price, 2)
+    
+    try:
+        r = httpx.patch(f"{base_url}/{signal_id}/update-sl", json=payload, timeout=10)
+        if r.status_code == 200:
+            print(f"    ✅ Trailing SL updated: #{signal_id} → ₹{new_sl:.2f} ({state})")
+        else:
+            print(f"    ⚠️ Trailing SL update failed: {r.status_code}")
+    except Exception as e:
+        print(f"    [ERROR] updating trailing SL: {e}")
+
+
+def trade_age_days(entry_raw):
+    """Calendar-day age of a trade from its ISO entryTime string. None if unparseable (fails safe)."""
+    if not entry_raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(entry_raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = pytz.utc.localize(dt)  # Prisma stores UTC
+        return (datetime.now(IST) - dt.astimezone(IST)).total_seconds() / 86400.0
+    except Exception:
+        return None
+
+
 def auto_close_signals(cache):
+    """
+    Smart 3-Phase exit system:
+    - Phase 1 (0-49%): Original SL
+    - Phase 2 (50-74%): SL to Breakeven, book 35%
+    - Phase 3 (75-99%): Trail SL below candle lows, book 35%
+    - Reversal Detection (>=80%): Exit remaining on volume exhaustion
+    """
     api_url = NESTJS_URL.replace("/signals/new", "/signals/active")
     now_time = datetime.now(IST).time()
-    is_square_off_time = now_time >= dtime(15, 15)
+    is_square_off_time = now_time >= SQUARE_OFF_TIME
 
     try:
         r = httpx.get(api_url, timeout=10)
         if r.status_code != 200:
             return
         active_signals = r.json()
+        
         for sig in active_signals:
             symbol = sig.get('stock', {}).get('symbol') or sig.get('symbol')
             if not symbol:
@@ -153,50 +368,148 @@ def auto_close_signals(cache):
             if not latest_price:
                 continue
             
-            sl = float(sig['stopLoss'])
+            trade = sig.get('trade')
+            if not trade or trade['status'] != 'OPEN':
+                continue
+            
+            qty = int(trade['quantity'])
+            remaining_qty = int(trade.get('remainingQty', qty))
+            
+            if remaining_qty == 0:
+                continue
+            
+            entry = float(trade['entryPrice'])
+            sl = float(trade['stopLoss'])
             tp = float(sig['target'])
-            is_buy = sig['signalType'] == 'BUY'
+            is_buy = trade['signalType'] == 'BUY'
+            signal_id = sig['id']
+            
+            current_state = trade.get('trailingState', "INITIAL")
+            progress = calculate_progress(entry, tp, latest_price, is_buy)
             
             should_close = False
             exit_price = latest_price
             close_reason = ""
-
-            if is_buy:
-                if latest_price <= sl:
-                    should_close = True
-                    exit_price = sl
-                    close_reason = f"hit Stop Loss (₹{sl})"
-                elif latest_price >= tp:
-                    should_close = True
-                    exit_price = tp
-                    close_reason = f"hit Target (₹{tp})"
+            
+            recent_df = get_recent_candles(symbol)
+            if not recent_df.empty:
+                prev_low = recent_df['Low'].iloc[-2] if len(recent_df) >= 2 else recent_df['Low'].iloc[-1]
+                prev_high = recent_df['High'].iloc[-2] if len(recent_df) >= 2 else recent_df['High'].iloc[-1]
             else:
-                if latest_price >= sl:
-                    should_close = True
-                    exit_price = sl
-                    close_reason = f"hit Stop Loss (₹{sl})"
-                elif latest_price <= tp:
-                    should_close = True
-                    exit_price = tp
-                    close_reason = f"hit Target (₹{tp})"
+                prev_low = latest_price
+                prev_high = latest_price
+            
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # PHASE 1 -> PHASE 2 (50%+)
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            if current_state == "INITIAL" and progress >= 0.50:
+                current_state = "PHASE2"
+                be_sl = entry + (entry * 0.001) if is_buy else entry - (entry * 0.001)
+                sl_better = (is_buy and be_sl > sl) or (not is_buy and be_sl < sl)
+                
+                new_sl = be_sl if sl_better else sl
+                update_trailing_sl(signal_id, new_sl, "PHASE2", latest_price)
+                sl = new_sl
+                
+                if qty >= 3:
+                    print(f"  💰 PHASE 2 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
+                    httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{signal_id}/partial-close",
+                                json={"percent": 0.35, "exitPrice": latest_price, "reason": "Phase 2 Partial (50% Target)"}, timeout=10)
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # PHASE 2 -> PHASE 3 (75%+)
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            if current_state == "PHASE2" and progress >= 0.75:
+                current_state = "PHASE3"
+                trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
+                sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
+                
+                new_sl = trail_sl if sl_better else sl
+                update_trailing_sl(signal_id, new_sl, "PHASE3", latest_price)
+                sl = new_sl
+                
+                if qty >= 3:
+                    print(f"  💰 PHASE 3 PARTIAL: {symbol} — Booking 35% at {progress*100:.0f}%")
+                    httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{signal_id}/partial-close",
+                                json={"percent": 0.35, "exitPrice": latest_price, "reason": "Phase 3 Partial (75% Target)"}, timeout=10)
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # PHASE 3 TRAILING (Update SL with candle lows)
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            if current_state == "PHASE3":
+                trail_sl = prev_low - (prev_low * 0.001) if is_buy else prev_high + (prev_high * 0.001)
+                sl_better = (is_buy and trail_sl > sl) or (not is_buy and trail_sl < sl)
+                if sl_better:
+                    update_trailing_sl(signal_id, trail_sl, "PHASE3", latest_price)
+                    sl = trail_sl
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # LAYER 3: Reversal Detection (80%+)
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            if progress >= REVERSAL_ZONE_START and not should_close:
+                if not recent_df.empty:
+                    is_reversal, reason = detect_reversal(recent_df, is_buy)
+                    if is_reversal:
+                        should_close = True
+                        exit_price = latest_price
+                        close_reason = f"REVERSAL DETECTED ({reason}) at {progress*100:.0f}%"
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # SL / TP / Intraday Hit Check
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            if not should_close:
+                if is_buy:
+                    if latest_price <= sl:
+                        should_close = True
+                        exit_price = sl
+                        close_reason = f"hit SL/Trailing SL (₹{sl})"
+                    elif latest_price >= tp:
+                        should_close = True
+                        exit_price = tp
+                        close_reason = f"hit Target (₹{tp})"
+                else:
+                    if latest_price >= sl:
+                        should_close = True
+                        exit_price = sl
+                        close_reason = f"hit SL/Trailing SL (₹{sl})"
+                    elif latest_price <= tp:
+                        should_close = True
+                        exit_price = tp
+                        close_reason = f"hit Target (₹{tp})"
                     
             if not should_close and sig.get('holdDuration') == 'INTRADAY' and is_square_off_time:
                 should_close = True
                 exit_price = latest_price
-                close_reason = "INTRADAY auto square-off (>= 15:15 IST)"
-                    
-            if (should_close):
-                print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{exit_price} {close_reason}")
-                httpx.patch(f"{NESTJS_URL.replace('/signals/new', '/signals')}/{sig['id']}/close", json={"exitPrice": exit_price}, timeout=10)
+                close_reason = f"INTRADAY square-off (>= {SQUARE_OFF_TIME.strftime('%H:%M')} IST)"
+
+            # ── MAX-HOLD time-stop (swing enforcement + intraday safety net) ──
+            if not should_close:
+                hold = sig.get('holdDuration') or 'UNKNOWN'
+                age_days = trade_age_days(trade.get('entryTime'))
+                limit = MAX_HOLD_DAYS.get(hold)
+                if age_days is not None and limit is not None and age_days >= limit:
+                    should_close = True
+                    exit_price = latest_price
+                    close_reason = f"MAX_HOLD time-stop ({age_days:.1f}d >= {limit}d, {hold})"
+
+            if should_close:
+                print(f"  🔒 AUTO-CLOSE {sig['signalType']} {symbol}: Price ₹{exit_price} {close_reason} (progress: {progress*100:.0f}%)")
+                httpx.patch(
+                    f"{NESTJS_URL.replace('/signals/new', '/signals')}/{signal_id}/close",
+                    json={"exitPrice": exit_price},
+                    timeout=10
+                )
+                
     except Exception as e:
         print(f"  [ERROR] auto-closing signals: {e}")
 
 
 def main():
-    print("🚀 Live Scanner started")
+    print("🚀 Live Scanner started (Smart Trailing SL v2)")
     print(f"📡 Will POST signals to: {NESTJS_URL}")
     print(f"⏰ Market hours: {MARKET_OPEN} – {MARKET_CLOSE} IST")
-    print("-" * 50)
+    print(f"📐 Trailing config: Breakeven@{BREAKEVEN_THRESHOLD*100:.0f}% | ProfitLock@{PROFIT_LOCK_THRESHOLD*100:.0f}% (lock {PROFIT_LOCK_PERCENT*100:.0f}%) | Reversal@{REVERSAL_ZONE_START*100:.0f}%+")
+    print("-" * 60)
 
     last_fired_times = {}
 
@@ -212,11 +525,15 @@ def main():
         configs = get_active_configs()
         cache = {}
         
-        # 1. Auto-close signals that hit SL/TP
+        # 1. Smart auto-close with trailing SL + reversal detection
         auto_close_signals(cache)
         
         # 2. Check for new setups
-        if not configs:
+        if now.time() < dtime(9, 30):
+            print("  Skipping new setups before 9:30 AM IST (avoiding fake opening moves).")
+        elif now.time() >= SQUARE_OFF_TIME:
+            print(f"  Skipping new setups after {SQUARE_OFF_TIME.strftime('%H:%M')} IST (square-off window).")
+        elif not configs:
             print("  No active configurations. Add some via the UI.")
         else:
             for config in configs:

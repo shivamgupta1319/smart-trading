@@ -26,7 +26,7 @@ This platform is a **local algorithmic trading assistant** for Indian stock mark
 
 - **ORB (Opening Range Breakout)**: The "opening range" is only the **first 15-minute candle** (09:15–09:30). The strategy is only valid if the price breaks that candle's high/low **after** 09:30.
 - **VWAP**: Resets every day at market open. Always compute VWAP fresh from 09:15 each day.
-- **Intraday strategies**: Positions should notionally be squared off at 15:15 (15 minutes before close) to avoid delivery.
+- **Intraday strategies**: Positions are squared off at 15:10 (before the 15:30 close) to avoid delivery; real-money Dhan positions also get a broker-side EOD sweep at 15:12–15:20.
 
 ---
 

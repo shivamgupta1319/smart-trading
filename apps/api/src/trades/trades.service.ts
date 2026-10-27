@@ -31,13 +31,33 @@ export class TradesService {
     });
   }
 
-  async getPortfolioStats() {
+  /**
+   * Portfolio stats. When `range` is given, the P&L-derived metrics (totalPnl,
+   * win rate, profit factor, strategy breakdowns, trade counts) are scoped to
+   * trades CLOSED within [range.from, range.to) by exitTime — used by the daily/
+   * weekly Telegram digests. Account-level fields (openTrades, currentCapital,
+   * initialCapital) always reflect the full all-time state regardless of range.
+   * With no range, output is identical to the all-time behaviour (used by /stats).
+   */
+  async getPortfolioStats(range?: { from: Date; to: Date }) {
     const allTrades = await this.prisma.trade.findMany({
       orderBy: { entryTime: 'asc' },
     });
 
-    const closedTrades = allTrades.filter((t) => t.status === 'CLOSED');
+    const allClosed = allTrades.filter((t) => t.status === 'CLOSED');
     const openTrades = allTrades.filter((t) => t.status === 'OPEN');
+
+    // All-time realized P&L drives current capital (account-level, never scoped).
+    const allTimePnl = allClosed.reduce((sum, t) => sum + (t.pnl || 0), 0);
+
+    // Period-scoped set: trades closed within the range (by exitTime). No range → all closed.
+    const closedTrades = range
+      ? allClosed.filter((t) => {
+          if (!t.exitTime) return false;
+          const et = new Date(t.exitTime).getTime();
+          return et >= range.from.getTime() && et < range.to.getTime();
+        })
+      : allClosed;
 
     const totalPnl = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
     const wins = closedTrades.filter((t) => t.outcome === 'WIN');
@@ -146,8 +166,9 @@ export class TradesService {
 
     return {
       totalTrades: allTrades.length,
-      openTrades: openTrades.length,
+      openTrades: openTrades.length, // all-time (account-level)
       closedTrades: closedTrades.length,
+      periodTradeCount: closedTrades.length, // # closed trades in range (all closed when no range)
       totalPnl: Math.round(totalPnl * 100) / 100,
       winRate: Math.round(winRate * 100) / 100,
       wins: wins.length,
@@ -161,7 +182,7 @@ export class TradesService {
       equityCurve,
       holdDurationStats,
       initialCapital: 100000,
-      currentCapital: Math.round((100000 + totalPnl) * 100) / 100,
+      currentCapital: Math.round((100000 + allTimePnl) * 100) / 100, // all-time (account-level)
     };
   }
 
@@ -180,8 +201,12 @@ export class TradesService {
     const pnlPerShare = isBuy
       ? exitPrice - trade.entryPrice
       : trade.entryPrice - exitPrice;
-    const pnl = pnlPerShare * trade.quantity;
-    const pnlPercent = (pnlPerShare / trade.entryPrice) * 100;
+    // Only the still-open lot is closed here; already-booked partials live in realizedPnl. Using
+    // trade.quantity (full size) would double-count partials and ignore realizedPnl. Mirror
+    // closeWithPrice: total = realizedPnl + perShare * remainingQty, and pnlPercent off capitalUsed.
+    const finalLotPnl = pnlPerShare * trade.remainingQty;
+    const pnl = trade.realizedPnl + finalLotPnl;
+    const pnlPercent = trade.capitalUsed > 0 ? (pnl / trade.capitalUsed) * 100 : 0;
 
     let outcome = 'BREAKEVEN';
     if (pnl > 0) outcome = 'WIN';
@@ -199,6 +224,7 @@ export class TradesService {
         exitPrice,
         pnl: Math.round(pnl * 100) / 100,
         pnlPercent: Math.round(pnlPercent * 100) / 100,
+        remainingQty: 0,
         outcome,
         exitTime: new Date(),
         status: 'CLOSED',

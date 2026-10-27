@@ -15,6 +15,7 @@ class BBMeanReversionIntradayStrategy(BaseStrategy):
     timeframe = "15m"
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
         if df.empty or len(df) < 25:
             return df
 
@@ -35,29 +36,18 @@ class BBMeanReversionIntradayStrategy(BaseStrategy):
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        for i in range(1, len(df)):
-            close = df['Close'].iloc[i]
-            open_p = df['Open'].iloc[i]
-            low = df['Low'].iloc[i]
-            high = df['High'].iloc[i]
-            
-            bbl = df['BBL'].iloc[i]
-            bbm = df['BBM'].iloc[i]
-            bbu = df['BBU'].iloc[i]
+        # Long Setup: Pierces lower band but closes above it (and bullish)
+        bullish_cond = (df['Low'] < df['BBL']) & (df['Close'] > df['BBL']) & (df['Close'] > df['Open'])
 
-            if pd.isna(bbl):
-                continue
+        # Short Setup: Pierces upper band but closes below it (and bearish)
+        bearish_cond = (df['High'] > df['BBU']) & (df['Close'] < df['BBU']) & (df['Close'] < df['Open'])
 
-            # Long Setup: Pierces lower band but closes above it (and bullish)
-            if low < bbl and close > bbl and close > open_p:
-                df.at[df.index[i], 'signal'] = 1
-                df.at[df.index[i], 'stop_loss'] = low - (close * 0.002)
-                df.at[df.index[i], 'target'] = bbm # Target the midline
+        df.loc[bullish_cond, 'signal'] = 1
+        df.loc[bullish_cond, 'stop_loss'] = df['Low'][bullish_cond] - (df['Close'][bullish_cond] * 0.002)
+        df.loc[bullish_cond, 'target'] = df['BBM'][bullish_cond]
 
-            # Short Setup: Pierces upper band but closes below it (and bearish)
-            elif high > bbu and close < bbu and close < open_p:
-                df.at[df.index[i], 'signal'] = -1
-                df.at[df.index[i], 'stop_loss'] = high + (close * 0.002)
-                df.at[df.index[i], 'target'] = bbm # Target the midline
+        df.loc[bearish_cond, 'signal'] = -1
+        df.loc[bearish_cond, 'stop_loss'] = df['High'][bearish_cond] + (df['Close'][bearish_cond] * 0.002)
+        df.loc[bearish_cond, 'target'] = df['BBM'][bearish_cond]
 
         return df

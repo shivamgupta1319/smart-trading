@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from strategies.base import BaseStrategy
 
 class FibonacciGoldenZoneStrategy(BaseStrategy):
@@ -13,7 +14,11 @@ class FibonacciGoldenZoneStrategy(BaseStrategy):
     timeframe = "1D"
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
         if df.empty or len(df) < 30:
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
             return df
 
         df['signal'] = 0
@@ -24,37 +29,25 @@ class FibonacciGoldenZoneStrategy(BaseStrategy):
         df['High_30'] = df['High'].rolling(window=30).max().shift(1)
         df['Low_30'] = df['Low'].rolling(window=30).min().shift(1)
 
-        for i in range(30, len(df)):
-            close = df['Close'].iloc[i]
-            open_p = df['Open'].iloc[i]
-            low = df['Low'].iloc[i]
-            
-            high_30 = df['High_30'].iloc[i]
-            low_30 = df['Low_30'].iloc[i]
+        trend_size = (df['High_30'] - df['Low_30']) / df['Low_30']
+        valid_trend = trend_size >= 0.10
 
-            if pd.isna(high_30) or pd.isna(low_30):
-                continue
+        diff = df['High_30'] - df['Low_30']
+        fib_50 = df['High_30'] - (diff * 0.50)
+        fib_618 = df['High_30'] - (diff * 0.618)
+        fib_786 = df['High_30'] - (diff * 0.786)
 
-            # Ensure there is a substantial trend (at least 10% move from low to high)
-            trend_size = (high_30 - low_30) / low_30
-            if trend_size < 0.10:
-                continue
+        in_zone = (df['Low'] <= fib_50) & (df['Low'] >= fib_618 * 0.98)
+        bullish_candle = df['Close'] > df['Open']
 
-            # Calculate Fibonacci levels
-            diff = high_30 - low_30
-            fib_50 = high_30 - (diff * 0.50)
-            fib_618 = high_30 - (diff * 0.618)
-            
-            # The Golden Zone is between fib_618 and fib_50
-            # Wait for price to drop into this zone
-            if low <= fib_50 and low >= fib_618 * 0.98: # Allow slight undercut of 61.8
-                # Enter if it's a bullish candle
-                if close > open_p:
-                    df.at[df.index[i], 'signal'] = 1
-                    # Stop loss below the 61.8% or 78.6% level
-                    fib_786 = high_30 - (diff * 0.786)
-                    df.at[df.index[i], 'stop_loss'] = min(low * 0.98, fib_786)
-                    # Target the recent high
-                    df.at[df.index[i], 'target'] = high_30
+        bullish_cond = valid_trend & in_zone & bullish_candle
+
+        # Edge-trigger
+        prev_bullish = bullish_cond.shift(1, fill_value=False)
+        valid_bull = bullish_cond & ~prev_bullish
+
+        df.loc[valid_bull, 'signal'] = 1
+        df.loc[valid_bull, 'stop_loss'] = np.minimum(df['Low'][valid_bull] * 0.98, fib_786[valid_bull])
+        df.loc[valid_bull, 'target'] = df['High_30'][valid_bull]
 
         return df

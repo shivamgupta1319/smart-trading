@@ -1,10 +1,9 @@
-"""Strategy 12: Bollinger Bands Mean Reversion"""
 import pandas as pd
 import pandas_ta as ta
 from strategies.base import BaseStrategy
 
-
 class BollingerMeanReversionStrategy(BaseStrategy):
+    """Strategy 12: Bollinger Bands Mean Reversion"""
     name = "Bollinger_Mean_Reversion"
     timeframe = "1D"
 
@@ -18,9 +17,10 @@ class BollingerMeanReversionStrategy(BaseStrategy):
             df['bb_middle'] = bbands['BBM_20_2.0_2.0']
             df['bb_upper'] = bbands['BBU_20_2.0_2.0']
         else:
-            df['bb_lower'] = pd.NA
-            df['bb_middle'] = pd.NA
-            df['bb_upper'] = pd.NA
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
+            return df
             
         df['rsi14'] = ta.rsi(df['Close'], length=14)
         df['atr'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
@@ -29,31 +29,29 @@ class BollingerMeanReversionStrategy(BaseStrategy):
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        for i in range(1, len(df)):
-            curr = df.iloc[i]
+        cond_long = (df['Close'] < df['bb_lower']) & (df['rsi14'] < 30)
+        cond_short = (df['Close'] > df['bb_upper']) & (df['rsi14'] > 70)
 
-            if any(pd.isna([curr['bb_lower'], curr['bb_upper'], curr['rsi14'], curr['atr']])):
-                continue
+        prev_long = cond_long.shift(1, fill_value=False)
+        prev_short = cond_short.shift(1, fill_value=False)
 
-            # Bullish Mean Reversion: Price drops below lower band, RSI is oversold
-            if curr['Close'] < curr['bb_lower'] and curr['rsi14'] < 30:
-                sl = curr['Close'] - 1.5 * curr['atr']
-                target = curr['bb_middle'] # Target the mean
-                
-                # Only take trades with positive risk reward
-                if (target - curr['Close']) > (curr['Close'] - sl):
-                    df.iloc[i, df.columns.get_loc('signal')] = 1
-                    df.iloc[i, df.columns.get_loc('stop_loss')] = sl
-                    df.iloc[i, df.columns.get_loc('target')] = target
-            
-            # Bearish Mean Reversion: Price jumps above upper band, RSI is overbought
-            elif curr['Close'] > curr['bb_upper'] and curr['rsi14'] > 70:
-                sl = curr['Close'] + 1.5 * curr['atr']
-                target = curr['bb_middle']
-                
-                if (curr['Close'] - target) > (sl - curr['Close']):
-                    df.iloc[i, df.columns.get_loc('signal')] = -1
-                    df.iloc[i, df.columns.get_loc('stop_loss')] = sl
-                    df.iloc[i, df.columns.get_loc('target')] = target
+        bullish_cond = cond_long & ~prev_long
+        bearish_cond = cond_short & ~prev_short
+
+        sl_bull = df['Close'] - 1.5 * df['atr']
+        target_bull = df['bb_middle']
+        valid_bull = bullish_cond & ((target_bull - df['Close']) > (df['Close'] - sl_bull))
+
+        sl_bear = df['Close'] + 1.5 * df['atr']
+        target_bear = df['bb_middle']
+        valid_bear = bearish_cond & ((df['Close'] - target_bear) > (sl_bear - df['Close']))
+
+        df.loc[valid_bull, 'signal'] = 1
+        df.loc[valid_bull, 'stop_loss'] = sl_bull[valid_bull]
+        df.loc[valid_bull, 'target'] = target_bull[valid_bull]
+
+        df.loc[valid_bear, 'signal'] = -1
+        df.loc[valid_bear, 'stop_loss'] = sl_bear[valid_bear]
+        df.loc[valid_bear, 'target'] = target_bear[valid_bear]
 
         return df

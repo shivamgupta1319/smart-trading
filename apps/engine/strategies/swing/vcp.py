@@ -1,5 +1,6 @@
 import pandas as pd
 import pandas_ta as ta
+import numpy as np
 from strategies.base import BaseStrategy
 
 class VCPStrategy(BaseStrategy):
@@ -15,7 +16,11 @@ class VCPStrategy(BaseStrategy):
     timeframe = "1D"
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
         if df.empty or len(df) < 50:
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
             return df
 
         # Calculate metrics
@@ -33,37 +38,27 @@ class VCPStrategy(BaseStrategy):
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        for i in range(50, len(df)):
-            close = df['Close'].iloc[i]
-            high = df['High'].iloc[i]
-            low = df['Low'].iloc[i]
-            vol = df['Volume'].iloc[i]
-            
-            vol_10 = df['Vol_10'].iloc[i-1] # Volume leading up to breakout
-            vol_50 = df['Vol_50'].iloc[i-1]
-            
-            atr_pct = df['ATR_Pct'].iloc[i-1]
-            high_20 = df['High_20'].iloc[i]
+        prev_vol_10 = df['Vol_10'].shift(1)
+        prev_vol_50 = df['Vol_50'].shift(1)
+        prev_atr_pct = df['ATR_Pct'].shift(1)
 
-            if pd.isna(vol_50) or pd.isna(high_20):
-                continue
+        vol_dry = prev_vol_10 < prev_vol_50
+        low_volatility = prev_atr_pct < 0.03
+        breakout = df['Close'] > df['High_20']
+        heavy_volume = df['Volume'] > (prev_vol_50 * 1.5)
 
-            # 1. Volume drying up before breakout
-            vol_dry = vol_10 < vol_50
-            
-            # 2. Volatility is relatively low (e.g. ATR is less than 3% of price)
-            low_volatility = atr_pct < 0.03
-            
-            # 3. Breakout on heavy volume
-            breakout = close > high_20
-            heavy_volume = vol > (vol_50 * 1.5)
+        bullish_cond = vol_dry & low_volatility & breakout & heavy_volume
 
-            if vol_dry and low_volatility and breakout and heavy_volume:
-                df.at[df.index[i], 'signal'] = 1
-                # Stop loss below the breakout candle's low or 5% max
-                sl = max(low - (close * 0.01), close * 0.95)
-                df.at[df.index[i], 'stop_loss'] = sl
-                # Target 1:2 to 1:3 RR
-                df.at[df.index[i], 'target'] = close + (close - sl) * 2.5
+        # Edge trigger
+        prev_bullish = bullish_cond.shift(1, fill_value=False)
+        valid_bull = bullish_cond & ~prev_bullish
+
+        sl_1 = df['Low'] - (df['Close'] * 0.01)
+        sl_2 = df['Close'] * 0.95
+        sl = np.maximum(sl_1, sl_2)
+
+        df.loc[valid_bull, 'signal'] = 1
+        df.loc[valid_bull, 'stop_loss'] = sl[valid_bull]
+        df.loc[valid_bull, 'target'] = df['Close'][valid_bull] + (df['Close'][valid_bull] - sl[valid_bull]) * 2.5
 
         return df

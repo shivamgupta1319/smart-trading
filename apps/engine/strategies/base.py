@@ -6,6 +6,9 @@ import pandas as pd
 class BaseStrategy(ABC):
     name: str
     timeframe: str
+    # Cash-equity rule: swing/positional strategies are long-only (no overnight shorts).
+    # Set per-strategy in strategies/__init__.py based on hold duration.
+    long_only: bool = False
 
     @abstractmethod
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -20,6 +23,11 @@ class BaseStrategy(ABC):
         """Run the strategy and compute backtest metrics with a running bankroll."""
         df = df.copy()
         df = self.generate_signals(df)
+
+        # Cash-equity rule: long-only strategies cannot hold short positions overnight,
+        # so drop any SELL (short) signals before simulating (keeps metrics executable).
+        if self.long_only and "signal" in df.columns:
+            df.loc[df["signal"] == -1, "signal"] = 0
 
         trades = []
         in_trade = False

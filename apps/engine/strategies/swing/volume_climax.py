@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from strategies.base import BaseStrategy
 
 class VolumeClimaxStrategy(BaseStrategy):
@@ -13,7 +14,11 @@ class VolumeClimaxStrategy(BaseStrategy):
     timeframe = "1D"
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
         if df.empty or len(df) < 250:
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
             return df
 
         df['signal'] = 0
@@ -23,25 +28,35 @@ class VolumeClimaxStrategy(BaseStrategy):
         # 250-day Volume High
         df['Vol_High_250'] = df['Volume'].rolling(window=250).max().shift(1)
         
+        closes = df['Close'].values
+        opens = df['Open'].values
+        highs = df['High'].values
+        lows = df['Low'].values
+        vols = df['Volume'].values
+        vol_highs = df['Vol_High_250'].values
+
+        signals = np.zeros(len(df))
+        stop_losses = np.zeros(len(df))
+        targets = np.zeros(len(df))
+
         active_climax_high = 0
         active_climax_low = 0
         days_since_climax = 0
 
         for i in range(250, len(df)):
-            close = df['Close'].iloc[i]
-            open_p = df['Open'].iloc[i]
-            high = df['High'].iloc[i]
-            low = df['Low'].iloc[i]
-            vol = df['Volume'].iloc[i]
-            
-            vol_high = df['Vol_High_250'].iloc[i]
+            close = closes[i]
+            open_p = opens[i]
+            high = highs[i]
+            low = lows[i]
+            vol = vols[i]
+            vol_high = vol_highs[i]
 
-            if pd.isna(vol_high):
+            if np.isnan(vol_high):
                 continue
 
             # 1. Detect Volume Climax Capitulation
             # Massive red candle (Close < Open) with volume breaking the 1-year high
-            if vol > vol_high and close < open_p and close < df['Close'].iloc[i-1]:
+            if vol > vol_high and close < open_p and close < closes[i-1]:
                 active_climax_high = high
                 active_climax_low = low
                 days_since_climax = 0
@@ -53,16 +68,20 @@ class VolumeClimaxStrategy(BaseStrategy):
                 
                 if days_since_climax <= 5:
                     if close > active_climax_high:
-                        df.at[df.index[i], 'signal'] = 1
+                        signals[i] = 1
                         # Stop loss at the low of the panic candle
                         sl = min(active_climax_low, low * 0.98)
-                        df.at[df.index[i], 'stop_loss'] = sl
-                        df.at[df.index[i], 'target'] = close + (close - sl) * 3
+                        stop_losses[i] = sl
+                        targets[i] = close + (close - sl) * 3
                         
                         # Reset
                         active_climax_high = 0
                 else:
                     # Time limit exceeded
                     active_climax_high = 0
+
+        df['signal'] = signals
+        df['stop_loss'] = stop_losses
+        df['target'] = targets
 
         return df
