@@ -76,8 +76,9 @@ Positive after costs so far: `MACD_Zero`, `SMC_FVG`, `RVOL_ORB`, `VWAP_MACD_RSI`
 
 With honest fills and costs at ₹10,000 per cell, **every intraday strategy is negative on
 average** across the 60 stocks (−0.35R per trade; −0.14R with the cost rule). The best four
-are near break-even on the most volatile stocks. Four swing strategies are positive in both
-halves of 5.5 years, on a stock list that flatters them. Detail and limits:
+are near break-even on the most volatile stocks. Swing, re-run that evening with the rules
+live actually uses (see the correction in strategies.md): 14 of 17 strategies are positive
+and six are positive in both halves of 5.5 years, on a stock list that flatters them. Detail and limits:
 [strategies.md](strategies.md). This is the baseline the 3–6 months of paper trading starts
 from; it is not a reason to expect profit.
 
@@ -166,7 +167,7 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] README rewritten; plain-language user guide (`docs/user-guide.md`); documents from the two earlier apps moved to `docs/archive/old-apps/`
 - [x] July rebuild: useful pieces in; the left-out code, tests and decision documents copied to `docs/archive/july-rebuild/`
 - [x] Replay test (backtest against the scanner on the same candles): entries now identical; it found and fixed three one-sided rules (late-day entries, stale next-morning signals, the cost rule's inputs)
-- [ ] Re-run the full backtest with the corrected engine (`2026.11.19-parity`) and refresh the numbers in `docs/strategies.md`
+- [x] Full backtest re-run on the corrected engine (`2026.11.19-parity2`); `docs/strategies.md` refreshed. Correction: the morning's swing figures used a time-stop that live does not have; with live rules 14 of 17 swing strategies are positive, six in both halves. Intraday unchanged: all negative after costs
 - [x] Phone menu: below 1200px the links fold into a menu opened by one button; the desktop bar fits from 1200px up
 - [ ] Luck check shown on the Backtesting page (today it is only in the backtest tool's report)
 - [ ] Owner: say yes to deleting `~/workspace/stock-trading` (a full copy of its history is in `~/backups/stock-trading-2026-11-19.bundle`)

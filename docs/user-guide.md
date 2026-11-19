@@ -145,9 +145,9 @@ Three checks before trusting a result:
 - **Better than doing nothing.** Compare with the NIFTY line on the Portfolio page.
 
 As of 2026-11-19 the honest backtest says: every intraday strategy loses after costs at
-₹10,000 per cell, mostly because costs are large against small stops. A few swing
-strategies are positive in both halves of five years. None passes the strictest luck
-test yet. See [strategies.md](strategies.md) for the detail.
+₹10,000 per cell, mostly because costs are large against small stops. Most swing
+strategies are positive, six of them in both halves of five years, on a stock list that
+flatters them. None passes the strictest luck test yet. See [strategies.md](strategies.md) for the detail.
 
 ## 10. A weekly routine
 
