@@ -42,7 +42,7 @@ JUMP_LOG_RETURN = 0.20  # |ln(close/prev close)| above this on a daily bar is fl
 FIELDS = [
     "symbol", "strategy", "timeframe", "bucket", "bars", "span_years", "trades", "win_pct",
     "net", "avg_r", "pf", "max_dd_pct", "r_first_half", "r_second_half",
-    "skipped_limits", "skipped_unsizable", "cannot_evaluate", "price_jump", "error",
+    "skipped_limits", "skipped_unsizable", "skipped_costly", "cannot_evaluate", "price_jump", "error",
 ]
 
 
@@ -90,6 +90,7 @@ def run_cell(strategy, df: pd.DataFrame) -> dict:
         "r_second_half": round(_mean(r[half:]), 3) if half else None,
         "skipped_limits": sim.get("skipped_limits", 0),
         "skipped_unsizable": sim.get("skipped_unsizable", 0),
+        "skipped_costly": sim.get("skipped_costly", 0),
         "cannot_evaluate": sim.get("no_signal_column", False),
     }
 

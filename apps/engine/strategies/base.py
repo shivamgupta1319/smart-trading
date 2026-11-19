@@ -7,6 +7,7 @@ import pandas as pd
 from backtest_config import (
     RISK, CostModel, uses_trailing_exit, trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD,
     LEVERAGE_INTRADAY, LEVERAGE_DELIVERY, RISK_PER_TRADE_PCT, time_stop_bars_for_bucket,
+    MAX_COST_TO_RISK, cost_to_risk,
 )
 from entry_limits import entry_allowed, limits_for_bucket
 from intraday_exits import (
@@ -217,6 +218,7 @@ class BaseStrategy(ABC):
         last_exit_ts = None    # bar on which this cell's previous trade closed
         skipped_limits = 0
         skipped_unsizable = 0  # signals where one share already broke a sizing bound
+        skipped_costly = 0     # signals whose round-trip cost was too large a share of the risk
 
         i = 0
         while i < n - 1:
@@ -277,6 +279,15 @@ class BaseStrategy(ABC):
                 skipped_unsizable += 1
                 i += 1
                 continue
+
+            # Cost-to-risk gate: what the round trip costs (charges + slippage both
+            # ways) as a share of the rupees risked. With a tight stop the costs alone
+            # can be half the risk, so the trade needs an unrealistic edge to pay.
+            if MAX_COST_TO_RISK > 0:
+                if cost_to_risk(qty, entry, risk_per_share, tf) > MAX_COST_TO_RISK:
+                    skipped_costly += 1
+                    i += 1
+                    continue
 
             # Walk forward to the exit bar. INTRADAY models the live 3-phase exit
             # (partials + breakeven + candle-trail + reversal + 15:15 square-off);
@@ -382,6 +393,7 @@ class BaseStrategy(ABC):
             "no_signal_column": no_signal_column,
             "skipped_limits": skipped_limits,
             "skipped_unsizable": skipped_unsizable,
+            "skipped_costly": skipped_costly,
             "net_trades": net_trades,
             "gross_trades": gross_trades,
             "r_trades": r_trades,

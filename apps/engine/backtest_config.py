@@ -37,7 +37,7 @@ def _i(name: str, default: int) -> int:
 # whenever the fill/exit model changes so stored reports produced by an older engine
 # are identifiable — they won't reproduce. Current model: C3 (live intraday exits) + F3
 # (swing time-stop).
-ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.11.19-strategies")
+ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.11.19-costgate")
 
 
 # Buying-power multiple by hold bucket. Intraday (MIS) deploys ~5× the cell fund as
@@ -53,6 +53,24 @@ LEVERAGE_DELIVERY = shared("LEVERAGE_DELIVERY")
 # Shared with the API (config/trading.json); a fraction, 0.02 = 2% (₹200 on a ₹10k seed).
 RISK_PER_TRADE_PCT = risk_per_trade_fraction()
 
+# Cost-to-risk gate: skip a trade whose round-trip cost (charges + slippage both ways)
+# exceeds this share of the rupees it risks. 0 = off. Shared with the API, which
+# rejects the same signals (config/trading.json).
+#
+# Why: on a Rs 10k cell the round trip costs about 0.2% of the position. With a 0.3%
+# stop that is two thirds of the risk gone before the trade starts. Measured on all
+# 60 stocks (2026-11): average intraday result -0.35R with no gate, -0.14R at 0.25,
+# and no strategy got worse.
+MAX_COST_TO_RISK = shared("MAX_COST_TO_RISK")
+
+
+def cost_to_risk(qty: int, entry: float, risk_per_share: float, timeframe: str) -> float:
+    """Round-trip cost of a position (charges + slippage on both sides) divided by
+    the rupees it risks. MUST match `costToRisk` in apps/api/src/common/costs.ts."""
+    value = qty * entry
+    friction = CostModel(timeframe).round_trip(value, value) + 2 * (RISK.slippage_bps / 10_000.0) * value
+    return friction / (qty * risk_per_share)
+
 
 @dataclass(frozen=True)
 class RiskConfig:
@@ -65,7 +83,7 @@ class RiskConfig:
     # Risk a fixed % of *slot* capital per trade.
     risk_per_trade_pct: float = _f("BT_RISK_PER_TRADE_PCT", 2.0)
     # Slippage applied to BOTH entry and exit, in basis points (1bp = 0.01%).
-    slippage_bps: float = _f("BT_SLIPPAGE_BPS", 5.0)
+    slippage_bps: float = shared("BT_SLIPPAGE_BPS")  # shared with the API (cost-to-risk gate)
     # When a single bar's range straddles both SL and TP, assume the worse
     # outcome (SL) filled first. Removes the classic optimistic bias.
     pessimistic_intrabar: bool = os.getenv("BT_PESSIMISTIC_INTRABAR", "true").lower() != "false"
