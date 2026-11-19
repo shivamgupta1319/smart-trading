@@ -1529,3 +1529,19 @@ tbody td {
     min-width: 9.5rem;
   }
 }
+
+/* Scorecard: a stock whose price history has an unreviewed large move */
+.sc-flag {
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--yellow);
+  overflow-wrap: anywhere;
+}
+
+/* A wide table inside a card scrolls inside the card on narrow screens, so the page
+   itself never scrolls sideways. */
+@media (max-width: 1100px) {
+  .card {
+    overflow-x: auto;
+  }
+}

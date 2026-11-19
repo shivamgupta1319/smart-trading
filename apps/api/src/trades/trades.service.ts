@@ -53,7 +53,12 @@ export class TradesService {
     const cutoff = windowDays && windowDays > 0 ? Date.now() - windowDays * 86400000 : null;
     const inWindow = (t: AnyTrade) =>
       !cutoff || new Date(t.exitTime || t.entryTime).getTime() >= cutoff;
-    const closedTrades = allTrades.filter((t) => t.status === 'CLOSED' && inWindow(t));
+    // Main book vs test book. A trade opened while its cell was PAUSED is the test book:
+    // the cell had already been switched off for losing, so its trades are kept apart and
+    // every figure below (totals, win rate, leaderboard) is the MAIN book only.
+    const closedInWindow = allTrades.filter((t) => t.status === 'CLOSED' && inWindow(t));
+    const closedTrades = closedInWindow.filter((t) => t.cellStatusAtEntry !== 'PAUSED');
+    const testBookTrades = closedInWindow.filter((t) => t.cellStatusAtEntry === 'PAUSED');
     const openTrades = allTrades.filter((t) => t.status === 'OPEN');
     // No funding gate anymore — every trade is real, so portfolio metrics AND the
     // per-cell edge breakdowns are computed over ALL closed trades (in the window).
@@ -235,6 +240,13 @@ export class TradesService {
       equityCurve,
       holdDurationStats,
       windowDays: windowDays || null,
+      mainBook: { trades: closedTrades.length, netPnl: round2(totalPnl) },
+      testBook: {
+        trades: testBookTrades.length,
+        netPnl: round2(testBookTrades.reduce((sum, t) => sum + pnlOf(t), 0)),
+      },
+      // Earliest trade on record, so the result can be set against NIFTY over the same days.
+      firstTradeAt: allTrades.length > 0 ? allTrades[0].entryTime : null,
     };
   }
 

@@ -139,15 +139,15 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Candle data checks where candles are written (`apps/engine/data_checks.py`); rows left out are counted and reported
 - [x] Price-jump check with a reviewed list (`config/known_price_actions.json`); unreviewed stocks get `Stock.dataFlag`
 - [x] Reviewed demergers are scaled out when history is loaded (backtests and scanner)
-- [ ] Flag shown in the app
+- [x] Flag shown on the Scorecard
 - [x] Whole series replaced when the data source has re-scaled its prices (split or dividend)
 - [x] The 27 flagged moves reviewed: 24 real market moves and 2 demergers listed; TRENT is a series stitched across its 1.5-for-1 split (repaired by a full re-download); KAYNES 2026-05-14 left for the owner
 
 ### 3. Honest numbers
 - [x] Slippage per share = the larger of one tick (₹0.05) and 5 basis points, in the engine and the API cost rule
 - [x] Luck-correction statistics and a trials ledger (`research_stats.py`, `research_trials.py`; the backtest tool writes a per-strategy table). Result: three long-term trend strategies pass the first test, none passes the stricter one
-- [ ] NIFTY buy-and-hold comparison
-- [ ] Portfolio totals split into main book and test book
+- [x] NIFTY buy-and-hold comparison (`GET /api/engine/benchmark`), shown on the Portfolio page since the first trade
+- [x] Portfolio totals split into main book and test book (all Portfolio figures are the main book)
 
 ### 4. Market condition and switching
 - [ ] See Phase 4 above

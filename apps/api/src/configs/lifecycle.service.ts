@@ -129,6 +129,9 @@ export class LifecycleService {
       return {
         id: c.id,
         symbol: c.stock.symbol,
+        // Set by the engine when this stock's price history has a large move nobody has reviewed.
+        dataFlag: c.stock.dataFlag,
+        dataFlagDetail: c.stock.dataFlagDetail,
         strategyName: c.strategyName,
         timeframe: c.timeframe,
         status: c.status,

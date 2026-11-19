@@ -132,5 +132,21 @@ def test_live_prices_keeps_a_recent_quote_when_the_refresh_fails(monkeypatch):
     assert out["STALE"] == {"price": 55.0}
 
 
+# ── Engine: NIFTY comparison ─────────────────────────────────────────────────
+
+def test_benchmark_return_is_first_close_on_or_after_the_date_to_the_latest():
+    import pandas as pd
+    import pytest as _pytest
+    from routers.history import benchmark_return
+
+    closes = pd.Series([25000.0, 25100.0, 24900.0, 25400.0],
+                       index=pd.to_datetime(["2026-11-17", "2026-11-18", "2026-11-20", "2026-11-23"]))
+    r = benchmark_return(closes, "2026-11-19")            # 19th was not a trading day in this series
+    assert r["since"] == "2026-11-20" and r["to"] == "2026-11-23"
+    assert r["return_pct"] == _pytest.approx((25400 / 24900 - 1) * 100, abs=0.01)
+    assert benchmark_return(closes, "2026-11-17")["return_pct"] == _pytest.approx(1.6, abs=0.01)
+    assert benchmark_return(closes, "2026-12-01") is None  # nothing on or after that date
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
