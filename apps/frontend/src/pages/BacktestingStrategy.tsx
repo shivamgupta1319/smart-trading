@@ -146,7 +146,7 @@ export function BacktestingStrategy() {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail || err?.response?.data?.message;
       if (status === 400 || status === 404) return detail || "Not enough data for this stock.";
-      if (status >= 500) return `Server error${detail ? `: ${detail}` : ""}. This is a bug — please report it.`;
+      if (status >= 500) return detail || "The server could not finish this check. Try again.";
       return detail || "Validation failed.";
     };
 
@@ -406,8 +406,8 @@ export function BacktestingStrategy() {
             ) : (
               <>
                 {validationError && (
-                  <div style={{ color: "var(--amber, var(--red))", padding: "0.5rem 1rem", marginBottom: "1rem", fontSize: "0.85rem" }}>
-                    ⚠️ {validationError}
+                  <div role="status" style={{ color: "var(--yellow)", padding: "0.5rem 0", marginBottom: "1rem", fontSize: "0.9rem", lineHeight: 1.5 }}>
+                    One of the two checks did not run. {validationError}
                   </div>
                 )}
                 {/* Walk-forward */}

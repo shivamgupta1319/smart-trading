@@ -1,5 +1,6 @@
-import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, HttpException } from '@nestjs/common';
 import axios from 'axios';
+import { engineErrorToHttp } from './engine-error';
 
 @Controller('api/engine')
 export class EngineController {
@@ -12,6 +13,15 @@ export class EngineController {
     timeout: 60000,
     headers: process.env.API_KEY ? { 'x-api-key': process.env.API_KEY } : {},
   });
+
+  constructor() {
+    // Pass the engine's own answer on. Without this every engine refusal (for example
+    // "need at least 5 trades") reached the browser as a 500 "Internal server error".
+    this.http.interceptors.response.use(undefined, (err: unknown) => {
+      const { status, message } = engineErrorToHttp(err);
+      throw new HttpException(message, status);
+    });
+  }
 
   @Post('fetch-history')
   async fetchHistory(@Body() body: { symbol: string; timeframes?: string[] }) {

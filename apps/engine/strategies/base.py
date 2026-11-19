@@ -270,7 +270,10 @@ class BaseStrategy(ABC):
             # Validate geometry: SL on the losing side, TP on the winning side.
             valid = (ttype == 1 and sl < entry < tp) or (ttype == -1 and tp < entry < sl)
             risk_per_share = abs(entry - sl)
-            if not valid or risk_per_share <= 0:
+            # The quote itself must also be on the right side of the stop: the cost rule
+            # below is judged on the quote, and a stop exactly at the quote has no risk
+            # to judge against (live drops it too: entry_geometry_ok).
+            if not valid or risk_per_share <= 0 or abs(entry_raw - sl) <= 0:
                 skipped_invalid += 1
                 i += 1
                 continue
