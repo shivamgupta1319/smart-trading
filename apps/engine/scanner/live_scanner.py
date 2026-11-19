@@ -77,6 +77,10 @@ def close_trade(signal_id, exit_price) -> bool:
 MARKET_OPEN = dtime(9, 15)
 MARKET_CLOSE = dtime(15, 30)
 POLL_INTERVAL = 100  # seconds
+# Pause after each candle DOWNLOAD (one per stock and timeframe per cycle). It used to
+# be a fixed 1s per cell, so a 400-cell roster spent almost 7 minutes a cycle sleeping
+# and open trades were only checked that often.
+FETCH_PAUSE_SECONDS = 0.5
 
 # ── Smart Trailing SL Configuration ──
 # Phase triggers (50%/75%) and REVERSAL_ZONE_START (80%) now live in
@@ -226,6 +230,7 @@ def check_and_fire_signal(config, cache, last_fired_times):
         cache_key = (symbol, timeframe)
         if cache_key not in cache:
             cache[cache_key] = fetch_live_candles(symbol, timeframe)
+            time.sleep(FETCH_PAUSE_SECONDS)  # be gentle on the data source, per download
         df = cache[cache_key]
         
         if df.empty or len(df) < 30:
@@ -647,7 +652,6 @@ def main():
             for config in configs:
                 print(f"  Checking {config[4]} with {config[2]} ({config[3]})...")
                 check_and_fire_signal(config, cache, last_fired_times)
-                time.sleep(1)  # Brief pause between stocks
 
         elapsed = time.monotonic() - cycle_start
         # Stall detection: if a cycle takes longer than the poll interval, the
