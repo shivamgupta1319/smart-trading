@@ -24,6 +24,8 @@ interface Cell {
   strategyName: string;
   timeframe: string;
   status: Status;
+  liveEnabled: boolean;
+  hasBrokerId: boolean;
   statusReason: string | null;
   statusChangedAt: string | null;
   openTrades: number;
@@ -32,6 +34,23 @@ interface Cell {
   testBook: { trades: number; netPnl: number };
   backtest: { trades: number; winRate: number; avgR: number | null; profitFactor: number | null } | null;
 }
+
+interface RealMoneyStatus {
+  mode: 'off' | 'log' | 'sandbox' | 'live';
+  entriesAllowed: boolean;
+  entriesHaltedToday: boolean;
+  exitOnly: boolean;
+  credentialsConfigured: boolean;
+  limits: { notionalPerOrder: number; riskPerOrder: number; maxDailyLoss: number };
+  openPositions: unknown[];
+}
+
+const MODE_TEXT: Record<RealMoneyStatus['mode'], string> = {
+  off: 'Real money is off. No real order can be placed.',
+  log: 'Real money is in log mode. Orders are written to the log, not sent to the broker.',
+  sandbox: 'Real money is in sandbox mode. Orders go to the broker’s test system, with no money.',
+  live: 'Real money is LIVE. Proven cells that are switched on place real orders.',
+};
 
 type Filter = 'ALL' | Status;
 type SortKey = 'evidence' | 'liveR' | 'trades' | 'pnl' | 'gap' | 'name';
@@ -109,6 +128,9 @@ export function Scorecard() {
   const [sort, setSort] = useState<SortKey>('evidence');
   const [checking, setChecking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [realMoney, setRealMoney] = useState<RealMoneyStatus | null>(null);
+  // The cell whose real-money switch is being confirmed, with what the owner typed.
+  const [liveEdit, setLiveEdit] = useState<{ id: number; securityId: string; busy: boolean; error: string | null } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -122,7 +144,29 @@ export function Scorecard() {
 
   useEffect(() => {
     load();
+    axios
+      .get<RealMoneyStatus>(`${API_URL}/dhan/status`)
+      .then((res) => setRealMoney(res.data))
+      .catch(() => setRealMoney(null)); // the page works without it
   }, [load]);
+
+  const setLive = async (cell: Cell, enabled: boolean, securityId?: string) => {
+    setLiveEdit((e) => (e && e.id === cell.id ? { ...e, busy: true, error: null } : e));
+    try {
+      await axios.post(`${API_URL}/configs/${cell.id}/live`, { enabled, securityId: securityId || undefined });
+      await load();
+      setLiveEdit(null);
+      setNotice(
+        enabled
+          ? `Real money switched on for ${cell.symbol} ${cell.strategyName.replace(/_/g, ' ')}.`
+          : `Real money switched off for ${cell.symbol} ${cell.strategyName.replace(/_/g, ' ')}.`,
+      );
+    } catch (e: any) {
+      const message = e?.response?.data?.message || 'The change was not saved. Try again.';
+      if (enabled) setLiveEdit((x) => (x && x.id === cell.id ? { ...x, busy: false, error: message } : x));
+      else setNotice(message);
+    }
+  };
 
   const recheck = async () => {
     setChecking(true);
@@ -224,6 +268,16 @@ export function Scorecard() {
 
       {cells !== null && cells.length > 0 && (
         <>
+          {realMoney && (
+            <p className={`sc-realmoney ${realMoney.mode === 'live' ? 'live' : ''}`}>
+              <strong>{MODE_TEXT[realMoney.mode]}</strong>{' '}
+              {realMoney.entriesHaltedToday && 'Today’s loss limit has been reached, so no new real trades today. '}
+              {realMoney.exitOnly && 'A real position is still open and will be exited. '}
+              A cell can trade real money only when it is Proven and you switch it on here. Each real trade
+              risks at most ₹{realMoney.limits.riskPerOrder.toLocaleString('en-IN')}.
+            </p>
+          )}
+
           <div className="sc-books">
             <div className="sc-book">
               <span className="sc-book-name">Main book</span>
@@ -325,6 +379,67 @@ export function Scorecard() {
                       <td data-label="Status">
                         <span className={`badge sc-status ${c.status.toLowerCase()}`}>{STATUS_LABEL[c.status]}</span>
                         <div className="sc-reason">{c.statusReason || STATUS_HELP[c.status]}</div>
+                        {c.liveEnabled && (
+                          <div className="sc-live">
+                            <span className={`sc-live-tag ${c.status === 'PROVEN' ? 'on' : 'held'}`}>
+                              {c.status === 'PROVEN' ? 'Real money on' : 'Real money on, held: not Proven'}
+                            </span>
+                            <button className="sc-linkbtn" onClick={() => setLive(c, false)}>
+                              Switch off
+                            </button>
+                          </div>
+                        )}
+                        {!c.liveEnabled && c.status === 'PROVEN' && liveEdit?.id !== c.id && (
+                          <div className="sc-live">
+                            <button
+                              className="sc-linkbtn"
+                              onClick={() => setLiveEdit({ id: c.id, securityId: '', busy: false, error: null })}
+                            >
+                              Switch on real money
+                            </button>
+                          </div>
+                        )}
+                        {liveEdit?.id === c.id && (
+                          <form
+                            className="sc-liveform"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              setLive(c, true, liveEdit.securityId.trim());
+                            }}
+                          >
+                            <p>
+                              When real money is live, the app will place real orders for {c.symbol} with this
+                              strategy. It stops by itself if the cell is no longer Proven.
+                            </p>
+                            <label className="sc-field">
+                              <span className="sc-field-label">
+                                Dhan security id{c.hasBrokerId ? ' (already saved; leave blank to keep it)' : ''}
+                              </span>
+                              <input
+                                className="form-select"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                required={!c.hasBrokerId}
+                                value={liveEdit.securityId}
+                                onChange={(e) => setLiveEdit({ ...liveEdit, securityId: e.target.value, error: null })}
+                                aria-describedby={liveEdit.error ? `live-error-${c.id}` : undefined}
+                              />
+                            </label>
+                            {liveEdit.error && (
+                              <p className="sc-liveform-error" id={`live-error-${c.id}`} role="alert">
+                                {liveEdit.error}
+                              </p>
+                            )}
+                            <div className="sc-liveform-actions">
+                              <button type="submit" className="btn btn-sm btn-primary" disabled={liveEdit.busy}>
+                                {liveEdit.busy ? 'Saving…' : 'Switch on real money'}
+                              </button>
+                              <button type="button" className="btn btn-sm btn-secondary" onClick={() => setLiveEdit(null)}>
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
+                        )}
                       </td>
                       <td data-label="Live against backtest">
                         <PromiseGauge live={c.live.avgR} backtest={c.backtest?.avgR ?? null} />
