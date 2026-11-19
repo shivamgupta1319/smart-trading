@@ -4,7 +4,7 @@ import requests
 import io
 import os
 
-DB_URL = "postgresql://trader:trader@postgres:5432/smart_trading"
+DB_URL = "postgresql+psycopg2://trader:trader@postgres:5432/smart_trading"
 engine = create_engine(DB_URL)
 
 NSE_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
