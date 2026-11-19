@@ -38,20 +38,21 @@ Positive after costs so far: `MACD_Zero`, `SMC_FVG`, `RVOL_ORB`, `VWAP_MACD_RSI`
 - [x] Back up both databases on work-pc (`~/backups/smart_trading-v{1,2}-pre-final-merge-20261119.sql.gz`)
 - [x] Save the analysis queries in `infra/scripts/analysis/`
 - [x] New progress tracker (this file); old one archived
-- [ ] `main` fast-forwarded to `roadmap-v2` and pushed
+- [x] `main` fast-forwarded to `roadmap-v2` and pushed
 - [ ] Owner: rotate the Telegram bot token that is committed in `docker-compose.prod.yml` on `roadmap-v1`
 
 ## Phase 1 — Truthful fills, and backtest = live
 
-- [ ] Live entry booked at the live price when the signal is found, not an old candle close
-- [ ] Stop and target exits booked at the worse of the level and the live price
-- [ ] Backtest: a stop that price gaps through fills at the open, not at the stop
-- [ ] Backtest and live check exits in the same order (stop first)
-- [ ] Cooldown and maximum trades per day for each cell, in both scanner and backtest
-- [ ] Scanner dedupe key includes the strategy (today two strategies on one stock can block each other)
-- [ ] A trade that cannot be sized inside the risk cap is skipped, not forced to 1 share
-- [ ] A strategy with too little data fails loudly instead of quietly giving no signal
-- [ ] One shared config file for risk, leverage, costs and exit rules, read by engine and API
+- [x] Live entry booked at the live price when the signal is found, not an old candle close
+- [x] Stop-outs booked at the worse of the stop and the live price; targets at the target level
+- [x] Backtest: a stop that price gaps through fills at the open, not at the stop
+- [x] Exit order reviewed: live checks one price per poll, so a stop and a profit level cannot both be true in the same check; no code change needed. The bar-versus-poll difference that remains is listed under "Not yet verified"
+- [x] Cooldown (30 min) and maximum trades per day (2) for each intraday cell, in both scanner and backtest
+- [x] Scanner dedupe key includes the strategy
+- [x] A trade that cannot be sized inside the risk cap is skipped, not forced to 1 share
+- [x] A strategy with too little data is reported (scanner warning, backtest flag) instead of quietly giving no signal
+- [x] One shared settings file (`config/trading.json`) for fund size, leverage, risk cap and costs, read by engine and API
+- [x] Engine dependencies pinned; database driver named explicitly (a fresh image build would otherwise have broken)
 - [ ] Parity test: one day of stored candles gives the same trades in scanner and backtest
 
 ## Phase 2 — Strategy cleanup and fresh backtest
@@ -107,6 +108,7 @@ Positive after costs so far: `MACD_Zero`, `SMC_FVG`, `RVOL_ORB`, `VWAP_MACD_RSI`
 
 ## Not yet verified
 
-- Whether the 2% risk-cap setting is correct on work-pc.
-- What price live daily (1D) entries are really booked at.
+- Whether the 2% risk-cap setting is correct on work-pc today. (From the next deploy a wrong value stops the service at start-up instead of silently disabling the cap.)
+- Live polls every 100 seconds, so a stop can be noticed after price has moved past it; the backtest books the stop level. Size of this gap is not measured yet.
+- The scanner's database read for entry limits and a real scanner-to-API rejection have not been exercised against a running stack.
 - The market-direction result covers about 940 trades; 1,485 had no 15-minute data.
