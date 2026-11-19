@@ -288,7 +288,9 @@ class BaseStrategy(ABC):
                 # Bound notional so a compounding cell doesn't size geometrically —
                 # keeps ROI/DD/PF honest for selection (see backtest_config).
                 notional = min(notional, RISK.max_position_value)
-            qty = position_qty(notional, current_capital * RISK_PER_TRADE_PCT, entry, risk_per_share)
+            # Risk at most 2% of what the trade may deploy (fund × leverage, capped like the
+            # notional): Rs 1,000 intraday, Rs 200 swing on a Rs 10k fund. Same rule as the API.
+            qty = position_qty(notional, notional * RISK_PER_TRADE_PCT, entry, risk_per_share)
             if qty < 1:
                 # One share already breaks the notional or the risk cap: live rejects
                 # this signal (signals.service), so the backtest must not take it either.

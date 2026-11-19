@@ -108,15 +108,15 @@ def test_backtest_sizes_to_one_slot():
 
 
 def test_per_trade_risk_cap_bounds_wide_stops():
-    """FEAT-005: sizing bounds rupee-risk at fund × RISK_PER_TRADE_PCT, so a wide-stop
-    trade can't out-risk a tight-stop one on the same fund. Mirrors the live formula in
-    apps/api/src/common/risk.ts (parity)."""
+    """Sizing bounds rupee-risk at fund × leverage × RISK_PER_TRADE_PCT (2% of what the
+    trade may deploy), so a wide-stop trade can't out-risk a tight-stop one on the same
+    fund. Mirrors the live formula in apps/api/src/common/risk.ts (parity)."""
     from backtest_config import RISK_PER_TRADE_PCT, LEVERAGE_INTRADAY, LEVERAGE_DELIVERY
 
     from strategies.base import position_qty  # the engine's real sizing function
 
     def qty(cell, lev, entry, stop, pct=RISK_PER_TRADE_PCT):
-        return position_qty(cell * lev, cell * pct, entry, abs(entry - stop))
+        return position_qty(cell * lev, cell * lev * pct, entry, abs(entry - stop))
 
     assert RISK_PER_TRADE_PCT == 0.02  # keep in lockstep with risk.ts default
     # Wide-stop swing (live open #241 IFCI·Fibonacci): notional 128 sh, cap trims to 38.
@@ -131,6 +131,11 @@ def test_per_trade_risk_cap_bounds_wide_stops():
     assert qty(10000, LEVERAGE_DELIVERY, 33980.00, 32000.00) == 0
     # Exactly one share fits both bounds → 1.
     assert qty(10000, LEVERAGE_DELIVERY, 4000.00, 3800.00) == 1
+    # INTRADAY (5×): the risk budget is 2% of Rs 50,000 = Rs 1,000, not Rs 200.
+    assert LEVERAGE_INTRADAY == 5
+    assert qty(10000, LEVERAGE_INTRADAY, 100.00, 95.00) == 200    # Rs 1,000 / Rs 5 a share
+    assert qty(10000, LEVERAGE_INTRADAY, 100.00, 99.00) == 500    # stop so tight the Rs 50,000 limit binds
+    assert qty(10000, LEVERAGE_INTRADAY, 4000.00, 3900.00) == 10  # Rs 1,000 / Rs 100 a share
 
 
 def test_backtest_skips_a_trade_it_cannot_size():

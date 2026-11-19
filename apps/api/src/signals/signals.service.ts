@@ -111,11 +111,12 @@ export class SignalsService {
 
         // Deploy cellCapital × leverage worth of notional, but bound rupee-risk by a
         // per-trade cap (FEAT-005): qty = min(notionalQty, floor(riskBudget/riskPerShare)),
-        // riskBudget = cellCapital × RISK_PER_TRADE_PCT. This equalizes ₹-risk across trades
+        // riskBudget = cellCapital × leverage × RISK_PER_TRADE_PCT (2% of what the trade may
+        // deploy: ₹1,000 intraday, ₹200 swing on a ₹10k fund). This equalizes ₹-risk across trades
         // so wide-stop trades stop out-risking tight-stop ones (fixes avg₹loss > avg₹win).
         // MUST match the engine sizing in apps/engine/strategies/base.py.
         const notionalBudget = cellCapital * leverage;
-        const riskBudget = riskBudgetFor(cellCapital);
+        const riskBudget = riskBudgetFor(cellCapital, leverage);
         quantity = sizePosition(notionalBudget, riskBudget, dto.entryPrice, riskPerShare);
         if (quantity < 1) {
           // One share already breaks the notional or the risk cap. Reject before any

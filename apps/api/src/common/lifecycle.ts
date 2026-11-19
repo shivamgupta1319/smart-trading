@@ -9,10 +9,13 @@
  *
  * Pause and resume both look at the most recent WINDOW trades, so a cell cannot be
  * resumed and re-paused by the same old losses:
- *   PAUSE   the last WINDOW trades average below PAUSE_AVG_R, or lost more than
- *           PAUSE_LOSS_PCT of the cell's starting fund between them.
+ *   PAUSE   the last WINDOW trades average below PAUSE_AVG_R, or the cell's fund
+ *           (starting fund plus the result of every closed trade) has fallen to
+ *           PAUSE_FUND_FLOOR_PCT of the starting fund: ₹5,000 left of ₹10,000. The
+ *           fund rule needs no full window: it acts on the trade that crosses it.
  *   RESUME  a PAUSED cell has taken a full WINDOW of new (test-book) trades since it
- *           was paused and they average above RESUME_AVG_R.
+ *           was paused, they average above RESUME_AVG_R, and its fund is back above
+ *           the floor.
  *   PROVEN  at least PROVEN_MIN_TRADES trades, average above PROVEN_AVG_R, profit
  *           factor at least PROVEN_PROFIT_FACTOR, and positive in BOTH halves.
  */
@@ -42,7 +45,7 @@ export interface CellStats {
 export interface LifecycleRules {
   windowTrades: number;
   pauseAvgR: number;
-  pauseLossPct: number;
+  pauseFundFloorPct: number;
   resumeAvgR: number;
   provenMinTrades: number;
   provenAvgR: number;
@@ -52,7 +55,7 @@ export interface LifecycleRules {
 export const lifecycleRules = (): LifecycleRules => ({
   windowTrades: shared('LIFECYCLE_WINDOW_TRADES'),
   pauseAvgR: shared('LIFECYCLE_PAUSE_AVG_R'),
-  pauseLossPct: shared('LIFECYCLE_PAUSE_LOSS_PCT'),
+  pauseFundFloorPct: shared('LIFECYCLE_PAUSE_FUND_FLOOR_PCT'),
   resumeAvgR: shared('LIFECYCLE_RESUME_AVG_R'),
   provenMinTrades: shared('LIFECYCLE_PROVEN_MIN_TRADES'),
   provenAvgR: shared('LIFECYCLE_PROVEN_AVG_R'),
@@ -94,7 +97,8 @@ const f = (n: number, digits = 2): string => n.toFixed(digits);
 /**
  * The status a cell should have now.
  * @param tradesSinceChange closed trades taken since the status last changed
- * @param baseCapital the cell's starting fund (for the loss limit)
+ * @param baseCapital the cell's starting fund (₹10,000). What is left of it is
+ *   baseCapital + stats.netPnl.
  */
 export function evaluateCell(
   current: CellStatus,
@@ -104,10 +108,17 @@ export function evaluateCell(
   rules: LifecycleRules,
 ): { status: CellStatus; reason: string } {
   const fullWindow = stats.windowTrades >= rules.windowTrades;
-  const lossLimit = -rules.pauseLossPct * baseCapital;
+  const fundFloor = rules.pauseFundFloorPct * baseCapital;
+  const fundLeft = baseCapital + stats.netPnl;
+  const fundTooLow = fundLeft <= fundFloor;
 
   if (current === 'PAUSED') {
-    if (fullWindow && tradesSinceChange >= rules.windowTrades && (stats.windowAvgR ?? -1) > rules.resumeAvgR) {
+    if (
+      fullWindow &&
+      tradesSinceChange >= rules.windowTrades &&
+      (stats.windowAvgR ?? -1) > rules.resumeAvgR &&
+      !fundTooLow
+    ) {
       return {
         status: 'TESTING',
         reason: `Resumed: last ${stats.windowTrades} trades average ${f(stats.windowAvgR ?? 0)}R`,
@@ -122,10 +133,10 @@ export function evaluateCell(
       reason: `Paused: last ${stats.windowTrades} trades average ${f(stats.windowAvgR)}R (limit ${f(rules.pauseAvgR)}R)`,
     };
   }
-  if (fullWindow && stats.windowPnl < lossLimit) {
+  if (fundTooLow) {
     return {
       status: 'PAUSED',
-      reason: `Paused: last ${stats.windowTrades} trades lost ₹${f(-stats.windowPnl, 0)} (limit ₹${f(-lossLimit, 0)})`,
+      reason: `Paused: ₹${f(Math.max(fundLeft, 0), 0)} left of the ₹${f(baseCapital, 0)} fund (stops at ₹${f(fundFloor, 0)})`,
     };
   }
 

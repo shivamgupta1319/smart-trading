@@ -19,14 +19,20 @@ export const LEVERAGE_DELIVERY = shared('LEVERAGE_DELIVERY');
 // Per-trade risk cap (FEAT-005). Notional sizing alone lets a wide-stop trade risk multiples
 // of a tight-stop one on the same fund — the payoff-ratio leak (avg ₹-loss > avg ₹-win) from
 // docs/agent-reports/2026-07-14-avg-loss-gt-avg-win-audit.md (F1). We bound each trade to at
-// most `cellCapital × RISK_PER_TRADE_PCT` rupees of risk:
+// most `cellCapital × leverage × RISK_PER_TRADE_PCT` rupees of risk (2% of the buying power:
+// ₹200 for a swing cell, ₹1,000 for an intraday cell at 5×; the owner's rule since 2026-11-19):
 //   qty = max(1, min(floor(notionalBudget/entry), floor(riskBudget/riskPerShare)))
 // MUST match the engine's RISK_PER_TRADE_PCT in apps/engine/backtest_config.py, or the
 // backtest stops predicting live (same parity invariant as leverage/costs).
-export const RISK_PER_TRADE_PCT = riskPerTradeFraction(); // fraction of the cell fund (0.02 = 2%)
+export const RISK_PER_TRADE_PCT = riskPerTradeFraction(); // fraction of the buying power (0.02 = 2%)
 
-/** Rupees a single trade may risk = cell fund × RISK_PER_TRADE_PCT. */
-export const riskBudgetFor = (cellCapital: number): number => cellCapital * RISK_PER_TRADE_PCT;
+/**
+ * Rupees a single trade may risk = cell fund × leverage × RISK_PER_TRADE_PCT.
+ * The base is what the trade may deploy, so intraday (5×) risks 2% of ₹50,000 and
+ * swing (1×) 2% of ₹10,000. MUST match the engine (apps/engine/strategies/base.py).
+ */
+export const riskBudgetFor = (cellCapital: number, leverage: number): number =>
+  cellCapital * leverage * RISK_PER_TRADE_PCT;
 
 /**
  * Shares to trade: the smaller of what the notional budget buys and what the rupee-risk

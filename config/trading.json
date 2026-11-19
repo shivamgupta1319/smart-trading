@@ -4,8 +4,9 @@
     "This file is the ONLY place the defaults live. Both runtimes read it at start.",
     "An environment variable with the same name overrides a value (for experiments).",
     "Percent fields ending in _PCT under 'costs' are percentages (0.03 = 0.03%).",
-    "RISK_PER_TRADE_PCT is a FRACTION of the cell fund (0.02 = 2%), never 2.",
+    "RISK_PER_TRADE_PCT is a FRACTION (0.02 = 2%), never 2. It is taken of what a trade may deploy: the cell fund times its leverage. So an intraday trade (5x) may risk 2% of 50,000 = 1,000 rupees and a swing trade (1x) 2% of 10,000 = 200.",
     "MAX_COST_TO_RISK: a trade is skipped when its round-trip cost (charges + slippage both ways) is more than this share of the rupees it risks. 0 turns the rule off.",
+    "LIFECYCLE_PAUSE_FUND_FLOOR_PCT: a cell is paused when its fund (starting fund plus the result of all its closed trades) has fallen to this share of the starting fund. 0.5 = paused when 5,000 of the 10,000 is left.",
     "lifecycle: when a cell (one stock with one strategy) is paused, resumed or marked proven. Judged on its closed paper trades after costs, in R (profit or loss divided by the rupees risked).",
     "Slippage per share, each side, is the larger of TICK_SIZE (the smallest price step, in rupees) and BT_SLIPPAGE_BPS basis points of the price. For a cheap stock one tick is more than 5 basis points; for an expensive one it is less."
   ],
@@ -36,7 +37,7 @@
   "lifecycle": {
     "LIFECYCLE_WINDOW_TRADES": 20,
     "LIFECYCLE_PAUSE_AVG_R": -0.15,
-    "LIFECYCLE_PAUSE_LOSS_PCT": 0.15,
+    "LIFECYCLE_PAUSE_FUND_FLOOR_PCT": 0.5,
     "LIFECYCLE_RESUME_AVG_R": 0.05,
     "LIFECYCLE_PROVEN_MIN_TRADES": 40,
     "LIFECYCLE_PROVEN_AVG_R": 0.1,

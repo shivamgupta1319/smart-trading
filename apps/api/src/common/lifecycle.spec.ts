@@ -4,7 +4,7 @@ import { cellStats, evaluateCell, lifecycleRules, type ClosedTrade, type Lifecyc
 const rules: LifecycleRules = {
   windowTrades: 20,
   pauseAvgR: -0.15,
-  pauseLossPct: 0.15,
+  pauseFundFloorPct: 0.5,
   resumeAvgR: 0.05,
   provenMinTrades: 40,
   provenAvgR: 0.1,
@@ -53,13 +53,6 @@ describe('evaluateCell', () => {
     expect(r.reason).toContain('-0.20R');
   });
 
-  it('pauses on the rupee loss limit even when the average R looks tolerable', () => {
-    // 20 trades averaging -0.1R (above the -0.15R limit) but risking Rs 1,000 each: -Rs 2,000.
-    const r = evaluateCell('TESTING', stats(Array.from({ length: 20 }, () => t(-0.1, 1000))), 20, BASE, rules);
-    expect(r.status).toBe('PAUSED');
-    expect(r.reason).toContain('lost');
-  });
-
   it('judges the RECENT window, so an old good run does not hide a bad one', () => {
     const r = evaluateCell('TESTING', stats([...many(60, 0.5), ...many(20, -0.5)]), 80, BASE, rules);
     expect(r.status).toBe('PAUSED');
@@ -94,5 +87,25 @@ describe('evaluateCell', () => {
     const r = evaluateCell('PROVEN', stats(many(40, 0.02)), 40, BASE, rules);
     expect(r.status).toBe('TESTING');
     expect(r.reason).toContain('No longer');
+  });
+
+  it('pauses a cell when ₹5,000 is left of its ₹10,000 fund', () => {
+    // Intraday risks ₹1,000 a trade. Four full losses leave ₹6,000: still trading.
+    expect(evaluateCell('TESTING', stats(Array.from({ length: 4 }, () => t(-1, 1000))), 4, BASE, rules).status).toBe('TESTING');
+    // The fifth leaves ₹5,000: paused on that trade, without waiting for 20 trades.
+    const r = evaluateCell('TESTING', stats(Array.from({ length: 5 }, () => t(-1, 1000))), 5, BASE, rules);
+    expect(r.status).toBe('PAUSED');
+    expect(r.reason).toContain('₹5000 left of the ₹10000 fund');
+    // A Proven cell is paused by it too.
+    expect(evaluateCell('PROVEN', stats(Array.from({ length: 6 }, () => t(-1, 1000))), 6, BASE, rules).status).toBe('PAUSED');
+  });
+
+  it('does not resume a cell whose fund is still at or under the floor', () => {
+    // Lost ₹6,000, then 20 good test-book trades that win back only ₹600.
+    const stillLow = stats([...Array.from({ length: 6 }, () => t(-1, 1000)), ...Array.from({ length: 20 }, () => t(0.15, 200))]);
+    expect(evaluateCell('PAUSED', stillLow, 20, BASE, rules).status).toBe('PAUSED');
+    // Wins back ₹4,000: ₹8,000 left, above the floor, and the window averages +1R.
+    const recovered = stats([...Array.from({ length: 6 }, () => t(-1, 1000)), ...Array.from({ length: 20 }, () => t(1, 200))]);
+    expect(evaluateCell('PAUSED', recovered, 20, BASE, rules).status).toBe('TESTING');
   });
 });

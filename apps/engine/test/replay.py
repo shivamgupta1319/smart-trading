@@ -63,10 +63,8 @@ class FakeApi:
             self.rejected.append("already open")
             return _Response(status_code=409, text="already open", body={})
         risk = abs(entry - stop)
-        qty = position_qty(
-            min(RISK.slot_capital * LEVERAGE_INTRADAY, RISK.max_position_value),
-            RISK.slot_capital * RISK_PER_TRADE_PCT, entry, risk,
-        )
+        notional = min(RISK.slot_capital * LEVERAGE_INTRADAY, RISK.max_position_value)
+        qty = position_qty(notional, notional * RISK_PER_TRADE_PCT, entry, risk)
         if qty < 1:
             self.rejected.append("unsizable")
             return _Response(status_code=400, text="one share does not fit", body={})

@@ -134,7 +134,9 @@ WS    TRADE_UPDATE                      # CLOSED / PARTIAL / SL_UPDATED
 **Capital model (per-cell testing lab).** Each (stock × strategy) cell owns its own ₹10k
 fund (`BASE_CELL_CAPITAL`) that COMPOUNDS with that cell's realized P&L. A trade deploys
 `cellCapital × leverage` of notional (INTRADAY 5×, delivery/swing 1×), and is also bounded
-by a per-trade risk cap of `cellCapital × RISK_PER_TRADE_PCT` (2%):
+by a per-trade risk cap of `cellCapital × leverage × RISK_PER_TRADE_PCT`: 2% of what the
+trade may deploy, so ₹200 for swing and ₹1,000 for intraday on a ₹10k fund (the owner's rule
+since 2026-11-19; before that it was 2% of the fund for both). Real-money orders keep their own, separate limit (`DHAN_MAX_RISK`, ₹200):
 `qty = min(floor(notional / entry), floor(riskBudget / |entry − stop|))`. If that is 0 (one
 share already breaks a bound) the signal is rejected and the backtest skips it too
 (`position_qty` in the engine, `sizePosition` in the API). There is **no funding gate** — every
@@ -198,7 +200,7 @@ applied by `configs/lifecycle.service.ts` after every close and on
 | Status | Meaning | Rule (defaults in `config/trading.json` → `lifecycle`) |
 |---|---|---|
 | `TESTING` | Collecting evidence | Default |
-| `PAUSED` | Kept losing | Last 20 trades average below −0.15R, or lost more than 15% of the cell's starting fund |
+| `PAUSED` | Kept losing | Last 20 trades average below −0.15R, or the cell's fund (₹10,000 plus the result of all its closed trades) has fallen to ₹5,000. The fund rule acts on the trade that crosses it |
 | `PROVEN` | Has earned trust | 40+ trades, average above +0.10R, profit factor 1.3+, positive in both halves |
 
 A paused cell keeps paper-trading so it can recover; those trades are stamped
