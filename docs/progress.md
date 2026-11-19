@@ -91,7 +91,7 @@ from; it is not a reason to expect profit.
 
 ## Phase 4 — Market condition ("smart switching")
 
-- [ ] Stage A: every trade stamped with the market condition at entry
+- [x] Stage A: every trade stamped with the market condition at entry
 - [ ] Stage B: rule table (strategy × condition); Portfolio shows "all trades" and "switch-approved" books
 - [ ] Stage C: weekly/monthly analyst report that proposes rule changes and new strategies
 
@@ -141,7 +141,7 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Reviewed demergers are scaled out when history is loaded (backtests and scanner)
 - [x] Flag shown on the Scorecard
 - [x] Whole series replaced when the data source has re-scaled its prices (split or dividend)
-- [x] The 27 flagged moves reviewed: 24 real market moves and 2 demergers listed; TRENT is a series stitched across its 1.5-for-1 split (repaired by a full re-download); KAYNES 2026-05-14 left for the owner
+- [x] The 27 flagged moves reviewed: 24 real market moves and 2 demergers listed. Two are left for the owner: TRENT 2026-01-01 (−33.0%, exactly a 1.5 ratio; a full re-download did not change it, so it is in the source data, most likely a corporate action the source did not adjust for) and KAYNES 2026-05-14 (−20.1%)
 
 ### 3. Honest numbers
 - [x] Slippage per share = the larger of one tick (₹0.05) and 5 basis points, in the engine and the API cost rule
@@ -150,7 +150,9 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Portfolio totals split into main book and test book (all Portfolio figures are the main book)
 
 ### 4. Market condition and switching
-- [ ] See Phase 4 above
+- [x] Stage A: every trade stamped with the market condition at entry (NIFTY regime, the day's direction across the roster, breadth, and whether the trade goes with the market). Nothing is blocked
+- [ ] Stage B: rule table and a "switch-approved" book next to "all trades"
+- [ ] Stage C: weekly/monthly analyst report
 
 ### 5. Real-money layer (Dhan), switched off
 - [ ] Service, tables and settings ported; known weaknesses fixed

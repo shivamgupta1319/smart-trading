@@ -180,6 +180,10 @@ export class SignalsService {
             peakPrice: dto.entryPrice,
             remainingQty: quantity,
             cellStatusAtEntry: cell?.status ?? null,
+            regimeAtEntry: dto.marketRegime ?? null,
+            marketDirectionAtEntry: dto.marketDirection ?? null,
+            breadthAtEntry: dto.marketBreadthPct ?? null,
+            alignedWithMarket: dto.alignedWithMarket ?? null,
           },
         });
         return sig;

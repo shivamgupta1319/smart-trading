@@ -128,8 +128,9 @@ that is Phase 4.
 ## Known limits of these numbers
 
 - All 27 daily moves above 20% in stored history have been reviewed
-  (`config/known_price_actions.json`). Two stocks stay flagged: TRENT (history stitched
-  across its split, to be re-downloaded) and KAYNES (one move on 2026-05-14 not yet confirmed).
+  (`config/known_price_actions.json`). Two stocks stay flagged until the
+  owner confirms what happened: TRENT (−33.0% on 2026-01-01, exactly a 1.5 ratio, present in
+  the source data) and KAYNES (−20.1% on 2026-05-14).
 - The intraday history is about 9 months. That is one market period, mostly falling.
 - Slippage is the larger of one ₹0.05 tick and 5 basis points per share and side. That is a
   cautious guess, not a measurement; real fills will tell. At 2 basis points the intraday

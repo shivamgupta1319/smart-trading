@@ -193,6 +193,13 @@ ALTER TABLE "Trade" ADD CONSTRAINT "Trade_signalId_fkey" FOREIGN KEY ("signalId"
 -- AddForeignKey
 ALTER TABLE "Trade" ADD CONSTRAINT "Trade_stockId_fkey" FOREIGN KEY ("stockId") REFERENCES "Stock"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- Market condition at entry (see apps/engine/market_condition.py)
+ALTER TABLE "Trade"
+  ADD COLUMN IF NOT EXISTS "regimeAtEntry"          TEXT,
+  ADD COLUMN IF NOT EXISTS "marketDirectionAtEntry" TEXT,
+  ADD COLUMN IF NOT EXISTS "breadthAtEntry"         DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "alignedWithMarket"      BOOLEAN;
+
 -- Stock data flag (see apps/engine/data_checks.py)
 ALTER TABLE "Stock"
   ADD COLUMN IF NOT EXISTS "dataFlag"       TEXT,

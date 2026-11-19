@@ -162,6 +162,11 @@ model Trade {
   remainingQty  Int       @default(1) // Remaining quantity after partials
   // The cell's lifecycle status when this trade was opened. "PAUSED" = test book.
   cellStatusAtEntry String?
+  // The market's condition when the trade was opened (labels; nothing is blocked on them).
+  regimeAtEntry          String?   // NIFTY daily: TRENDING_UP | TRENDING_DOWN | RANGING | VOLATILE
+  marketDirectionAtEntry String?   // the day so far across the roster: UP | DOWN | FLAT
+  breadthAtEntry         Float?    // % of roster stocks above their day open
+  alignedWithMarket      Boolean?  // BUY in UP / SELL in DOWN = true; the reverse = false; FLAT = null
   createdAt     DateTime  @default(now())
 
   signal        LiveSignal @relation(fields: [signalId], references: [id], onDelete: Cascade)

@@ -26,6 +26,7 @@ from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
 from entry_limits import entry_allowed, limits_for_bucket
 from live_fills import entry_geometry_ok, stop_exit_price, target_exit_price
 from data_checks import back_adjust
+from market_condition import aligned, breadth_pct, direction_from_moves, move_from_day_open
 # Shared intraday-exit primitives — same source of truth the backtest models.
 from intraday_exits import (
     calculate_progress,
@@ -183,6 +184,38 @@ def cell_activity_today(stock_id: int, strategy_name: str, now_ist: datetime):
     return trades_today, last_exit
 
 
+# The market's condition, stamped on every signal (see market_condition.py). `direction` and
+# `breadth` are refreshed at the end of each scan from the candles that scan downloaded, so a
+# signal carries the reading from the cycle before it (about two minutes old). `regime` is
+# NIFTY on daily bars, refreshed every half hour.
+market_state = {"regime": None, "direction": None, "breadth": None, "regime_checked": 0.0}
+REGIME_REFRESH_SECONDS = 1800
+
+
+def refresh_market_state(cache: dict) -> None:
+    """Update market_state from this cycle's candles. Never raises: a failed reading
+    leaves the label empty rather than stopping the scan."""
+    try:
+        per_symbol = {}
+        for (symbol, timeframe), df in cache.items():
+            if timeframe in ("15m", "5m") and symbol not in per_symbol:
+                move = move_from_day_open(df)
+                if move is not None:
+                    per_symbol[symbol] = move
+        moves = list(per_symbol.values())
+        market_state["direction"], _ = direction_from_moves(moves)
+        market_state["breadth"] = breadth_pct(moves) if market_state["direction"] else None
+    except Exception as e:
+        print(f"  [WARN] market direction not updated: {e}")
+    if time.monotonic() - market_state["regime_checked"] >= REGIME_REFRESH_SECONDS:
+        market_state["regime_checked"] = time.monotonic()
+        try:
+            from routers.regime import INDEX_SYMBOL, _classify, _load_yf
+            market_state["regime"] = _classify(_load_yf(INDEX_SYMBOL, is_index=True))["regime"]
+        except Exception as e:
+            print(f"  [WARN] market regime not updated: {e}")
+
+
 # Newest candle each cell has already been evaluated on: {(symbol, tf, strategy): timestamp}.
 last_evaluated = {}
 # How many just-completed candles to look back over when a cycle ran long.
@@ -326,6 +359,11 @@ def check_and_fire_signal(config, cache, last_fired_times):
             "stopLoss": stop_loss,
             "target": target,
             "holdDuration": STRATEGY_HOLD_DURATIONS.get(strategy_name, "UNKNOWN"),
+            # The market's condition as this trade is opened (labels only; nothing is blocked).
+            "marketRegime": market_state["regime"],
+            "marketDirection": market_state["direction"],
+            "marketBreadthPct": market_state["breadth"],
+            "alignedWithMarket": aligned(signal_type, market_state["direction"]),
         }
 
         print(f"  🚨 SIGNAL: {signal_type} {symbol} @ ₹{payload['entryPrice']} ({strategy_name})")
@@ -663,6 +701,11 @@ def main():
             for config in configs:
                 print(f"  Checking {config[4]} with {config[2]} ({config[3]})...")
                 check_and_fire_signal(config, cache, last_fired_times)
+
+        refresh_market_state(cache)
+        print(f"  Market: {market_state['regime'] or 'regime unknown'}, today "
+              f"{market_state['direction'] or 'direction unknown'}"
+              + (f" ({market_state['breadth']}% of stocks above their open)" if market_state['breadth'] is not None else ""))
 
         elapsed = time.monotonic() - cycle_start
         # Stall detection: if a cycle takes longer than the poll interval, the
