@@ -23,6 +23,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from db.client import engine
 from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
+from entry_limits import entry_allowed, limits_for_bucket
 # Shared intraday-exit primitives — same source of truth the backtest models.
 from intraday_exits import (
     calculate_progress,
@@ -141,6 +142,31 @@ def fetch_live_candles(symbol: str, timeframe: str) -> pd.DataFrame:
     return df
 
 
+def cell_activity_today(stock_id: int, strategy_name: str, now_ist: datetime):
+    """(trades this cell entered today, when its last trade closed) for the entry limits.
+
+    Read from the Trade table, not scanner memory, so the limits survive a restart.
+    `Trade.entryTime` / `exitTime` are stored UTC-naive; both sides are converted so
+    the caller works in IST-naive time, like the backtest's bar index.
+    """
+    day_start_utc = (
+        now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+        .astimezone(timezone.utc).replace(tzinfo=None)
+    )
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT COUNT(*) FILTER (WHERE "entryTime" >= :day_start),
+                   MAX("exitTime")
+            FROM "Trade"
+            WHERE "stockId" = :stock_id AND "strategyName" = :strategy
+        """), {"day_start": day_start_utc, "stock_id": stock_id, "strategy": strategy_name}).fetchone()
+    trades_today = int(row[0] or 0)
+    last_exit = row[1]
+    if last_exit is not None:
+        last_exit = last_exit.replace(tzinfo=timezone.utc).astimezone(IST).replace(tzinfo=None)
+    return trades_today, last_exit
+
+
 def check_and_fire_signal(config, cache, last_fired_times):
     stock_id = config[1]
     strategy_name = config[2]
@@ -172,8 +198,11 @@ def check_and_fire_signal(config, cache, last_fired_times):
             print(f"  [INFO] {symbol} ({strategy_name}): No signal")
             return
             
-        # Prevent duplicate signals for the exact same candle
-        last_fired = last_fired_times.get(cache_key)
+        # Prevent duplicate signals for the exact same candle. Keyed per STRATEGY:
+        # keyed on (symbol, timeframe) alone, one strategy firing on a candle
+        # silently blocked every other strategy on that stock and timeframe.
+        fired_key = (symbol, timeframe, strategy_name)
+        last_fired = last_fired_times.get(fired_key)
         if last_fired == candle_time:
             print(f"  [INFO] {symbol} ({strategy_name}): Signal already fired for this candle")
             return
@@ -191,6 +220,17 @@ def check_and_fire_signal(config, cache, last_fired_times):
         if signal_type == "SELL" and hold_duration != "INTRADAY":
             print(f"  [INFO] {symbol} ({strategy_name}): Dropped SELL for non-intraday ({hold_duration}) — long-only")
             return
+
+        # Per-cell entry limits (daily cap + cooldown) — same rule the backtest applies.
+        limits = limits_for_bucket(hold_duration)
+        if limits is not None:
+            now_naive = now_ist.replace(tzinfo=None)
+            trades_today, last_exit = cell_activity_today(stock_id, strategy_name, now_ist)
+            allowed, why = entry_allowed(limits, trades_today, last_exit, now_naive)
+            if not allowed:
+                print(f"  [INFO] {symbol} ({strategy_name}): entry blocked — {why}")
+                last_fired_times[fired_key] = candle_time
+                return
         payload = {
             "stockId": stock_id,
             "strategyName": strategy_name,
@@ -206,7 +246,7 @@ def check_and_fire_signal(config, cache, last_fired_times):
         print(f"  ✅ Posted to NestJS: {response.status_code}")
         
         # Mark this candle as fired
-        last_fired_times[cache_key] = candle_time
+        last_fired_times[fired_key] = candle_time
 
     except Exception as e:
         print(f"  [ERROR] {symbol}: {e}")

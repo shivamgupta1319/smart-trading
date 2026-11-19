@@ -8,6 +8,7 @@ from backtest_config import (
     RISK, CostModel, uses_trailing_exit, trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD,
     LEVERAGE_INTRADAY, LEVERAGE_DELIVERY, RISK_PER_TRADE_PCT, time_stop_bars_for_bucket,
 )
+from entry_limits import entry_allowed, limits_for_bucket
 from intraday_exits import (
     PHASE2_TRIGGER, PHASE3_TRIGGER, REVERSAL_ZONE_START,
     PARTIAL_FRACTION, MIN_QTY_FOR_PARTIAL, SQUARE_OFF_TIME,
@@ -182,6 +183,12 @@ class BaseStrategy(ABC):
         max_dd = 0.0
         max_dd_pct = 0.0
         skipped_invalid = 0
+        # Entry-limit state (None for buckets that are not limited).
+        limits = limits_for_bucket(_bucket)
+        limit_day = None       # trading day `trades_on_day` counts
+        trades_on_day = 0
+        last_exit_ts = None    # bar on which this cell's previous trade closed
+        skipped_limits = 0
 
         i = 0
         while i < n - 1:
@@ -197,6 +204,19 @@ class BaseStrategy(ABC):
             if not math.isfinite(entry_raw) or entry_raw <= 0:
                 i += 1
                 continue
+
+            # Per-cell entry limits (daily cap + cooldown after an exit) — the same
+            # `entry_allowed` the live scanner calls. A blocked signal is dropped,
+            # exactly as live drops it; the next signal is judged on its own.
+            entry_ts = ts[entry_idx]
+            if limits is not None and hasattr(entry_ts, "date"):
+                if entry_ts.date() != limit_day:
+                    limit_day, trades_on_day = entry_ts.date(), 0
+                ok, _why = entry_allowed(limits, trades_on_day, last_exit_ts, entry_ts)
+                if not ok:
+                    skipped_limits += 1
+                    i += 1
+                    continue
 
             # Adverse slippage on entry (buy fills higher, short fills lower)
             entry = entry_raw * (1 + slip) if ttype == 1 else entry_raw * (1 - slip)
@@ -327,9 +347,14 @@ class BaseStrategy(ABC):
             if dd_pct > max_dd_pct:
                 max_dd_pct = dd_pct
 
+            if limits is not None:
+                trades_on_day += 1
+                last_exit_ts = ts[exit_idx] if hasattr(ts[exit_idx], "date") else None
+
             i = exit_idx + 1  # no overlapping positions
 
         return {
+            "skipped_limits": skipped_limits,
             "net_trades": net_trades,
             "gross_trades": gross_trades,
             "r_trades": r_trades,
