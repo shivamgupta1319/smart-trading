@@ -184,4 +184,4 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Intraday risk per trade is 2% of the ₹50,000 a trade may hold (₹1,000), not 2% of the ₹10,000 fund. Swing unchanged (₹200). A cell is now paused when ₹5,000 is left of its ₹10,000 fund (this replaces "lost 15% in the last 20 trades"); the average-R pause rule is unchanged. Backtest and live use the same rule; engine `2026.11.19-risk5x`. Real-money orders keep their separate ₹200 limit
 - [x] Portfolio: profit factor shows "—" until there is a losing trade; flat trades are counted and named
 - [x] Validate: the engine's real reason is shown (it was replaced by "internal server error")
-- [ ] Fresh start: clear the roster and the trades, and start again from a selected roster
+- [x] Fresh start (owner's decision): all 390 cells and all 10 trades of the first day deleted; the roster is now 100 cells chosen from the backtest on engine `2026.11.19-risk5x` (rule and list in `infra/scripts/seed-starting-roster.sql`): 7 intraday, 93 swing. Paper trading restarts on 2026-11-20 with every cell at ₹10,000
