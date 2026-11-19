@@ -1,16 +1,13 @@
 from .intraday.orb_15m import ORB15mStrategy
-from .intraday.vwap_supertrend import VWAPSupertrendStrategy
 from .intraday.ema_rsi import EMARSIStrategy
 from .intraday.macd_zero import MACDZeroStrategy
 from .intraday.inside_bar import InsideBarStrategy
 from .intraday.vwap_macd_rsi import VWAPMACDRSIStrategy
 from .intraday.gap_and_go import GapAndGoStrategy
-from .intraday.ema20_pullback import EMA20PullbackStrategy
 from .intraday.cpr_breakout import CPRBreakoutStrategy
 from .intraday.pdh_pdl_breakout import PDHPDLBreakoutStrategy
 from .intraday.bb_mean_reversion_intraday import BBMeanReversionIntradayStrategy
 from .intraday.smc_fvg import SMCFVGStrategy
-from .intraday.vol_profile_poc import VolumeProfilePOCStrategy
 from .intraday.rvol_orb import RVOLORBStrategy
 from .swing.sma44_pullback import SMA44PullbackStrategy
 from .swing.ema200_macd import EMA200MACDStrategy
@@ -30,20 +27,25 @@ from .swing.mtf_alignment import MTFAlignmentStrategy
 from .swing.channel_oscillation import ChannelOscillationStrategy
 from .swing.volume_climax import VolumeClimaxStrategy
 
+# Retired 2026-11 on live paper results (docs/strategies.md has the detail):
+#   EMA20_Pullback      1,557 live trades, 33% wins, -Rs 6.56 lakh; fires on every bar its
+#                       condition holds, so it re-entered about three times per stock per day.
+#   Volume_Profile_POC  190 trades, 32% wins, -Rs 1.07 lakh; its "POC" is the price of the
+#                       highest-volume bar, not a volume profile, and goes stale.
+#   VWAP_Supertrend     negative in both apps (130 and 109 trades); re-fires on each VWAP
+#                       re-cross with a target rarely reachable before the square-off.
+# Old ActiveConfiguration rows naming them are skipped by the scanner ("Unknown strategy").
 STRATEGY_REGISTRY = {
     "15m_ORB": ORB15mStrategy(),
-    "VWAP_Supertrend": VWAPSupertrendStrategy(),
     "VWAP_MACD_RSI": VWAPMACDRSIStrategy(),
     "EMA_RSI": EMARSIStrategy(),
     "MACD_Zero": MACDZeroStrategy(),
     "Inside_Bar": InsideBarStrategy(),
     "Gap_And_Go": GapAndGoStrategy(),
-    "EMA20_Pullback": EMA20PullbackStrategy(),
     "CPR_Breakout": CPRBreakoutStrategy(),
     "PDH_PDL_Breakout": PDHPDLBreakoutStrategy(),
     "BB_Mean_Reversion_Intraday": BBMeanReversionIntradayStrategy(),
     "SMC_FVG": SMCFVGStrategy(),
-    "Volume_Profile_POC": VolumeProfilePOCStrategy(),
     "RVOL_ORB": RVOLORBStrategy(),
     "SMA44_Pullback": SMA44PullbackStrategy(),
     "EMA200_MACD": EMA200MACDStrategy(),
@@ -66,18 +68,15 @@ STRATEGY_REGISTRY = {
 
 STRATEGY_TIMEFRAMES = {
     "15m_ORB": "15m",
-    "VWAP_Supertrend": "15m",
     "VWAP_MACD_RSI": "15m",
     "EMA_RSI": "5m",
     "MACD_Zero": "15m",
     "Inside_Bar": "15m",
     "Gap_And_Go": "5m",
-    "EMA20_Pullback": "5m",
     "CPR_Breakout": "5m",
     "PDH_PDL_Breakout": "5m",
     "BB_Mean_Reversion_Intraday": "15m",
     "SMC_FVG": "15m",
-    "Volume_Profile_POC": "15m",
     "RVOL_ORB": "15m",
     "SMA44_Pullback": "1D",
     "EMA200_MACD": "1D",
@@ -105,18 +104,15 @@ STRATEGY_TIMEFRAMES = {
 # LONG_POSITIONAL: 1-6 months
 STRATEGY_HOLD_DURATIONS = {
     "15m_ORB": "INTRADAY",
-    "VWAP_Supertrend": "INTRADAY",
     "VWAP_MACD_RSI": "INTRADAY",
     "EMA_RSI": "INTRADAY",
     "MACD_Zero": "INTRADAY",
     "Inside_Bar": "INTRADAY",
     "Gap_And_Go": "INTRADAY",
-    "EMA20_Pullback": "INTRADAY",
     "CPR_Breakout": "INTRADAY",
     "PDH_PDL_Breakout": "INTRADAY",
     "BB_Mean_Reversion_Intraday": "INTRADAY",
     "SMC_FVG": "INTRADAY",
-    "Volume_Profile_POC": "INTRADAY",
     "RVOL_ORB": "INTRADAY",
     "SMA44_Pullback": "SHORT_SWING",
     "EMA200_MACD": "SHORT_SWING",
