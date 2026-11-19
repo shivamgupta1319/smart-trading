@@ -91,6 +91,52 @@ def parse_news_item(item):
 # All AI calls go through the AI router (see ai_client.py).
 from ai_client import llm  # noqa: E402
 
+async def _rss_titles() -> list[str]:
+    """Newest headlines from the Indian market RSS feeds (the same ones the News page uses)."""
+    async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0 (SmartTrader)"}) as client:
+        results = await asyncio.gather(*[_fetch_rss(client, name, url) for name, url in NEWS_RSS_FEEDS])
+    items = sorted((a for feed in results for a in feed), key=lambda x: x["providerPublishTime"], reverse=True)
+    titles, seen = [], set()
+    for a in items:
+        key = a["title"].strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            titles.append(a["title"])
+    return titles
+
+
+async def headlines_for(ticker, limit: int, match: str | None = None) -> list[str]:
+    """Up to `limit` recent headlines, and never an exception.
+
+    Yahoo's news feed is tried first. It fails often ("Yahoo Finance is currently down")
+    while prices and company data keep working, and it used to take the whole analysis down
+    with it. On failure or an empty answer the app's own RSS feeds are used; with `match`
+    (a stock symbol) only headlines naming it are kept.
+    """
+    try:
+        raw = await asyncio.to_thread(lambda: ticker.news)
+        titles = [n["title"] for n in (parse_news_item(x) for x in (raw or [])) if n["title"]]
+        if titles:
+            return titles[:limit]
+    except Exception as exc:
+        print(f"[analysis] Yahoo news failed: {type(exc).__name__}: {str(exc)[:80]}")
+    try:
+        titles = await _rss_titles()
+    except Exception as exc:
+        print(f"[analysis] RSS news failed: {type(exc).__name__}: {exc}")
+        return []
+    if match:
+        needle = match.replace(".NS", "").lower()
+        titles = [t for t in titles if needle in t.lower()]
+    return titles[:limit]
+
+
+DATA_PROVIDER_BUSY = (
+    "The market data provider (Yahoo Finance) did not answer just now. "
+    "This is usually temporary. Try again in a minute."
+)
+
+
 @router.get("/dashboard")
 async def get_dashboard_analysis():
     try:
@@ -103,16 +149,9 @@ async def get_dashboard_analysis():
             print(f"[analysis] NIFTY history failed: {type(exc).__name__}: {exc}")
             return {
                 "status": "error",
-                "message": (
-                    "The market data provider (Yahoo Finance) did not answer just now. "
-                    "This is usually temporary. Press Refresh Analysis in a minute."
-                ),
+                "message": DATA_PROVIDER_BUSY,
             }
-        try:
-            news = ticker.news
-        except Exception as exc:
-            print(f"[analysis] NIFTY news failed: {type(exc).__name__}: {exc}")
-            news = []
+        news_titles = await headlines_for(ticker, 5) or ["No recent news available"]
 
         if hist.empty:
             current_price = "Unknown"
@@ -121,9 +160,6 @@ async def get_dashboard_analysis():
             current_price = hist["Close"].iloc[-1]
             prev_price = hist["Close"].iloc[0] # 1 month ago
             price_change = ((current_price - prev_price) / prev_price) * 100
-
-        parsed_news = [parse_news_item(n) for n in news] if news else []
-        news_titles = [n["title"] for n in parsed_news[:5] if n["title"]] or ["No recent news available"]
 
         prompt = f"""
         Analyze the current state of the Indian Stock Market (Nifty 50).
@@ -140,7 +176,8 @@ async def get_dashboard_analysis():
         analysis = await llm.generate(prompt)
         return {"status": "success", "analysis": analysis}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        print(f"[analysis] failed: {type(e).__name__}: {e}")
+        return {"status": "error", "message": "The analysis could not be prepared just now. Try again in a minute."}
 
 @router.get("/news")
 async def get_market_news():
@@ -187,7 +224,8 @@ async def get_market_news():
             "articles": all_news
         }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        print(f"[analysis] failed: {type(e).__name__}: {e}")
+        return {"status": "error", "message": "The analysis could not be prepared just now. Try again in a minute."}
 
 @router.get("/stock/{symbol}")
 async def get_stock_analysis(symbol: str):
@@ -195,12 +233,21 @@ async def get_stock_analysis(symbol: str):
     yf_symbol = symbol if symbol.endswith(".NS") else f"{symbol}.NS"
     try:
         ticker = yf.Ticker(yf_symbol)
-        info = ticker.info
-        hist = ticker.history(period="6mo")
-        news = ticker.news
-        
+        # Three separate calls, each allowed to fail on its own. Only the price history
+        # is essential; company details and headlines are extras.
+        try:
+            hist = ticker.history(period="6mo")
+        except Exception as exc:
+            print(f"[analysis] {yf_symbol} history failed: {type(exc).__name__}: {str(exc)[:80]}")
+            return {"status": "error", "message": DATA_PROVIDER_BUSY}
+        try:
+            info = ticker.info or {}
+        except Exception as exc:
+            print(f"[analysis] {yf_symbol} info failed: {type(exc).__name__}: {str(exc)[:80]}")
+            info = {}
+
         if hist.empty:
-            return {"status": "error", "message": "Failed to fetch historical data for this stock."}
+            return {"status": "error", "message": "No price history is available for this stock yet."}
             
         current_price = hist["Close"].iloc[-1]
         high_52w = info.get("fiftyTwoWeekHigh", "Unknown")
@@ -209,8 +256,7 @@ async def get_stock_analysis(symbol: str):
         pe_ratio = info.get("trailingPE", "Unknown")
         sector = info.get("sector", "Unknown")
         
-        parsed_news = [parse_news_item(n) for n in news] if news else []
-        news_titles = [n["title"] for n in parsed_news[:3] if n["title"]] or ["No recent news available"]
+        news_titles = await headlines_for(ticker, 3, match=symbol) or ["No recent news available"]
         
         prompt = f"""
         Provide a comprehensive quantitative research report for the Indian stock: {symbol} (Sector: {sector}).
@@ -235,7 +281,8 @@ async def get_stock_analysis(symbol: str):
         analysis = await llm.generate(prompt)
         return {"status": "success", "analysis": analysis}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        print(f"[analysis] failed: {type(e).__name__}: {e}")
+        return {"status": "error", "message": "The analysis could not be prepared just now. Try again in a minute."}
 import pandas_ta as ta
 
 @router.get("/sectors")
@@ -299,7 +346,8 @@ async def get_sectors_analysis():
             "lagging": lagging,
         }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        print(f"[analysis] failed: {type(e).__name__}: {e}")
+        return {"status": "error", "message": "The analysis could not be prepared just now. Try again in a minute."}
 
 class SectorStockList(BaseModel):
     sector_name: str
@@ -333,7 +381,8 @@ async def analyze_sector_list(payload: SectorStockList):
         analysis = await llm.generate(prompt)
         return {"status": "success", "analysis": analysis}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        print(f"[analysis] failed: {type(e).__name__}: {e}")
+        return {"status": "error", "message": "The analysis could not be prepared just now. Try again in a minute."}
 
 @router.get("/stock/{symbol}/indicators")
 async def get_technical_indicators(symbol: str, timeframe: str = "1d"):
@@ -401,4 +450,5 @@ async def get_technical_indicators(symbol: str, timeframe: str = "1d"):
         
         return {"status": "success", "indicators": indicators, "current_price": round(close_price, 2)}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        print(f"[analysis] failed: {type(e).__name__}: {e}")
+        return {"status": "error", "message": "The analysis could not be prepared just now. Try again in a minute."}
