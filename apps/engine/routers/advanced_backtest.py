@@ -93,7 +93,7 @@ def _resolve(strategy_name: str, symbol: str, timeframe: str):
     strategy = STRATEGY_REGISTRY[strategy_name]
     df = load_historical(stock_id, timeframe)
     if len(df) < 60:
-        raise HTTPException(status_code=400, detail="Need >= 60 bars for advanced backtests")
+        raise HTTPException(status_code=400, detail=f"needs at least 60 candles of history; this stock has {len(df)}.")
     return strategy, df
 
 
@@ -122,7 +122,10 @@ def run_monte_carlo(req: MonteCarloRequest):
     sim = strategy.simulate(df)
     trades = np.array(sim["net_trades"], dtype=float)
     if trades.size < 5:
-        raise HTTPException(status_code=400, detail="Need >= 5 trades to bootstrap a distribution")
+        raise HTTPException(
+            status_code=400,
+            detail=f"needs at least 5 backtest trades to shuffle; this stock and strategy have {trades.size}.",
+        )
 
     iters = max(100, min(req.iterations, 20000))
     capital = RISK.initial_capital
