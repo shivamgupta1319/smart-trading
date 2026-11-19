@@ -1,7 +1,5 @@
 # ============================================================================
-#  ISOLATED v2 stack (project: smart-trading-v2).
-#  Runs in parallel with the live `smart-trading` stack — different project
-#  name, container names, host ports, and volume, so nothing collides.
+#  Local development stack (project: smart-trading).
 #
 #  Secrets are read from the gitignored root `.env` (see .env.example).
 #  Start:  docker compose up -d     Stop:  docker compose down
