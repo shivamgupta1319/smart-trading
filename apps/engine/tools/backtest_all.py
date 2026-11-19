@@ -14,9 +14,9 @@ What the columns are for
   skipped_limits / skipped_unsizable            signals dropped by the daily cap/cooldown
                                                 or because one share broke the risk cap
   cannot_evaluate                               the strategy returned no signal column
-  price_jump                                    the stock has an unexplained >20% daily
-                                                move in stored history (possible split /
-                                                demerger cliff) — treat its rows with care
+  price_jump                                    daily moves above 20% that nobody has
+                                                reviewed (config/known_price_actions.json)
+                                                — treat that stock's rows with care
 """
 from __future__ import annotations
 
@@ -34,10 +34,9 @@ from sqlalchemy import text
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backtest_config import ENGINE_VERSION  # noqa: E402
+from data_checks import back_adjust, unexplained_jumps  # noqa: E402
 from db.client import engine  # noqa: E402
 from strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES, STRATEGY_HOLD_DURATIONS  # noqa: E402
-
-JUMP_LOG_RETURN = 0.20  # |ln(close/prev close)| above this on a daily bar is flagged
 
 FIELDS = [
     "symbol", "strategy", "timeframe", "bucket", "bars", "span_years", "trades", "win_pct",
@@ -56,14 +55,6 @@ def load(conn, stock_id: int, timeframe: str) -> pd.DataFrame:
         return df
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     return df.set_index("timestamp")
-
-
-def price_jumps(daily: pd.DataFrame) -> list[str]:
-    """Dates of daily closes that moved more than JUMP_LOG_RETURN from the prior close."""
-    if daily.empty:
-        return []
-    lr = np.log(daily["Close"] / daily["Close"].shift(1)).abs()
-    return [d.strftime("%Y-%m-%d") for d in lr[lr > JUMP_LOG_RETURN].index]
 
 
 def _mean(xs) -> float | None:
@@ -114,7 +105,10 @@ def main() -> int:
             frames: dict[str, pd.DataFrame] = {}
             for tf in sorted(set(STRATEGY_TIMEFRAMES.values())):
                 frames[tf] = load(conn, stock_id, tf)
-            jumps = price_jumps(frames.get("1D", pd.DataFrame()))
+            # Only moves nobody has reviewed are flagged; reviewed demergers are scaled out.
+            daily = frames.get("1D", pd.DataFrame())
+            jumps = [str(j) for j in unexplained_jumps(symbol, daily["Close"])] if not daily.empty else []
+            frames = {tf: back_adjust(f, symbol) for tf, f in frames.items()}
             for name, strategy in STRATEGY_REGISTRY.items():
                 if only_s and name not in only_s:
                     continue

@@ -25,6 +25,10 @@ model Stock {
   symbol       String               @unique
   isActive     Boolean              @default(true)
   sector       String?              // GICS-style sector tag (backfilled from yfinance) for risk concentration
+  // Set by the engine when stored daily history has a large move nobody has reviewed
+  // (config/known_price_actions.json). NULL = nothing to review.
+  dataFlag       String?
+  dataFlagDetail String?
   createdAt    DateTime             @default(now())
 
   historicalData      HistoricalData[]

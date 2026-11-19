@@ -193,6 +193,11 @@ ALTER TABLE "Trade" ADD CONSTRAINT "Trade_signalId_fkey" FOREIGN KEY ("signalId"
 -- AddForeignKey
 ALTER TABLE "Trade" ADD CONSTRAINT "Trade_stockId_fkey" FOREIGN KEY ("stockId") REFERENCES "Stock"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- Stock data flag (see apps/engine/data_checks.py)
+ALTER TABLE "Stock"
+  ADD COLUMN IF NOT EXISTS "dataFlag"       TEXT,
+  ADD COLUMN IF NOT EXISTS "dataFlagDetail" TEXT;
+
 -- CreateTable
 CREATE TABLE IF NOT EXISTS "SentDigest" (
     "id" SERIAL NOT NULL,

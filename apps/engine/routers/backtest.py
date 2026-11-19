@@ -7,6 +7,8 @@ from db.client import engine
 from strategies import STRATEGY_REGISTRY
 from reports import save_report as _upsert_report
 
+from data_checks import back_adjust
+
 router = APIRouter()
 
 
@@ -45,7 +47,14 @@ def load_historical(stock_id: int, timeframe: str) -> pd.DataFrame:
     df = pd.DataFrame(rows, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df = df.set_index('timestamp')
-    return df
+    # Scale prices before a reviewed demerger so the series is continuous (data_checks).
+    return back_adjust(df, _symbol_of(stock_id))
+
+
+def _symbol_of(stock_id: int) -> str:
+    with engine.connect() as conn:
+        row = conn.execute(text('SELECT symbol FROM "Stock" WHERE id = :sid'), {"sid": stock_id}).fetchone()
+    return row[0] if row else ""
 
 
 def save_report(stock_id: int, strategy_name: str, timeframe: str, metrics: dict):
