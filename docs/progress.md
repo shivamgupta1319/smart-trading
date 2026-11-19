@@ -83,9 +83,11 @@ from; it is not a reason to expect profit.
 
 ## Phase 3 — Cell lifecycle and scorecard
 
-- [ ] Cell status: `TESTING` → `PROVEN` → `PAUSED`, with the reason stored
-- [ ] Automatic pause for cells that keep losing; paused cells continue in a test book
-- [ ] Scorecard page: backtest next to live, costs, status, reason for every cell
+- [x] Cell status: `TESTING` → `PROVEN` → `PAUSED`, with the reason stored (API; rules in `config/trading.json`)
+- [x] Automatic pause for cells that keep losing; paused cells continue in a test book (`Trade.cellStatusAtEntry`)
+- [x] `GET /api/configs/scorecard` and an end-to-end check (`infra/scripts/e2e-smoke.sh`)
+- [ ] Portfolio totals split into main book and test book
+- [x] Scorecard page (`/scorecard`): status and reason, live result against the backtest, first and second half, net after costs, main and test book totals
 
 ## Phase 4 — Market condition ("smart switching")
 

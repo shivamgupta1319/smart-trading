@@ -157,6 +157,23 @@ found, stop-outs at the worse of stop and live price, P&L booked after costs. En
 single modules imported by both paths. Known remaining difference: live polls every 100
 seconds, so a stop can be noticed late; the backtest books the stop level.
 
+**Cell lifecycle.** Every cell (`ActiveConfiguration`) has a `status` that the API sets from
+the cell's own closed paper trades, after costs, measured in R (`common/lifecycle.ts`,
+applied by `configs/lifecycle.service.ts` after every close and on
+`POST /api/configs/evaluate`):
+
+| Status | Meaning | Rule (defaults in `config/trading.json` → `lifecycle`) |
+|---|---|---|
+| `TESTING` | Collecting evidence | Default |
+| `PAUSED` | Kept losing | Last 20 trades average below −0.15R, or lost more than 15% of the cell's starting fund |
+| `PROVEN` | Has earned trust | 40+ trades, average above +0.10R, profit factor 1.3+, positive in both halves |
+
+A paused cell keeps paper-trading so it can recover; those trades are stamped
+`Trade.cellStatusAtEntry = 'PAUSED'` (the test book) and it returns to `TESTING` after a full
+window of new trades averaging above +0.05R. `GET /api/configs/scorecard` returns, per cell,
+the status and reason, the live record, main-book and test-book totals, and the latest
+backtest. `infra/scripts/e2e-smoke.sh` exercises all of this against a throwaway database.
+
 **Scanner UX.** `/scanner` is split into two tabs: **Live Scanner** (connection status +
 active signals) and **Monitored Stocks** (a table of each monitored stock×strategy with its
 latest persisted `BacktestReport`, plus Re-run — recomputes via `POST /api/engine/run-backtest`,

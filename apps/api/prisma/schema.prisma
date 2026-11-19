@@ -93,12 +93,19 @@ model ActiveConfiguration {
   stockId      Int
   strategyName String
   timeframe    String
+  // Lifecycle, set by the API from this cell's own closed trades (common/lifecycle.ts):
+  // "TESTING" (default) | "PROVEN" | "PAUSED". A PAUSED cell keeps paper-trading, but
+  // its trades are stamped PAUSED and kept out of the main book.
+  status          String    @default("TESTING")
+  statusReason    String?
+  statusChangedAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
 
   @@unique([stockId, strategyName])
+  @@index([status])
 }
 
 model LiveSignal {
@@ -149,6 +156,8 @@ model Trade {
   peakPrice     Decimal?  @db.Decimal(18, 4)   // Best favorable price reached during the trade
   realizedPnl   Decimal   @default(0) @db.Decimal(18, 4) // PnL accumulated from partial exits
   remainingQty  Int       @default(1) // Remaining quantity after partials
+  // The cell's lifecycle status when this trade was opened. "PAUSED" = test book.
+  cellStatusAtEntry String?
   createdAt     DateTime  @default(now())
 
   signal        LiveSignal @relation(fields: [signalId], references: [id], onDelete: Cascade)

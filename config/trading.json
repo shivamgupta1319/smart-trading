@@ -5,7 +5,8 @@
     "An environment variable with the same name overrides a value (for experiments).",
     "Percent fields ending in _PCT under 'costs' are percentages (0.03 = 0.03%).",
     "RISK_PER_TRADE_PCT is a FRACTION of the cell fund (0.02 = 2%), never 2.",
-    "MAX_COST_TO_RISK: a trade is skipped when its round-trip cost (charges + slippage both ways) is more than this share of the rupees it risks. 0 turns the rule off."
+    "MAX_COST_TO_RISK: a trade is skipped when its round-trip cost (charges + slippage both ways) is more than this share of the rupees it risks. 0 turns the rule off.",
+    "lifecycle: when a cell (one stock with one strategy) is paused, resumed or marked proven. Judged on its closed paper trades after costs, in R (profit or loss divided by the rupees risked)."
   ],
   "capital": {
     "BASE_CELL_CAPITAL": 10000,
@@ -29,5 +30,14 @@
     "BT_DELIVERY_STAMP_BUY_PCT": 0.015,
     "BT_DP_CHARGE_PER_DELIVERY_SELL": 14.75,
     "BT_SLIPPAGE_BPS": 5
+  },
+  "lifecycle": {
+    "LIFECYCLE_WINDOW_TRADES": 20,
+    "LIFECYCLE_PAUSE_AVG_R": -0.15,
+    "LIFECYCLE_PAUSE_LOSS_PCT": 0.15,
+    "LIFECYCLE_RESUME_AVG_R": 0.05,
+    "LIFECYCLE_PROVEN_MIN_TRADES": 40,
+    "LIFECYCLE_PROVEN_AVG_R": 0.1,
+    "LIFECYCLE_PROVEN_PROFIT_FACTOR": 1.3
   }
 }

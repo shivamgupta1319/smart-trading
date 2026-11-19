@@ -992,3 +992,540 @@ tbody td {
     transform: translateY(0);
   }
 }
+/* ===== SCORECARD (cell lifecycle) ===== */
+.sc-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.sc-live-region:empty {
+  display: none;
+}
+
+.sc-live-region .alert,
+.sc-error {
+  margin-bottom: 1rem;
+}
+
+.sc-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.up {
+  color: var(--green);
+}
+
+.down {
+  color: var(--red);
+}
+
+.flat {
+  color: var(--text-secondary);
+}
+
+/* Two books, stated as plain figures rather than cards */
+.sc-books {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 1rem 2.5rem;
+  padding: 1rem 0 1.25rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.25rem;
+}
+
+.sc-book {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: 0.75rem;
+  row-gap: 0.15rem;
+}
+
+.sc-book-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sc-book-pnl {
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+
+.sc-book-note {
+  grid-column: 1 / -1;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  max-width: 44ch;
+}
+
+.sc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.sc-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.sc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-light);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 0.875rem var(--font-ui);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.sc-chip:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.sc-chip.on {
+  background: var(--bg-card-hover);
+  border-color: var(--cyan);
+  color: var(--text-primary);
+}
+
+.sc-chip-count {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.sc-chip.proven .sc-chip-count {
+  color: var(--green);
+}
+
+.sc-chip.paused .sc-chip-count {
+  color: var(--yellow);
+}
+
+.sc-chip:focus-visible,
+.sc-symbol:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.sc-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.sc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.sc-field-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.sc-field .form-select {
+  min-height: 44px;
+  font-size: 1rem;
+  min-width: 12rem;
+}
+
+/* Table */
+.sc-table th.sc-num,
+.sc-table td.sc-num {
+  text-align: right;
+}
+
+.sc-table tbody td {
+  vertical-align: top;
+}
+
+.sc-symbol {
+  font-weight: 700;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.sc-symbol:hover {
+  color: var(--cyan);
+}
+
+.sc-strategy,
+.sc-sub,
+.sc-reason {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 0.2rem;
+}
+
+.sc-reason {
+  max-width: 30ch;
+  overflow-wrap: anywhere;
+}
+
+.sc-tf {
+  color: var(--text-muted);
+  margin-left: 0.25rem;
+}
+
+.sc-status {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.78rem;
+}
+
+.sc-status.testing {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+}
+
+.sc-status.proven {
+  background: var(--green-glow);
+  color: var(--green);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.sc-status.paused {
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--yellow);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+.sc-halves {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-then {
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.sc-pnl {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The gauge: live result against the backtest's promise, −1R … +1R */
+.sc-gauge {
+  min-width: 11rem;
+  max-width: 17rem;
+}
+
+.sc-gauge-track {
+  position: relative;
+  height: 14px;
+  margin: 2px 7px 6px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.sc-gauge-zero {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: -4px;
+  width: 1px;
+  background: var(--text-muted);
+}
+
+.sc-gauge-link {
+  position: absolute;
+  top: 6px;
+  height: 2px;
+  opacity: 0.55;
+}
+
+.sc-gauge-link.up {
+  background: var(--green);
+}
+
+.sc-gauge-link.down {
+  background: var(--red);
+}
+
+.sc-gauge-bt,
+.sc-legend-bt {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--text-secondary);
+  border-radius: 2px;
+  background: var(--bg-card);
+}
+
+.sc-gauge-bt {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.sc-gauge-live,
+.sc-legend-live {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+.sc-gauge-live {
+  position: absolute;
+  top: 1px;
+  transform: translateX(-50%);
+}
+
+.sc-gauge-live.up {
+  background: var(--green);
+}
+
+.sc-gauge-live.down {
+  background: var(--red);
+}
+
+.sc-gauge-figures {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.1rem 0.75rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-fig {
+  font-weight: 600;
+}
+
+.sc-fig-bt {
+  color: var(--text-secondary);
+}
+
+.sc-legend {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 78ch;
+}
+
+.sc-legend-live,
+.sc-legend-bt {
+  display: inline-block;
+  vertical-align: -1px;
+  margin: 0 0.4rem 0 0;
+}
+
+.sc-legend-bt {
+  transform: rotate(45deg);
+  margin-left: 1rem;
+}
+
+.sc-skeleton {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.sc-skeleton-row {
+  display: flex;
+  gap: 1.5rem;
+  padding: 1.1rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.sc-skeleton-row:last-child {
+  border-bottom: none;
+}
+
+.sc-skeleton-row .skeleton-loader {
+  height: 14px;
+  border-radius: 4px;
+}
+
+/* Phones, tablets and narrow laptops: each cell becomes a stacked block, so no
+   column is ever cut off or scrolled sideways */
+@media (max-width: 1100px) {
+  .sc-table {
+    border: none;
+    overflow: visible;
+  }
+
+  .sc-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .sc-table table,
+  .sc-table tbody,
+  .sc-table tr,
+  .sc-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .sc-table tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    padding: 0.5rem 1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .sc-table tbody tr:last-child {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sc-table tbody td {
+    display: grid;
+    grid-template-columns: minmax(6.5rem, 38%) 1fr;
+    gap: 0.75rem;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+
+  .sc-table td.sc-num {
+    text-align: left;
+  }
+
+  .sc-table tbody td:last-child {
+    border-bottom: none;
+  }
+
+  .sc-table tbody td::before {
+    content: attr(data-label);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+
+  .sc-table tbody td > * {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  .sc-table tbody td:first-child {
+    grid-template-columns: 1fr;
+  }
+
+  .sc-table tbody td:first-child::before {
+    content: none;
+  }
+
+  .sc-table tbody td:first-child > * {
+    grid-column: 1;
+  }
+
+  .sc-symbol {
+    font-size: 1.05rem;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .sc-table tbody td > .sc-status {
+    justify-self: start;
+  }
+
+  .sc-gauge {
+    min-width: 0;
+    max-width: none;
+  }
+
+  .sc-reason {
+    max-width: none;
+  }
+
+  .sc-controls,
+  .sc-field {
+    flex: 1 1 100%;
+  }
+
+  .sc-field .form-select {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .sc-header .btn {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sc-chip {
+    transition: none;
+  }
+}
+
+/* Navbar: the link row scrolls sideways inside the bar on narrow screens, so the
+   PAGE never does. (A collapsing menu would be better; this stops the overflow.) */
+.navbar {
+  max-width: 100vw;
+}
+
+.navbar-brand {
+  flex-shrink: 0;
+}
+
+.navbar-links {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.navbar-links::-webkit-scrollbar {
+  display: none;
+}
+
+.navbar-links > * {
+  flex-shrink: 0;
+}
+
+@media (max-width: 860px) {
+  .navbar-links .nav-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+}
+
+/* Scorecard table on laptops: keep the reason readable instead of a one-word column */
+@media (min-width: 1101px) {
+  .sc-table td[data-label="Status"] {
+    min-width: 14rem;
+  }
+
+  .sc-table td[data-label="Trades"] .sc-sub {
+    white-space: nowrap;
+  }
+
+  .sc-gauge {
+    min-width: 9.5rem;
+  }
+}
