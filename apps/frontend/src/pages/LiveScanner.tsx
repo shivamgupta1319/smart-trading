@@ -4,6 +4,7 @@ import axios from "axios";
 import { useSocket, TradeAlert } from "../hooks/useSocket";
 import { ToastContainer } from "../components/ToastNotification";
 import { API } from "../config";
+import { closeTradeAtRealPrice } from "../hooks/closeTrade";
 
 interface BacktestSnapshot {
   winRate: number;
@@ -226,31 +227,10 @@ export function LiveScanner() {
   }, []);
 
   const closeSignal = async (id: number, symbol: string) => {
-    try {
-      let payload = {};
-      try {
-        const liveRes = await axios.post(`${API}/api/engine/live-prices`, {
-          symbols: [symbol],
-        });
-        const livePriceData = liveRes.data[symbol];
-        const livePrice = livePriceData
-          ? typeof livePriceData === "object"
-            ? livePriceData.price
-            : livePriceData
-          : undefined;
-        if (livePrice) {
-          payload = { exitPrice: livePrice };
-        }
-      } catch (e) {
-        console.error("Failed to fetch live price for closing", e);
-      }
-
-      await axios.patch(`${API}/api/signals/${id}/close`, payload);
+    if (await closeTradeAtRealPrice(id, symbol)) {
       setActiveSignals((prev) =>
         prev.map((s) => (s.id === id ? { ...s, status: "CLOSED" } : s)),
       );
-    } catch {
-      /* noop */
     }
   };
 

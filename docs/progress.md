@@ -162,7 +162,7 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Deployed to work-pc with the mode `off` (2026-11-19; log shows `DhanService mode=off`)
 
 ### 6. Finish and retire
-- [ ] Manual close needs a price; planned stop shown; journal shows all trades
+- [x] Manual close needs a price (the live quote, or one typed in; never the entry price); planned stop shown in the journal; journal lists all trades
 - [ ] Replay test; phone menu; README; plain-language user guide
 - [ ] July rebuild: useful pieces in, the rest copied to `docs/archive/july-rebuild/`, folder deleted
 

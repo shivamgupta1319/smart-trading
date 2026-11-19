@@ -7,6 +7,7 @@ import {
   Body,
   ParseIntPipe,
   HttpCode,
+  BadRequestException,
 } from "@nestjs/common";
 import { SignalsService } from "./signals.service";
 import { SignalsGateway } from "./signals.gateway";
@@ -63,12 +64,16 @@ export class SignalsController {
 
   @Patch(":id/close")
   async close(@Param("id", ParseIntPipe) id: number, @Body() body: any) {
+    // A close always books a real price. With a price in the request it must be a
+    // positive number; without one the service uses the live quote, and refuses
+    // (400) when there is none. It never books the entry price as a pretend exit.
     let result;
-    if (body && body.exitPrice !== undefined) {
-      result = await this.signalsService.closeWithPrice(
-        id,
-        Number(body.exitPrice),
-      );
+    if (body && body.exitPrice !== undefined && body.exitPrice !== null && body.exitPrice !== "") {
+      const exitPrice = Number(body.exitPrice);
+      if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
+        throw new BadRequestException("The exit price must be a number above zero.");
+      }
+      result = await this.signalsService.closeWithPrice(id, exitPrice);
     } else {
       result = await this.signalsService.close(id);
     }

@@ -252,12 +252,11 @@ export class SignalsService {
       return this.closeWithPrice(id, livePrice);
     }
 
-    // Fallback: cannot price the exit. Mark it, but do NOT pretend it's breakeven.
-    this.logger.warn(
-      `close(${id}): no live price for ${sig.stock?.symbol} — falling back to entry price; verify manually.`,
+    // No price to book. Refuse instead of booking the entry price: that would
+    // record a real open position as a ₹0 trade. The caller must supply the price.
+    throw new BadRequestException(
+      `No live price for ${sig.stock?.symbol ?? "this stock"} right now. Enter the exit price to close this trade.`,
     );
-    const entryFallback = toNum(sig.trade?.entryPrice ?? sig.entryPrice);
-    return this.closeWithPrice(id, entryFallback, "Closed without live price (fallback to entry)");
   }
 
   async partialClose(id: number, percentToClose: number, exitPrice: number, reason: string) {
