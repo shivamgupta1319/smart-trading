@@ -21,7 +21,8 @@ Live at **https://trading.pseo.cloud** (password, then PIN). One product, one br
 ## How it works, in short
 
 - A **cell** is one stock with one strategy. Each cell has its own ₹10,000 of pretend
-  money. Intraday trades may use 5 times that; no trade may risk more than 2% of the cell.
+  money. Intraday trades may use 5 times that. No trade may risk more than 2% of what it
+  may hold: ₹200 for swing, ₹1,000 for intraday.
 - The **scanner** checks every cell during market hours, opens a paper trade when a
   strategy signals, and closes it at the stop, the target or 15:15.
 - Every result is **after costs** (brokerage, taxes, slippage) and is measured in **R**:

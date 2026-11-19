@@ -79,8 +79,12 @@ export class TradesService {
       losses.length > 0
         ? Math.abs(losses.reduce((sum, t) => sum + pnlOf(t), 0) / losses.length)
         : 0;
+    // No losing trade yet means there is nothing to divide by: that is "not known yet"
+    // (null), not a profit factor of 0, which reads as "all lost".
     const profitFactor =
-      avgLoss > 0 ? (avgWin * wins.length) / (avgLoss * losses.length) : 0;
+      avgLoss > 0 ? (avgWin * wins.length) / (avgLoss * losses.length) : null;
+    // Closed within the scratch band (see BREAKEVEN_R): neither a win nor a loss.
+    const flat = closedTrades.length - wins.length - losses.length;
 
     // Dynamic "invested now" = actual capital (margin) deployed in currently-open
     // positions = Σ notional ÷ leverage. This is the per-cell ₹10k fund at work, NOT the
@@ -160,7 +164,7 @@ export class TradesService {
         avgLoss: round2(cellAvgLoss),
         expectancy: trades > 0 ? round2(grpPnl / trades) : 0,
         avgRMultiple: round2(avgRMultiple),
-        profitFactor: round2(grossLoss > 0 ? grossWin / grossLoss : 0),
+        profitFactor: grossLoss > 0 ? round2(grossWin / grossLoss) : null,
         maxDrawdown: round2(maxDd),
         cellCapital,
         cellRoiPct,
@@ -229,9 +233,10 @@ export class TradesService {
       winRate: round2(winRate),
       wins: wins.length,
       losses: losses.length,
+      flat,
       avgWin: round2(avgWin),
       avgLoss: round2(avgLoss),
-      profitFactor: round2(profitFactor),
+      profitFactor: profitFactor === null ? null : round2(profitFactor),
       bestStrategy,
       bestCell,
       leaderboard,

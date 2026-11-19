@@ -60,7 +60,7 @@ interface EdgeMetrics {
   avgLoss: number;
   expectancy: number;
   avgRMultiple: number;
-  profitFactor: number;
+  profitFactor: number | null; // null until the cell has a losing trade
   maxDrawdown: number;
   cellCapital: number;
   cellRoiPct: number;
@@ -86,9 +86,10 @@ interface PortfolioStats {
   winRate: number;
   wins: number;
   losses: number;
+  flat?: number; // closed within the scratch band: neither won nor lost
   avgWin: number;
   avgLoss: number;
-  profitFactor: number;
+  profitFactor: number | null; // null until there is a losing trade
   bestStrategy: string;
   bestCell: ({ symbol: string; strategy: string } & EdgeMetrics) | null;
   leaderboard: ({ symbol: string; strategy: string } & EdgeMetrics)[];
@@ -665,12 +666,25 @@ export function Portfolio() {
               <p className="metric-value highlight" style={{ fontSize: '1.3rem' }}>
                 {stats.winRate}%
               </p>
+              <p className="metric-label">
+                {stats.wins} of {stats.wins + stats.losses + (stats.flat ?? 0)} closed trades won
+              </p>
             </div>
             <div className="metric-card">
               <p className="metric-label">Profit Factor</p>
-              <p className={`metric-value ${stats.profitFactor >= 1 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
-                {stats.profitFactor}
-              </p>
+              {stats.profitFactor === null ? (
+                <>
+                  <p className="metric-value" style={{ fontSize: '1.3rem', color: 'var(--text-secondary)' }}>—</p>
+                  <p className="metric-label">Needs a losing trade to work out</p>
+                </>
+              ) : (
+                <>
+                  <p className={`metric-value ${stats.profitFactor >= 1 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
+                    {stats.profitFactor}
+                  </p>
+                  <p className="metric-label">Won ÷ lost. Above 1 is profitable</p>
+                </>
+              )}
             </div>
             <div className="metric-card">
               <p className="metric-label">Active / Total</p>
@@ -685,12 +699,15 @@ export function Portfolio() {
           {/* Secondary stats row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 11rem), 1fr))', gap: '1rem', marginBottom: '2rem' }}>
             <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
-              <p className="metric-label">W / L</p>
+              <p className="metric-label">Won / Lost / Flat</p>
               <p className="metric-value" style={{ fontSize: '1.1rem' }}>
                 <span style={{ color: 'var(--green)' }}>{stats.wins}</span>
                 <span style={{ color: 'var(--text-muted)' }}> / </span>
                 <span style={{ color: 'var(--red)' }}>{stats.losses}</span>
+                <span style={{ color: 'var(--text-muted)' }}> / </span>
+                <span style={{ color: 'var(--text-secondary)' }}>{stats.flat ?? 0}</span>
               </p>
+              <p className="metric-label">Flat: closed within 0.1R of zero</p>
             </div>
             <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
               <p className="metric-label">Avg Win</p>
@@ -698,7 +715,11 @@ export function Portfolio() {
             </div>
             <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
               <p className="metric-label">Avg Loss</p>
-              <p className="metric-value negative" style={{ fontSize: '1.1rem' }}>-₹{stats.avgLoss}</p>
+              {stats.losses === 0 ? (
+                <p className="metric-value" style={{ fontSize: '1.1rem', color: 'var(--text-secondary)' }}>No losses yet</p>
+              ) : (
+                <p className="metric-value negative" style={{ fontSize: '1.1rem' }}>-₹{stats.avgLoss}</p>
+              )}
             </div>
             <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
               <p className="metric-label">Best Strategy</p>
@@ -916,7 +937,7 @@ export function Portfolio() {
                         <td style={{ textAlign: 'right', color: s.avgRMultiple >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
                           {s.avgRMultiple >= 0 ? '+' : ''}{s.avgRMultiple}R
                         </td>
-                        <td style={{ textAlign: 'right', color: s.profitFactor >= 1 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>{s.profitFactor}</td>
+                        <td style={{ textAlign: 'right', color: s.profitFactor === null ? 'var(--text-secondary)' : s.profitFactor >= 1 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)' }}>{s.profitFactor === null ? '—' : s.profitFactor}</td>
                         <td style={{ textAlign: 'right', color: 'var(--red)', fontFamily: 'var(--font-mono)' }}>-₹{s.maxDrawdown.toLocaleString('en-IN')}</td>
                         <td style={{ textAlign: 'right' }}>
                           <span style={{ color: s.totalPnl >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>

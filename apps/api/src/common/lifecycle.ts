@@ -94,7 +94,9 @@ const f = (n: number, digits = 2): string => n.toFixed(digits);
 /**
  * The status a cell should have now.
  * @param tradesSinceChange closed trades taken since the status last changed
- * @param baseCapital the cell's starting fund (for the loss limit)
+ * @param baseCapital what the cell's loss limit is a share of: its starting fund times its
+ *   leverage (₹50,000 intraday, ₹10,000 swing), the same base the per-trade risk uses, so
+ *   the limit is worth the same number of full stop-outs for every kind of cell
  */
 export function evaluateCell(
   current: CellStatus,

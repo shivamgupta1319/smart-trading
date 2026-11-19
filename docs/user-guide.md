@@ -43,7 +43,7 @@ backtest is treated as a first filter only. **The live paper record decides.**
 | **Leverage** | Intraday trades may hold shares worth up to 5 times the fund. Swing trades use the fund only. |
 | **Stop** | The price at which a losing trade is closed. |
 | **Target** | The price at which a winning trade is closed. |
-| **Risk** | The rupees lost if the stop is hit. No trade may risk more than 2% of the cell's fund (₹200 on ₹10,000). |
+| **Risk** | The rupees lost if the stop is hit. No trade may risk more than 2% of what it may hold: ₹200 for a swing trade (2% of ₹10,000) and ₹1,000 for an intraday trade (2% of ₹50,000). |
 | **R** | The result divided by the risk. +1R: made what it risked. −1R: lost the full risk. An average above 0 over many trades is what matters. |
 | **After costs** | Brokerage, taxes and slippage are already taken off. Every figure in the app is after costs. |
 | **Profit factor** | Total won divided by total lost. Above 1 is profitable; 1.3 or more is the bar for Proven. |
@@ -58,7 +58,7 @@ The app sets the status itself from the cell's own closed paper trades.
 | Status | Meaning | Rule |
 |---|---|---|
 | **Testing** | Still collecting evidence | Where every cell starts |
-| **Paused** | It kept losing | Last 20 trades average below −0.15R, or the cell lost more than 15% of its fund |
+| **Paused** | It kept losing | Last 20 trades average below −0.15R, or those 20 trades lost more than 15% of what the cell may hold (₹1,500 swing, ₹7,500 intraday: about 7.5 full stop-outs either way) |
 | **Proven** | It has earned trust | 40 or more trades, average above +0.10R, profit factor 1.3 or more, and positive in both the first and second half of its history |
 
 A paused cell keeps paper trading so it can recover. Those trades go into the **test

@@ -95,4 +95,16 @@ describe('evaluateCell', () => {
     expect(r.status).toBe('TESTING');
     expect(r.reason).toContain('No longer');
   });
+
+  it('measures the loss limit against the same base as the per-trade risk', () => {
+    // An intraday cell risks ₹1,000 a trade (2% of ₹50,000). Twenty trades averaging
+    // -0.1R lose ₹2,000: above the -0.15R line, so only the rupee limit could pause it.
+    const intraday = stats(Array.from({ length: 20 }, () => t(-0.1, 1000)));
+    // Against the ₹10,000 fund the limit would be ₹1,500 and two bad trades would pause it.
+    expect(evaluateCell('TESTING', intraday, 20, 10000, rules).status).toBe('PAUSED');
+    // Against its ₹50,000 buying power the limit is ₹7,500: 7.5 full stop-outs, as for swing.
+    expect(evaluateCell('TESTING', intraday, 20, 50000, rules).status).toBe('TESTING');
+    const worse = stats(Array.from({ length: 20 }, (_, i) => t(i < 12 ? -1 : 0.5, 1000))); // -₹8,000
+    expect(evaluateCell('TESTING', worse, 20, 50000, rules).status).toBe('PAUSED');
+  });
 });

@@ -134,7 +134,10 @@ WS    TRADE_UPDATE                      # CLOSED / PARTIAL / SL_UPDATED
 **Capital model (per-cell testing lab).** Each (stock × strategy) cell owns its own ₹10k
 fund (`BASE_CELL_CAPITAL`) that COMPOUNDS with that cell's realized P&L. A trade deploys
 `cellCapital × leverage` of notional (INTRADAY 5×, delivery/swing 1×), and is also bounded
-by a per-trade risk cap of `cellCapital × RISK_PER_TRADE_PCT` (2%):
+by a per-trade risk cap of `cellCapital × leverage × RISK_PER_TRADE_PCT`: 2% of what the
+trade may deploy, so ₹200 for swing and ₹1,000 for intraday on a ₹10k fund (the owner's rule
+since 2026-11-19; before that it was 2% of the fund for both). The pause loss limit uses the
+same base. Real-money orders keep their own, separate limit (`DHAN_MAX_RISK`, ₹200):
 `qty = min(floor(notional / entry), floor(riskBudget / |entry − stop|))`. If that is 0 (one
 share already breaks a bound) the signal is rejected and the backtest skips it too
 (`position_qty` in the engine, `sizePosition` in the API). There is **no funding gate** — every

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sizePosition } from './risk';
+import { riskBudgetFor, sizePosition } from './risk';
 
 // Mirrors apps/engine/test/test_roadmap_fixes.py::test_per_trade_risk_cap_bounds_wide_stops.
 // The two sizing functions MUST agree or the backtest stops predicting live.
@@ -28,5 +28,18 @@ describe('sizePosition', () => {
   it('returns 0 for a non-positive or missing entry price', () => {
     expect(sizePosition(10000, 200, 0, 5)).toBe(0);
     expect(sizePosition(10000, 200, Number.NaN, 5)).toBe(0);
+  });
+});
+
+describe('riskBudgetFor', () => {
+  it('is 2% of what the trade may deploy: the fund times its leverage', () => {
+    expect(riskBudgetFor(10000, 1)).toBe(200); // swing
+    expect(riskBudgetFor(10000, 5)).toBe(1000); // intraday: 2% of ₹50,000
+    expect(riskBudgetFor(12500, 5)).toBe(1250); // grows with the cell's fund
+  });
+
+  it('sizes an intraday trade from the ₹1,000 budget', () => {
+    // entry 100, stop 95: ₹1,000 / ₹5 a share = 200 shares (₹20,000 of the ₹50,000 limit)
+    expect(sizePosition(50000, riskBudgetFor(10000, 5), 100, 5)).toBe(200);
   });
 });

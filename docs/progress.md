@@ -178,3 +178,10 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - Live polls every 100 seconds, so a stop can be noticed after price has moved past it; the backtest books the stop level. Size of this gap is not measured yet.
 - The scanner's database read for entry limits and a real scanner-to-API rejection have not been exercised against a running stack.
 - The market-direction result covers about 940 trades; 1,485 had no 15-minute data.
+
+## Owner's changes, 2026-11-19 (evening)
+
+- [x] Intraday risk per trade is 2% of the ₹50,000 a trade may hold (₹1,000), not 2% of the ₹10,000 fund. Swing unchanged (₹200). The pause loss limit moved to the same base (₹7,500 intraday, ₹1,500 swing). Backtest and live use the same rule; engine `2026.11.19-risk5x`. Real-money orders keep their separate ₹200 limit
+- [x] Portfolio: profit factor shows "—" until there is a losing trade; flat trades are counted and named
+- [x] Validate: the engine's real reason is shown (it was replaced by "internal server error")
+- [ ] Fresh start: clear the roster and the trades, and start again from a selected roster
