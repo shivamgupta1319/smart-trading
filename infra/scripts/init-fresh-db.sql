@@ -262,6 +262,17 @@ CREATE TABLE IF NOT EXISTS "SentDigest" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "SentDigest_period_periodKey_key" ON "SentDigest"("period", "periodKey");
 
+-- One stored luck check per run (apps/engine/luck_check.py). Safe to run twice.
+CREATE TABLE IF NOT EXISTS "LuckCheckRun" (
+    "id" SERIAL NOT NULL,
+    "computedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "engineVersion" TEXT NOT NULL,
+    "stocks" INTEGER NOT NULL,
+    "trials" INTEGER NOT NULL,
+    "rows" JSONB NOT NULL,
+    CONSTRAINT "LuckCheckRun_pkey" PRIMARY KEY ("id")
+);
+
 -- At most one ACTIVE signal per cell. This is the real guard behind the API's
 -- duplicate check (a partial unique index, not expressible in schema.prisma).
 CREATE UNIQUE INDEX IF NOT EXISTS "LiveSignal_active_unique"

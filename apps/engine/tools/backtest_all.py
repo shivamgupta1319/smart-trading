@@ -40,7 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backtest_config import ENGINE_VERSION  # noqa: E402
 from data_checks import back_adjust, unexplained_jumps  # noqa: E402
 from db.client import engine  # noqa: E402
-from research_stats import DSR_THRESHOLD, bh_adjusted, deflated_sharpe_ratio, psr_pvalue, sharpe_ratio  # noqa: E402
+from luck_check import load_candles as load, strategy_table  # noqa: E402,F401  (strategy_table is imported from here by tests)
 from research_trials import Trial, TrialsLedger  # noqa: E402
 from strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES, STRATEGY_HOLD_DURATIONS  # noqa: E402
 
@@ -51,68 +51,8 @@ FIELDS = [
 ]
 
 
-def load(conn, stock_id: int, timeframe: str) -> pd.DataFrame:
-    rows = conn.execute(text(
-        'SELECT timestamp, open, high, low, close, volume FROM "HistoricalData" '
-        'WHERE "stockId" = :sid AND timeframe = :tf ORDER BY timestamp'
-    ), {"sid": stock_id, "tf": timeframe}).fetchall()
-    df = pd.DataFrame(rows, columns=["timestamp", "Open", "High", "Low", "Close", "Volume"])
-    if df.empty:
-        return df
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    return df.set_index("timestamp")
-
-
-FDR_Q = 0.10  # share of "discoveries" we accept being false
-
 STRATEGY_FIELDS = ["strategy", "bucket", "cells", "trades", "avg_r", "sharpe_per_trade",
                    "p_value", "q_value", "deflated_sharpe", "stands_out"]
-
-
-def strategy_table(r_by_strategy: dict[str, list[float]], prior_sharpes: list[float]) -> list[dict]:
-    """One row per strategy: is its result more than luck, given how many were tried?
-
-    Each strategy's trades (pooled over its stocks, in R) are one hypothesis. `p_value` is
-    the chance of a result this good if the strategy had no edge. `q_value` corrects that for
-    testing all the strategies at once (Benjamini-Hochberg). `deflated_sharpe` asks the same
-    question against the best result luck alone would give across every trial on record
-    (`prior_sharpes` plus this run). `stands_out` needs all three: a positive average, q at
-    or below 10%, and a deflated Sharpe above 0.95.
-    """
-    rows, measured = [], []
-    for name, rs in r_by_strategy.items():
-        row = {"strategy": name, "trades": len(rs), "avg_r": round(float(np.mean(rs)), 3) if rs else None,
-               "sharpe_per_trade": None, "p_value": None, "q_value": None, "deflated_sharpe": None,
-               "stands_out": False}
-        try:
-            # Identical trades have no spread to judge against; rounding can leave a
-            # spread of 1e-17 that would otherwise read as an infinitely good result.
-            if len(rs) < 2 or float(np.std(rs, ddof=1)) < 1e-9:
-                raise ValueError("nothing to test")
-            row["sharpe_per_trade"] = sharpe_ratio(rs)
-            row["p_value"] = psr_pvalue(rs)
-            measured.append(row)
-        except ValueError:
-            pass  # fewer than 2 trades, or every trade identical: nothing to test
-        rows.append(row)
-    if measured:
-        for row, q in zip(measured, bh_adjusted([r["p_value"] for r in measured])):
-            row["q_value"] = float(q)
-        trial_sharpes = list(prior_sharpes) + [r["sharpe_per_trade"] for r in measured]
-        for row in measured:
-            try:
-                row["deflated_sharpe"] = deflated_sharpe_ratio(r_by_strategy[row["strategy"]], trial_sharpes)
-            except ValueError:
-                row["deflated_sharpe"] = None
-            row["stands_out"] = bool(
-                (row["avg_r"] or 0) > 0 and row["q_value"] is not None and row["q_value"] <= FDR_Q
-                and row["deflated_sharpe"] is not None and row["deflated_sharpe"] > DSR_THRESHOLD
-            )
-    for row in rows:
-        for k in ("sharpe_per_trade", "p_value", "q_value", "deflated_sharpe"):
-            if row[k] is not None:
-                row[k] = round(row[k], 4)
-    return sorted(rows, key=lambda r: (r["avg_r"] is None, -(r["avg_r"] or 0)))
 
 
 def _mean(xs) -> float | None:

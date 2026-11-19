@@ -241,6 +241,15 @@ condition before any switching rule is trusted.
   live scanner).
 `python tools/check_data.py` reports on every stock and refreshes the flags.
 
+**Luck check.** `apps/engine/luck_check.py` backtests every strategy on every active stock,
+pools each strategy's trades and works out the chance its result is luck, corrected for the
+number tested, plus a stricter test against every try on record
+(`config/research_trials_seed.jsonl` plus stored runs; the same strategy on the same engine
+version counts once). The scheduler runs it after the daily fetch and stores it in
+`LuckCheckRun`; `GET /api/engine/luck-check` returns the latest and
+`POST /api/engine/luck-check/run` recomputes it (about a minute). The Backtesting page shows
+it. `tools/backtest_all.py` uses the same `strategy_table`.
+
 **AI analysis.** Every AI call (market overview, stock, sector and indicator write-ups) goes
 through the owner's AI router, an OpenAI-compatible gateway on work-pc that tracks which free
 models are answering. The engine's only AI code is `apps/engine/ai_client.py`: it posts to

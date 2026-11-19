@@ -101,3 +101,44 @@ def test_strategy_table_handles_cells_with_nothing_to_test():
     table = strategy_table({"EMPTY": [], "ONE": [0.5], "FLAT": [0.2, 0.2, 0.2]}, prior_sharpes=[])
     assert {r["strategy"] for r in table} == {"EMPTY", "ONE", "FLAT"}
     assert all(r["p_value"] is None and r["stands_out"] is False for r in table)
+
+
+# --- the luck check shown on the Backtesting page (luck_check.py) ------------------
+
+def test_a_rerun_on_the_same_engine_does_not_add_tries():
+    """The daily refresh re-tests the same strategies on the same engine. That is the same
+    hypothesis again, so the count of tries must not grow with it; a different engine
+    version or another strategy is a new try."""
+    import numpy as np
+    import luck_check
+    from backtest_config import ENGINE_VERSION
+
+    rng = np.random.default_rng(7)
+    r = {"A": list(rng.normal(0.05, 1, 300)), "B": list(rng.normal(0.0, 1, 300))}
+    cells = {"A": 3, "B": 3}
+    now = f"engine={ENGINE_VERSION}"
+
+    rows, trials = luck_check.build_run(r, cells, prior={})
+    assert trials == 2 and {row["strategy"] for row in rows} == {"A", "B"}
+    assert all(row["cells"] == 3 for row in rows)
+
+    # Yesterday's run of the same two on the same engine is replaced, not added.
+    same = {("A", now): 0.01, ("B", now): 0.02}
+    assert luck_check.build_run(r, cells, prior=same)[1] == 2
+
+    # An older engine's results and a strategy not in this run are real extra tries.
+    older = {**same, ("A", "engine=older"): 0.3, ("B", "engine=older"): 0.1, ("C", now): 0.2}
+    rows_more, trials_more = luck_check.build_run(r, cells, prior=older)
+    assert trials_more == 5
+    # More tries on record can only make the stricter test harder to pass.
+    dsr = lambda rs: next(x["deflated_sharpe"] for x in rs if x["strategy"] == "A")
+    assert dsr(rows_more) <= dsr(rows)
+
+
+def test_the_seed_file_of_tries_is_shipped_and_readable():
+    import luck_check
+    from research_trials import TrialsLedger
+
+    seed = TrialsLedger(luck_check._seed_path()).read()
+    assert len(seed) >= 84, "config/research_trials_seed.jsonl must carry the tries already on record"
+    assert all(t.strategy and t.variant.startswith("engine=") for t in seed)

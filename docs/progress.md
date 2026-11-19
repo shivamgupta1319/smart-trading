@@ -169,7 +169,7 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Replay test (backtest against the scanner on the same candles): entries now identical; it found and fixed three one-sided rules (late-day entries, stale next-morning signals, the cost rule's inputs)
 - [x] Full backtest re-run on the corrected engine (`2026.11.19-parity2`); `docs/strategies.md` refreshed. Correction: the morning's swing figures used a time-stop that live does not have; with live rules 14 of 17 swing strategies are positive, six in both halves. Intraday unchanged: all negative after costs
 - [x] Phone menu: below 1200px the links fold into a menu opened by one button; the desktop bar fits from 1200px up
-- [ ] Luck check shown on the Backtesting page (today it is only in the backtest tool's report)
+- [x] Luck check shown on the Backtesting page: stored per run (`LuckCheckRun`), refreshed by the scheduler after each daily fetch, and on demand from the page
 - [x] Owner's decision (2026-11-19): `~/workspace/stock-trading` stays as it is. It is not used by the product; a full copy of its history is also in `~/backups/stock-trading-2026-11-19.bundle`
 
 ## Not yet verified
