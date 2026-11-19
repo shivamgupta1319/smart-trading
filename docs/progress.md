@@ -108,7 +108,7 @@ from; it is not a reason to expect profit.
 - [x] Final stack on work-pc from `main`, fresh database, served at `trading.pseo.cloud` (2026-11-19, 387 cells in testing)
 - [x] Both earlier stacks stopped (their volumes, images and files are kept on work-pc for now)
 - [x] Old second-stack folder removed on work-pc. Kept on purpose: both old database volumes, the old images, the dumps in `~/backups`, and `infra/_archive-before-merge-20261119/` (holds the Dhan settings needed for the port)
-- [ ] Owner: remove the `trading-v2.pseo.cloud` hostname in Cloudflare
+- [x] Owner: removed the `trading-v2.pseo.cloud` hostname in Cloudflare (2026-11-19)
 - [x] Old branch tips tagged `archive/*`, then all branches except `main` deleted (the Dhan code to port is at tag `archive/roadmap-v1`)
 - [x] Second local project folder removed; one folder on `main`
 - [ ] README rewritten; old docs moved to `docs/archive/`; single `docs/HANDOFF.md`
@@ -170,7 +170,7 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Full backtest re-run on the corrected engine (`2026.11.19-parity2`); `docs/strategies.md` refreshed. Correction: the morning's swing figures used a time-stop that live does not have; with live rules 14 of 17 swing strategies are positive, six in both halves. Intraday unchanged: all negative after costs
 - [x] Phone menu: below 1200px the links fold into a menu opened by one button; the desktop bar fits from 1200px up
 - [ ] Luck check shown on the Backtesting page (today it is only in the backtest tool's report)
-- [ ] Owner: say yes to deleting `~/workspace/stock-trading` (a full copy of its history is in `~/backups/stock-trading-2026-11-19.bundle`)
+- [x] Owner's decision (2026-11-19): `~/workspace/stock-trading` stays as it is. It is not used by the product; a full copy of its history is also in `~/backups/stock-trading-2026-11-19.bundle`
 
 ## Not yet verified
 
