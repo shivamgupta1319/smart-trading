@@ -1,7 +1,7 @@
 """Per-cell entry limits — one rule set for the backtest and the live scanner.
 
 Why this exists: neither path limited how often a (stock, strategy) cell could
-re-enter. A strategy whose condition stays true bar after bar (EMA20_Pullback)
+re-enter. A strategy whose condition stays true bar after bar (the retired EMA20_Pullback)
 re-fired the moment its previous trade stopped out: 1,557 live trades at about
 three per stock per day, −₹6.56 lakh, while its backtest looked fine.
 

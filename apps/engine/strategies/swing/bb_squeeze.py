@@ -3,7 +3,13 @@ import pandas_ta as ta
 from strategies.base import BaseStrategy
 
 class BBSqueezeStrategy(BaseStrategy):
-    """Strategy 8: Bollinger Band Squeeze (Swing)"""
+    """Strategy 8: Bollinger Band Squeeze (Swing)
+
+    A breakout bar closing outside the band, coming out of a squeeze (bandwidth within
+    5% of its 6-month low on any of the previous 5 bars). The squeeze is read from the
+    bars BEFORE the breakout: the breakout bar itself widens the bands, so testing the
+    squeeze on that same bar almost never passed.
+    """
     name = "BB_Squeeze"
     timeframe = "1D"
 
@@ -29,7 +35,9 @@ class BBSqueezeStrategy(BaseStrategy):
         df['stop_loss'] = 0.0
         df['target'] = 0.0
 
-        is_squeeze = df['bb_bandwidth'] <= df['bw_rolling_min'] * 1.05  # within 5% of 6m low
+        squeezed = df['bb_bandwidth'] <= df['bw_rolling_min'] * 1.05  # within 5% of 6m low
+        # Any of the 5 bars before this one (shift keeps the current bar out of it).
+        is_squeeze = squeezed.shift(1, fill_value=False).rolling(5, min_periods=1).max().astype(bool)
         
         bullish_breakout = (df['Close'] > df['bb_upper'])
         prev_bullish_breakout = (df['Close'].shift(1) > df['bb_upper'].shift(1))

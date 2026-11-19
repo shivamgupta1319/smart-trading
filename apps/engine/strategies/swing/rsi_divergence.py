@@ -4,7 +4,12 @@ import numpy as np
 from strategies.base import BaseStrategy
 
 class RSIDivergenceStrategy(BaseStrategy):
-    """Strategy 9: RSI Divergence (Bullish)"""
+    """Strategy 9: RSI Divergence (Bullish)
+
+    Fires ONCE, on the first green candle on which the divergence set-up is true.
+    It used to fire on every green candle while the set-up stayed true, so a
+    stopped-out trade was re-entered on the same stale divergence.
+    """
     name = "RSI_Divergence"
     timeframe = "1D"
 
@@ -33,7 +38,9 @@ class RSIDivergenceStrategy(BaseStrategy):
         stop_losses = np.zeros(len(df))
         targets = np.zeros(len(df))
 
+        prev_setup = False  # was the full set-up true on the previous bar?
         for i in range(lookback + 1, len(df)):
+            setup_before, prev_setup = prev_setup, False
             curr_rsi = rsi14s[i]
             curr_ema50 = ema50s[i]
             curr_atr = atr14s[i]
@@ -73,6 +80,9 @@ class RSIDivergenceStrategy(BaseStrategy):
             if price_lower_low and rsi_higher_low and at_major_support:
                 # Entry: first green candle after divergence
                 if curr_close > curr_open:
+                    prev_setup = True
+                    if setup_before:
+                        continue  # same set-up as the previous bar: already signalled
                     sl = curr_close - 2 * curr_atr
                     rr = curr_close - sl
                     target = curr_close + 2 * rr
