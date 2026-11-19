@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from db.client import engine
 from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
 from entry_limits import entry_allowed, limits_for_bucket
+from live_fills import entry_geometry_ok, stop_exit_price, target_exit_price
 # Shared intraday-exit primitives — same source of truth the backtest models.
 from intraday_exits import (
     calculate_progress,
@@ -231,13 +232,28 @@ def check_and_fire_signal(config, cache, last_fired_times):
                 print(f"  [INFO] {symbol} ({strategy_name}): entry blocked — {why}")
                 last_fired_times[fired_key] = candle_time
                 return
+        # Book the entry at the LIVE quote, not the old candle close (for a 1D
+        # strategy that close is yesterday's). No quote → no trade this poll; the
+        # candle is not marked fired, so the next poll tries again.
+        live_price = get_live_price(symbol)
+        if not live_price:
+            print(f"  [INFO] {symbol} ({strategy_name}): signal seen but no live price — retrying next poll")
+            return
+        entry_price = round(float(live_price), 2)
+        stop_loss = round(float(latest.get('stop_loss', latest['Close'] * 0.98)), 2)
+        target = round(float(latest.get('target', latest['Close'] * 1.04)), 2)
+        ok, why = entry_geometry_ok(signal_type == "BUY", entry_price, stop_loss, target)
+        if not ok:
+            print(f"  [INFO] {symbol} ({strategy_name}): signal dropped — {why}")
+            last_fired_times[fired_key] = candle_time
+            return
         payload = {
             "stockId": stock_id,
             "strategyName": strategy_name,
             "signalType": signal_type,
-            "entryPrice": round(float(latest['Close']), 2),
-            "stopLoss": round(float(latest.get('stop_loss', latest['Close'] * 0.98)), 2),
-            "target": round(float(latest.get('target', latest['Close'] * 1.04)), 2),
+            "entryPrice": entry_price,
+            "stopLoss": stop_loss,
+            "target": target,
             "holdDuration": STRATEGY_HOLD_DURATIONS.get(strategy_name, "UNKNOWN"),
         }
 
@@ -511,25 +527,18 @@ def auto_close_signals(cache):
             # SL / TP / Intraday Hit Check
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             if not should_close:
-                if is_buy:
-                    if latest_price <= sl:
-                        should_close = True
-                        exit_price = sl
-                        close_reason = f"hit SL/Trailing SL (₹{sl})"
-                    elif latest_price >= tp:
-                        should_close = True
-                        exit_price = tp
-                        close_reason = f"hit Target (₹{tp})"
-                else:
-                    if latest_price >= sl:
-                        should_close = True
-                        exit_price = sl
-                        close_reason = f"hit SL/Trailing SL (₹{sl})"
-                    elif latest_price <= tp:
-                        should_close = True
-                        exit_price = tp
-                        close_reason = f"hit Target (₹{tp})"
-                    
+                sl_hit = latest_price <= sl if is_buy else latest_price >= sl
+                tp_hit = latest_price >= tp if is_buy else latest_price <= tp
+                if sl_hit:
+                    should_close = True
+                    # Price is already through the stop: book the worse of the two.
+                    exit_price = stop_exit_price(is_buy, sl, latest_price)
+                    close_reason = f"hit SL/Trailing SL (₹{sl}), filled ₹{exit_price}"
+                elif tp_hit:
+                    should_close = True
+                    exit_price = target_exit_price(tp)
+                    close_reason = f"hit Target (₹{tp})"
+
             if not should_close and sig.get('holdDuration') == 'INTRADAY' and is_square_off_time:
                 should_close = True
                 exit_price = latest_price
