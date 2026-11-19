@@ -29,6 +29,9 @@ model Stock {
   // (config/known_price_actions.json). NULL = nothing to review.
   dataFlag       String?
   dataFlagDetail String?
+  // Dhan's NSE_EQ security id for this stock (from Dhan's scrip master). Needed before any
+  // cell on this stock can be switched on for real money.
+  dhanSecurityId String?
   createdAt    DateTime             @default(now())
 
   historicalData      HistoricalData[]
@@ -103,6 +106,8 @@ model ActiveConfiguration {
   status          String    @default("TESTING")
   statusReason    String?
   statusChangedAt DateTime?
+  // Second lock for real money: set by the owner. Real orders also need status = PROVEN.
+  liveEnabled     Boolean   @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -185,4 +190,52 @@ model SentDigest {
   sentAt    DateTime @default(now())
 
   @@unique([period, periodKey])
+}
+
+// A real position at the Dhan broker, kept in the database so a restart never orphans it:
+// on boot the service reloads OPEN rows and reconciles them against Dhan's own records.
+// Deliberately separate from Trade (real quantity and fills differ from the paper trade);
+// signalId is the link, with no foreign key.
+model DhanPosition {
+  id            Int      @id @default(autoincrement())
+  signalId      Int      @unique // = LiveSignal.id
+  symbol        String
+  securityId    String?  // broker id used for the entry; exits use this, not the roster
+  side          String   // "BUY" | "SELL" (entry side)
+  qty           Int
+  simEntryPrice Float
+  orderId       String?  // Dhan entry order id (null = logged only, nothing at the broker)
+  fillPrice     Float?   // real entry fill price
+  stopPrice     Float?   // original stop the resting broker stop is pegged to
+  slOrderId     String?  // resting STOP_LOSS (limit) order id
+  status        String   @default("OPEN") // "OPEN" | "CLOSED"
+  exitOrderId   String?
+  exitFillPrice Float?
+  realizedPnl   Float?
+  closeReason   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+}
+
+// Per-day real-money counters. One row per IST day, so the daily-loss kill switch
+// survives a restart.
+model DhanDailyState {
+  id                Int      @id @default(autoincrement())
+  dayKey            String   @unique // IST date string
+  realizedLossToday Float    @default(0)
+  ordersToday       Int      @default(0)
+  killed            Boolean  @default(false)
+  updatedAt         DateTime @updatedAt
+}
+
+// The current Dhan access token (valid about 24 hours), kept so a restart reuses it instead
+// of asking Dhan for a new one. One row, id = 1. It is a credential: treat database dumps
+// accordingly.
+model DhanToken {
+  id        Int      @id @default(1)
+  token     String
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
 }

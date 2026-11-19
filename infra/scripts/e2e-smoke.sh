@@ -44,6 +44,13 @@ print('main book %d trades %.0f | test book %d trades %.0f | status changes %d |
 print(d['text'])"
 docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "INSERT INTO \"SentDigest\"(period,\"periodKey\") VALUES ('DAILY','2026-01-01')" >/dev/null
 docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "INSERT INTO \"SentDigest\"(period,\"periodKey\") VALUES ('DAILY','2026-01-01')" 2>&1 | grep -q "duplicate key" && echo "second copy of the same digest is refused by the database"
+echo "--- real money: off by default, and the switch refuses a cell that is not PROVEN"
+curl -s localhost:3099/api/dhan/status | python3 -c "
+import sys,json
+d=json.load(sys.stdin); print('mode=%s entriesAllowed=%s openPositions=%d riskPerOrder=%s' % (d['mode'], d['entriesAllowed'], len(d['openPositions']), d['limits']['riskPerOrder']))"
+curl -s -X POST localhost:3099/api/configs/1/live $J -d '{"enabled":true,"securityId":"3812"}' | cut -c1-160; echo
+curl -s -X POST localhost:3099/api/configs/1/live $J -d '{"enabled":false}' | cut -c1-120; echo
+docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "SELECT COUNT(*) FROM \"DhanPosition\"" | sed 's/^/real positions created by this run: /'
 echo "--- market condition label"
 ID=$(curl -s -X POST localhost:3099/api/signals/new $J -d "{\"stockId\":$SID,\"strategyName\":\"MACD_Zero\",\"signalType\":\"SELL\",\"entryPrice\":100,\"stopLoss\":102,\"target\":96,\"holdDuration\":\"INTRADAY\",\"marketRegime\":\"TRENDING_DOWN\",\"marketDirection\":\"DOWN\",\"marketBreadthPct\":22.5,\"alignedWithMarket\":true}" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id"))')
 docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "SELECT \"regimeAtEntry\", \"marketDirectionAtEntry\", \"breadthAtEntry\", \"alignedWithMarket\" FROM \"Trade\" WHERE \"signalId\" = $ID"

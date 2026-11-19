@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateConfigDto } from './dto/create-config.dto';
 
@@ -65,6 +65,47 @@ export class ConfigsService {
       });
       return { status: 'added', config: added };
     }
+  }
+
+  /**
+   * The owner's switch for real money on one cell (the second lock). Switching ON is
+   * refused unless the cell is PROVEN and its stock has a broker id; switching OFF always
+   * works. A broker id can be saved in the same call.
+   */
+  async setLive(id: number, enabled: boolean, securityId?: string) {
+    const config = await this.prisma.activeConfiguration.findUnique({ where: { id }, include: { stock: true } });
+    if (!config) throw new NotFoundException(`Configuration #${id} not found`);
+
+    const cleanId = securityId?.trim();
+    if (cleanId !== undefined && cleanId !== '') {
+      if (!/^[0-9]{1,10}$/.test(cleanId)) throw new BadRequestException('The broker id must be a number (Dhan security id).');
+      await this.prisma.stock.update({ where: { id: config.stockId }, data: { dhanSecurityId: cleanId } });
+    }
+    const brokerId = cleanId || config.stock.dhanSecurityId;
+
+    if (enabled) {
+      if (config.status !== 'PROVEN') {
+        throw new BadRequestException(
+          `Real money can only be switched on for a PROVEN cell. ${config.stock.symbol} ${config.strategyName} is ${config.status}.`,
+        );
+      }
+      if (!brokerId) {
+        throw new BadRequestException(`${config.stock.symbol} has no Dhan security id yet. Send it as securityId.`);
+      }
+    }
+    const updated = await this.prisma.activeConfiguration.update({
+      where: { id },
+      data: { liveEnabled: enabled },
+      include: { stock: true },
+    });
+    return {
+      id: updated.id,
+      symbol: updated.stock.symbol,
+      strategyName: updated.strategyName,
+      status: updated.status,
+      liveEnabled: updated.liveEnabled,
+      dhanSecurityId: updated.stock.dhanSecurityId,
+    };
   }
 
   async remove(id: number) {

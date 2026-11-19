@@ -135,6 +135,9 @@ export class LifecycleService {
         strategyName: c.strategyName,
         timeframe: c.timeframe,
         status: c.status,
+        // Real money: the owner's switch and whether the stock has a broker id.
+        liveEnabled: c.liveEnabled,
+        hasBrokerId: !!c.stock.dhanSecurityId,
         statusReason: c.statusReason,
         statusChangedAt: c.statusChangedAt,
         openTrades: openByCell.get(k) ?? 0,

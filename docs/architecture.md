@@ -174,6 +174,17 @@ window of new trades averaging above +0.05R. `GET /api/configs/scorecard` return
 the status and reason, the live record, main-book and test-book totals, and the latest
 backtest. `infra/scripts/e2e-smoke.sh` exercises all of this against a throwaway database.
 
+**Real money (Dhan).** `apps/api/src/dhan/dhan.service.ts` places real intraday orders at the
+Dhan broker. It is off by default (`DHAN_TRADING_MODE`). An entry needs two locks: the cell is
+`PROVEN` and the owner switched it on (`ActiveConfiguration.liveEnabled`, set through
+`POST /api/configs/:id/live`), and the stock has a broker id (`Stock.dhanSecurityId`). The
+service sizes its own order, rests a stop at the broker, exits when the paper trade closes
+and closes anything left at 15:12 IST. Entries and exits are separate: mode `off`, the
+daily-loss limit or a cell leaving `PROVEN` stop new entries only. Positions, the day's
+counters and the login token live in `DhanPosition`, `DhanDailyState` and `DhanToken`.
+`signals.service.ts` calls it after a paper trade is created and after it is closed; a failure
+there never affects the paper trade. See `docs/real-money-trading.md`.
+
 **Market condition.** Every trade records the market's condition when it was opened
 (`apps/engine/market_condition.py`): `regimeAtEntry` (NIFTY on daily bars: trending up,
 trending down, ranging or volatile), `marketDirectionAtEntry` (the median roster stock's move

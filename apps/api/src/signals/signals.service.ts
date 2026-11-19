@@ -3,6 +3,7 @@ import axios from "axios";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateSignalDto } from "./dto/create-signal.dto";
 import { LifecycleService } from "../configs/lifecycle.service";
+import { DhanService } from "../dhan/dhan.service";
 import {
   BASE_CELL_CAPITAL,
   MIN_CELL_CAPITAL,
@@ -23,6 +24,7 @@ export class SignalsService {
   constructor(
     private prisma: PrismaService,
     private lifecycle: LifecycleService,
+    private dhan: DhanService,
   ) {}
 
   async findAll() {
@@ -193,6 +195,23 @@ export class SignalsService {
         `Trade created: ${dto.signalType} ${signal.stock?.symbol} [${dto.strategyName}] × ${quantity} shares ` +
           `(₹${capitalUsed.toFixed(0)} notional off ₹${cellCapital.toFixed(0)} cell fund ×${leverage}, ₹${riskAmount.toFixed(0)} at risk)`,
       );
+      // Real-money entry. Does nothing unless the mode allows entries AND this cell is both
+      // PROVEN and switched on by the owner. Sized by the Dhan service on its own; a failure
+      // here must never undo or fail the paper trade.
+      try {
+        await this.dhan.placeEntry({
+          signalId: signal.id,
+          stockId: dto.stockId,
+          symbol: signal.stock?.symbol,
+          signalType: dto.signalType,
+          strategyName: dto.strategyName,
+          entryPrice: dto.entryPrice,
+          stopLoss: dto.stopLoss,
+          holdDuration: dto.holdDuration,
+        });
+      } catch (err: unknown) {
+        this.logger.error(`Real-money entry failed for signal #${signal.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return { signal, isNew: true };
     } catch (err: unknown) {
       // P2002 = the partial-unique index rejected a concurrent duplicate active signal.
@@ -303,6 +322,13 @@ export class SignalsService {
     // A closed trade is new evidence about its cell: re-apply the lifecycle rules.
     // Never let this fail the close itself.
     if (closed) {
+      // Square off the real position, if this signal has one. Not gated on the mode: an
+      // open real position is always exited.
+      try {
+        await this.dhan.placeExit({ signalId: id, symbol: closed.stock?.symbol, exitPrice });
+      } catch (err) {
+        this.logger.error(`Real-money exit failed for signal #${id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
       try {
         await this.lifecycle.evaluate(closed.stockId, closed.strategyName);
       } catch (err) {
