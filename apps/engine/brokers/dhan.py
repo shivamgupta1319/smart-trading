@@ -9,7 +9,7 @@ Auth is simple (no daily OAuth): generate an access token from the Dhan web app
 in the engine env:  DHAN_ACCESS_TOKEN, DHAN_CLIENT_ID.
 
 Endpoint shapes follow DhanHQ API v2. Field names can change — see
-docs/dhan-paper-trading.md and verify against current Dhan docs.
+docs/archive/old-apps/dhan-paper-trading.md and verify against current Dhan docs.
 """
 from __future__ import annotations
 import base64

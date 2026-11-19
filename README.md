@@ -1,167 +1,82 @@
-# ⚡ SmartTrader — Zero-Cost Algorithmic Trading Scanner
+# Smart Trading
 
-> ⚠️ **Partly historical.** This README still describes the v1 prototype in places (ports 5173/3000/8000, old container names, and a '3-phase 35%/40% partial exit' the live code does NOT run). For the current v2 system see **[architecture.md](docs/architecture.md)** and **[work-pc-deployment.md](docs/work-pc-deployment.md)**; latest audit: **[2026-07-13 trust & correctness audit](docs/agent-reports/2026-07-13-trust-and-correctness-audit.md)**.
+A paper-trading lab for Indian stocks (NSE). It runs 28 trading strategies on 60 stocks
+with pretend money, books every trade after real costs, and shows which
+stock-and-strategy pairs keep earning. Real money is built in and switched off.
 
-A full-stack local platform for Indian stock market (NSE) algorithmic trading. Backtests 28 strategies, provides interactive candlestick charting, automatic portfolio/risk management tracking, and monitors live markets every 60 seconds to fire WebSocket and Telegram alerts.
+Live at **https://trading.pseo.cloud** (password, then PIN). One product, one branch
+(`main`), one deployment.
 
-> **🛠 v2 hardening (branch `roadmap-v2`):** the system was audited and largely
-> hardened. Highlights: API-key **auth** across all services, **realistic
-> backtests** (intrabar fills + Indian costs + risk sizing), **Decimal** money,
-> transactional P&L, a fixed 3-phase exit, **walk-forward / Monte-Carlo** validation,
-> and a **portfolio risk engine**. See **[docs/roadmap-implementation.md](docs/roadmap-implementation.md)**,
-> **[docs/system-review-2026-06.md](docs/system-review-2026-06.md)**, and the isolated
-> dev setup in **[docs/v2-environment.md](docs/v2-environment.md)**.
->
-> **Secrets are now read from a gitignored root `.env`** (template: `.env.example`).
-> Set a strong `API_KEY`, and **rotate** the previously-committed Telegram/LLM keys.
+## Where to start
 
-## Architecture
+| You want to | Read |
+|---|---|
+| Use the app and understand its numbers | [docs/user-guide.md](docs/user-guide.md) |
+| Know what each strategy does and how it has done | [docs/strategies.md](docs/strategies.md) |
+| See what is done and what is left | [docs/progress.md](docs/progress.md) |
+| Deploy, check or operate it on work-pc | [docs/work-pc-deployment.md](docs/work-pc-deployment.md) |
+| Understand how the code fits together | [docs/architecture.md](docs/architecture.md) |
+| Turn on real money (off today) | [docs/real-money-trading.md](docs/real-money-trading.md), [docs/live-capabilities.md](docs/live-capabilities.md) |
+
+## How it works, in short
+
+- A **cell** is one stock with one strategy. Each cell has its own ₹10,000 of pretend
+  money. Intraday trades may use 5 times that; no trade may risk more than 2% of the cell.
+- The **scanner** checks every cell during market hours, opens a paper trade when a
+  strategy signals, and closes it at the stop, the target or 15:15.
+- Every result is **after costs** (brokerage, taxes, slippage) and is measured in **R**:
+  the profit or loss divided by the rupees the trade risked.
+- Each cell has a **status** set from its own results: Testing, Proven or Paused. The
+  Scorecard page shows it next to what the backtest promised.
+- **Real money** needs two locks: the cell is Proven, and the owner switched it on. The
+  whole layer is off (`DHAN_TRADING_MODE=off`).
+
+## What is in the repo
 
 ```
-apps/
-├── frontend/   React + TypeScript + Vite    (port 5173)
-├── api/        NestJS + Prisma + Socket.io  (port 3000)
-└── engine/     Python FastAPI + pandas-ta   (port 8000)
+apps/api        NestJS + Prisma: trades, sizing, costs, cell status, Telegram, real-money layer
+apps/engine     Python + FastAPI: strategies, backtests, live scanner, data checks, scheduler
+apps/frontend   React + Vite: the screens
+config/         trading.json (capital, costs, status rules), known_price_actions.json
+infra/          docker-compose.yml for work-pc, nginx, landing page, scripts
+docs/           current docs; docs/archive/ holds history from the earlier apps
 ```
 
-## Quick Start (Docker — Recommended)
+## Run it on your own machine
+
+You need Docker, Node 20+ and Python 3.12.
 
 ```bash
-# Start everything
-docker-compose up -d
-
-# Apply database migrations (or push schema)
-docker exec smart-trading-api npx prisma db push --accept-data-loss
-
-# Start live scanner (separate terminal)
-docker exec -it smart-trading-engine python scanner/live_scanner.py
+cp .env.example .env            # fill in the values; never commit this file
+docker compose up -d postgres
+npm ci
+npx prisma db push --schema=apps/api/prisma/schema.prisma
+npx nx serve api                # http://localhost:3000
+npx nx serve frontend           # http://localhost:5173
+cd apps/engine && python -m venv venv && source venv/bin/activate \
+  && pip install -r requirements.txt && uvicorn main:app --reload --port 8000
 ```
 
-Then open http://localhost:5173
+The scanner (`python scanner/live_scanner.py`) only opens trades in market hours,
+09:30 to 15:00 IST on trading days.
 
-## Quick Start (Local Development)
-
-### 1. Start PostgreSQL
+## Tests
 
 ```bash
-docker-compose up postgres -d
+npx vitest run apps/api/src                      # API
+npx nx build api --prod && npx nx build frontend # builds
+# Engine tests run inside the engine image, from the repo root:
+docker run --rm -v "$PWD:/repo" -w /repo/apps/engine shivam13gupta/smart-trading-engine:latest \
+  sh -c "pip install -q pytest; python -m pytest test -q -p no:cacheprovider"
+infra/scripts/e2e-smoke.sh                       # whole flow against a throwaway database
 ```
 
-### 2. Push Prisma Schema
+CI runs the engine tests, the API tests and both builds on every pull request.
 
-```bash
-DATABASE_URL=postgresql://trader:trader@localhost:5470/smart_trading \
-  npx prisma db push --accept-data-loss
-```
+## Working on it
 
-### 3. Start NestJS API
+Branch from `main`, open a pull request, wait for CI, merge, then build and deploy
+(`infra/scripts/build-and-push.sh`, then the runbook). Update `docs/progress.md` and the
+page that describes what you changed in the same pull request.
 
-```bash
-npx nx serve api
-```
-
-### 4. Start Python Engine
-
-```bash
-cd apps/engine
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
-
-### 5. Start React Frontend
-
-```bash
-npx nx serve frontend
-```
-
-### 6. Start Live Scanner (during market hours)
-
-```bash
-cd apps/engine
-source venv/bin/activate
-python scanner/live_scanner.py
-```
-
-## The 28 Strategies
-
-### Intraday (5m / 15m)
-
-1. **15m ORB** — Opening Range Breakout
-2. **VWAP + Supertrend(10,3)** — Trend confirmation with VWAP filter
-3. **VWAP + MACD/RSI** — Confluence of trend, momentum, and volume
-4. **9/15 EMA + RSI** — EMA crossover with RSI momentum filter
-5. **MACD Zero-Line Cross** — MACD crossover below/above zero
-6. **Inside Bar Breakout** — Mother bar breakout entry
-7. **Gap and Go** — Momentum entry on sustained gap up/down
-8. **Pullback to 20 EMA** — Trend continuation on low volume pullback
-9. **CPR Breakout** — Breakout from Central Pivot Range
-10. **PDH/PDL Breakout** — Institutional levels breakout
-11. **BB Mean Reversion (Intraday)** — Fade extreme moves at standard deviations
-
-### Swing (1D)
-
-12. **Volatility Contraction Pattern (VCP)** — Low volatility consolidation breakout
-13. **Episodic Pivots** — Massive gap up and consolidation breakout
-14. **Break and Retest** — Former 60-day resistance acts as support
-15. **10/50 EMA Cross** — Momentum crossover
-16. **20-DMA Pullback** — Bread and butter trend pullback on low volume
-17. **Fibonacci Golden Zone** — 50%-61.8% retracement bounce
-18. **Multi-Timeframe Alignment** — Weekly 50-SMA filter + Daily Breakout
-19. **RSI Divergence at Major Support** — Bullish divergence at 200-day lows
-20. **Channel Oscillation** — Multi-month wide channel bounds fading
-21. **Volume Climax** — Panic selling exhaustion and reversal
-22. **44 SMA Pullback** — Price > 200 SMA, pullback to 44 SMA
-23. **200 EMA + MACD** — Trend + momentum confluence
-24. **Bollinger Band Squeeze** — Squeeze breakout
-25. **50/200 Golden Cross** — Classic trend-change signal
-26. **SuperTrend EMA** — Supertrend + EMA filter
-27. **Bollinger Mean Reversion** — Mean reversion inside bands
-28. **Price Action** — Simple support/resistance breakout
-
-## Documentation
-
-| File                                  | Purpose                                              |
-| ------------------------------------- | ---------------------------------------------------- |
-| `docs/understanding.md`               | Domain knowledge, strategy logic, NSE market context |
-| `docs/architecture.md`                | System architecture, data flows, API contracts       |
-| `docs/progress.md`                    | Build phase tracker                                  |
-| `docs/ui-ux-flow.md`                  | UI screen designs and user journey maps              |
-| `docs/edge-cases-and-verification.md` | Edge cases and verification checklist                |
-| `gemini.md`                           | AI assistant context and session log                 |
-
-## Environment Variables
-
-All secrets/config now live in **one gitignored root `.env`** (copy `.env.example`).
-Docker Compose reads it automatically. Key variables:
-
-```
-# Database
-POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB / DB_PORT
-DATABASE_URL                 # used by services inside docker
-
-# Service ports (host)
-API_PORT / ENGINE_PORT / FRONTEND_PORT
-
-# Auth (set a strong value to require it everywhere; unset = open/dev)
-API_KEY
-
-# Secrets (ROTATE the old leaked values)
-TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID / TELEGRAM_ENABLED
-OPENROUTER_API_KEY / GEMINI_API_KEY
-
-# Optional CORS + backtest realism tuning
-CORS_ORIGINS, BT_SLIPPAGE_BPS, BT_RISK_PER_TRADE_PCT, LIVE_PRICE_TTL_S, ...
-```
-
-The frontend is built with `VITE_API_URL` (and `VITE_API_KEY` when auth is on),
-baked at image build time — see `apps/frontend/Dockerfile` and the compose `args`.
-
-### New endpoints (v2)
-
-```
-GET   /api/trades/risk                 # portfolio risk engine (exposure, heat, concentration)
-POST  /api/engine/run-walk-forward     # out-of-sample rolling validation
-POST  /api/engine/run-monte-carlo      # bootstrapped ROI / drawdown distribution
-WS    TRADE_UPDATE                      # CLOSED / PARTIAL / SL_UPDATED events
-```
+Secrets live only in `.env` files that git ignores. Do not put a key in a tracked file.

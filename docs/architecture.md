@@ -1,10 +1,12 @@
-# Architecture: Zero-Cost Algorithmic Trading Scanner
+# Smart Trading: architecture
 
 ## System Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Docker Compose                         │
+│  scanner and scheduler run the engine image as two more     │
+│  containers; they talk to the api and the database.         │
 │  ┌────────────┐   ┌────────────┐   ┌──────────────────┐    │
 │  │  frontend  │   │    api     │   │     engine       │    │
 │  │ React/Nginx│   │  NestJS    │   │ Python/FastAPI   │    │
@@ -27,18 +29,18 @@
 ### React Frontend (`apps/frontend`) — Port 5173
 - React 18 + TypeScript + Vite (served via Nginx in Docker)
 - Vanilla CSS dark terminal theme
-- Pages: Backtest Arena, Live Scanner
+- Pages: Dashboard, Live Scanner, Portfolio, Scorecard, News, Sectors, Backtesting, Builder, Settings
 
 ### NestJS Backend (`apps/api`) — Port 3000
 - Prisma ORM, Socket.io WebSocket gateway
-- Modules: Stocks, Configs, Signals, Engine proxy, Prisma
+- Modules: Stocks, Configs (with the cell lifecycle), Signals, Trades, Reports (Telegram digests), Dhan (real money, off by default), Telegram, Engine proxy, Prisma
 
 ### Python Engine (`apps/engine`) — Port 8000
 - FastAPI, pandas-ta, yfinance, SQLAlchemy
 - Handles data fetching, backtesting, live scanning
 
 ### PostgreSQL — Port 5470
-- Schema: Stock, HistoricalData, BacktestReport, ActiveConfiguration, LiveSignal, Trade
+- Schema: Stock, HistoricalData, BacktestReport, ActiveConfiguration, LiveSignal, Trade, SentDigest, DhanPosition, DhanDailyState, DhanToken
 - The `Trade` model auto-syncs with `LiveSignal` to build a live Portfolio and compute P&L.
 
 ---
@@ -78,6 +80,11 @@ POST       /api/signals/new
 GET        /api/signals
 POST       /api/engine/fetch-history
 POST       /api/engine/run-backtest
+PATCH      /api/signals/:id/close        # needs a real price: the one sent, or the live quote
+GET        /api/configs/scorecard        # every cell: status, live record, books, backtest
+POST       /api/configs/:id/live         # the owner's real-money switch for a Proven cell
+GET        /api/dhan/status              # real-money mode and today's counters
+GET        /api/reports/digest-preview   # what the Telegram digest would say
 ```
 
 ## Nx Workspace Layout
@@ -88,17 +95,18 @@ smart-trading/
 │   ├── frontend/     React + Vite
 │   ├── api/          NestJS + Prisma
 │   └── engine/       Python FastAPI
+├── config/           trading.json (shared settings), known_price_actions.json
+├── infra/            docker-compose.yml used on work-pc, nginx, landing page, scripts
 ├── docs/
-├── docker-compose.yml
-├── nx.json
-└── gemini.md
+├── docker-compose.yml   local development only
+└── nx.json
 ```
 
 ---
 
-## v2 Architecture Updates (branch `roadmap-v2`)
+## How it works
 
-**Security layer.** Every HTTP request and socket handshake now passes an opt-in
+**Security layer.** Every HTTP request and socket handshake passes an opt-in
 `API_KEY` (NestJS `ApiKeyGuard` + global throttle; FastAPI `require_api_key` +
 LLM rate-limit). The key is threaded across all hops: frontend → API → engine,
 and scanner → API. CORS and all secrets are env-driven from a single root `.env`.
@@ -228,13 +236,9 @@ latest persisted `BacktestReport`, plus Re-run — recomputes via `POST /api/eng
 which persists a fresh report — and Remove — `DELETE /api/configs/:id`).
 
 **Fetch scheduler.** A standalone `scheduler` service (engine image,
-`scheduler/fetch_scheduler.py`, profile `live`) runs a **daily after-close** fetch of every
+`scheduler/fetch_scheduler.py`) runs a **daily after-close** fetch of every
 active stock so the backtest dataset grows over time — intraday (15m/5m) accumulates past
 yfinance's ~60-day-per-request cap because `upsert_ohlcv` never deletes. Daily cadence is
 deliberate: backtests only use completed bars, whole only after the 15:30 IST close. Shares
 the `fetch_and_store()` core with `POST /api/engine/fetch-history`. Env: `FETCH_RUN_HOUR_IST`,
 `FETCH_RUN_MINUTE_IST`, `FETCH_TIMEFRAMES`, `FETCH_ON_START`.
-
-**Isolated dev stack.** A parallel `smart-trading-v2` compose (ports 5471/3001/
-8001/5174, own volume, cloned DB) runs alongside the live stack untouched. See
-[v2-environment.md](v2-environment.md) and [roadmap-implementation.md](roadmap-implementation.md).

@@ -1,0 +1,39 @@
+# Research constants — DATA, not code. See docs/DECISIONS.md D14.
+#
+# Nothing here is read from the environment. V2 read exactly these kinds of numbers via
+# os.getenv at import time, and that is how its 2% risk cap silently became 200% for its
+# entire life (defect N5). Change a number here and the tests that depend on it move --
+# which is the point.
+
+# What the owner actually funds: Rs 10,000 per concurrent position ("slot"), topped up on
+# go-live. NOT a compounding bankroll -- see D5. A cross-sectional top-6 strategy is
+# slots=6, i.e. a Rs 60,000 commitment (D8).
+slot_capital: 10000.0
+
+# Fraction, not percent. Rs 200 on a Rs 10k slot.
+#
+# The unit is spelled out because the name RISK_PER_TRADE_PCT meant THREE different things
+# across V1/V2: 2 (percent) in V1, 0.02 (fraction) in V2's risk.ts, and 2.0 (percent
+# again) in V2's backtest_config.py. Three conventions, one name, no shared schema.
+risk_per_trade_pct: 0.02
+
+# Buying power by hold bucket. Intraday (MIS) deploys 5x the slot; delivery (CNC) 1x.
+leverage:
+  intraday: 5.0
+  delivery: 1.0
+
+# The friction gate's safety factor. A strategy must clear 2x its friction on its own
+# author's OPTIMISTIC prior before it may be written.
+#
+# Not arbitrary: V2's intraday book measured at ~0.5x (Rs 2 spent per Rs 1 earned), so 2x
+# demands 4x the realised edge/friction ratio of anything V1 or V2 ever produced -- and
+# 50%+ out-of-sample decay is the norm.
+gate_margin: 2.0
+
+slippage:
+  # Slippage per share = max(1 tick, k * spread). See D11.
+  k: 0.5
+  # Fallback when no spread estimate exists yet: a floor in bps of price. Corwin-Schultz
+  # arrives in P3 with the data layer (ARCHITECTURE §8) -- it needs real OHLC and a
+  # calibration decision we refuse to guess at.
+  floor_bps: 2.0

@@ -163,8 +163,12 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 
 ### 6. Finish and retire
 - [x] Manual close needs a price (the live quote, or one typed in; never the entry price); planned stop shown in the journal; journal lists all trades
-- [ ] Replay test; phone menu; README; plain-language user guide
-- [ ] July rebuild: useful pieces in, the rest copied to `docs/archive/july-rebuild/`, folder deleted
+- [x] README rewritten; plain-language user guide (`docs/user-guide.md`); documents from the two earlier apps moved to `docs/archive/old-apps/`
+- [x] July rebuild: useful pieces in; the left-out code, tests and decision documents copied to `docs/archive/july-rebuild/`
+- [ ] Replay test (backtest against the scanner on the same candles)
+- [ ] Phone menu
+- [ ] Luck check shown on the Backtesting page (today it is only in the backtest tool's report)
+- [ ] Owner: say yes to deleting `~/workspace/stock-trading` (a full copy of its history is in `~/backups/stock-trading-2026-11-19.bundle`)
 
 ## Not yet verified
 

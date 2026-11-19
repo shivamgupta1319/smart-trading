@@ -1,0 +1,229 @@
+# Point-in-time NIFTY 200 membership -- the data behind R3 (survivorship). See
+# src/trading/data/universe.py for the reconstruction, and docs/HANDOFF.md for why it matters.
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# STATUS: the ANCHOR is populated (real, fetched from niftyindices.com). The reconstitution
+# `changes` log is STILL EMPTY -- so right now `members_as_of(any past date)` returns TODAY's list
+# unchanged, which is exactly the survivorship bias R3 is about (just 200 names instead of 60).
+# THE UNIVERSE IS NOT YET SURVIVORSHIP-SAFE until the changes below are filled in. Each event is a
+# claim a human stands behind, with the NSE circular that backs it.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+#
+# TO FILL `changes` (all free): one entry per semi-annual reconstitution (effective ~April and
+# ~October each year; NIFTY 200 follows the NIFTY 100 + Midcap 100 reviews, Jan-31 / Jul-31 cut-offs):
+#   - NSE inclusion/exclusion log (1998 -> 31-Jul-2020, free):
+#       https://archives.nseindia.com/content/indices/IndexInclExcl.xls
+#   - 2020 -> today: NSE's per-review circulars on niftyindices.com (added/removed + effective date).
+# For each event: effective_date, added: [...], removed: [...], source: "<circular URL>".
+#
+# RECONSTRUCTION: members_as_of(D) = anchor, then undo every change effective AFTER D (drop its
+# 'added', restore its 'removed'). A name that left in a later review is correctly a member for the
+# dates it was in. Dates are the reconstitution EFFECTIVE date, IST.
+
+anchor:
+  as_of: 2026-07-16
+  source: "niftyindices.com ind_nifty200list.csv via fetch_current_constituents (owner-fetched 2026-07-16); 200 symbols"
+  symbols:
+    - 360ONE
+    - ABB
+    - APLAPOLLO
+    - AUBANK
+    - ADANIENSOL
+    - ADANIENT
+    - ADANIGREEN
+    - ADANIPORTS
+    - ADANIPOWER
+    - ATGL
+    - ABCAPITAL
+    - ALKEM
+    - AMBUJACEM
+    - APOLLOHOSP
+    - ASHOKLEY
+    - ASIANPAINT
+    - ASTRAL
+    - AUROPHARMA
+    - DMART
+    - AXISBANK
+    - BSE
+    - BAJAJ-AUTO
+    - BAJFINANCE
+    - BAJAJFINSV
+    - BAJAJHLDNG
+    - BANKBARODA
+    - BANKINDIA
+    - BDL
+    - BEL
+    - BHARATFORG
+    - BHEL
+    - BPCL
+    - BHARTIARTL
+    - GROWW
+    - BIOCON
+    - BLUESTARCO
+    - BOSCHLTD
+    - BRITANNIA
+    - CGPOWER
+    - CANBK
+    - CHOLAFIN
+    - CIPLA
+    - COALINDIA
+    - COCHINSHIP
+    - COFORGE
+    - COLPAL
+    - CONCOR
+    - COROMANDEL
+    - CUMMINSIND
+    - DLF
+    - DABUR
+    - DIVISLAB
+    - DIXON
+    - DRREDDY
+    - EICHERMOT
+    - ETERNAL
+    - EXIDEIND
+    - NYKAA
+    - FEDERALBNK
+    - FORTIS
+    - GAIL
+    - "GVT&D"
+    - GMRAIRPORT
+    - GLENMARK
+    - GODFRYPHLP
+    - GODREJCP
+    - GODREJPROP
+    - GRASIM
+    - HCLTECH
+    - HDFCAMC
+    - HDFCBANK
+    - HDFCLIFE
+    - HAVELLS
+    - HEROMOTOCO
+    - HINDALCO
+    - HAL
+    - HINDPETRO
+    - HINDUNILVR
+    - HINDZINC
+    - POWERINDIA
+    - HUDCO
+    - HYUNDAI
+    - ICICIBANK
+    - ICICIGI
+    - ICICIAMC
+    - IDFCFIRSTB
+    - ITC
+    - INDIANB
+    - INDHOTEL
+    - IOC
+    - IRCTC
+    - IRFC
+    - IREDA
+    - INDUSTOWER
+    - INDUSINDBK
+    - NAUKRI
+    - INFY
+    - INDIGO
+    - JSWENERGY
+    - JSWSTEEL
+    - JINDALSTEL
+    - JIOFIN
+    - JUBLFOOD
+    - KEI
+    - KPITTECH
+    - KALYANKJIL
+    - KOTAKBANK
+    - LTF
+    - LGEINDIA
+    - LICHSGFIN
+    - LTM
+    - LT
+    - LAURUSLABS
+    - LENSKART
+    - LODHA
+    - LUPIN
+    - MRF
+    - "M&MFIN"
+    - "M&M"
+    - MANKIND
+    - MARICO
+    - MARUTI
+    - MFSL
+    - MAXHEALTH
+    - MAZDOCK
+    - MOTILALOFS
+    - MPHASIS
+    - MCX
+    - MUTHOOTFIN
+    - NHPC
+    - NMDC
+    - NTPC
+    - NATIONALUM
+    - NESTLEIND
+    - OBEROIRLTY
+    - ONGC
+    - OIL
+    - PAYTM
+    - OFSS
+    - POLICYBZR
+    - PIIND
+    - PAGEIND
+    - PATANJALI
+    - PERSISTENT
+    - PHOENIXLTD
+    - PIDILITIND
+    - POLYCAB
+    - PFC
+    - POWERGRID
+    - PREMIERENE
+    - PRESTIGE
+    - PNB
+    - RECLTD
+    - RADICO
+    - RVNL
+    - RELIANCE
+    - SBICARD
+    - SBILIFE
+    - SRF
+    - MOTHERSON
+    - SHREECEM
+    - SHRIRAMFIN
+    - ENRIN
+    - SIEMENS
+    - SOLARINDS
+    - SBIN
+    - SAIL
+    - SUNPHARMA
+    - SUPREMEIND
+    - SUZLON
+    - SWIGGY
+    - TVSMOTOR
+    - TATACAP
+    - TATACOMM
+    - TCS
+    - TATACONSUM
+    - TATAELXSI
+    - TATAINVEST
+    - TMCV
+    - TMPV
+    - TATAPOWER
+    - TATASTEEL
+    - TECHM
+    - TITAN
+    - TORNTPHARM
+    - TRENT
+    - TIINDIA
+    - UPL
+    - ULTRACEMCO
+    - UNIONBANK
+    - UNITDSPR
+    - VBL
+    - VEDL
+    - VMM
+    - IDEA
+    - VOLTAS
+    - WAAREEENER
+    - WIPRO
+    - YESBANK
+    - ZYDUSLIFE
+
+# STILL EMPTY -- until filled, the universe is today's list projected backward (survivorship-biased).
+changes: []
