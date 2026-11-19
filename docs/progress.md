@@ -53,22 +53,33 @@ Positive after costs so far: `MACD_Zero`, `SMC_FVG`, `RVOL_ORB`, `VWAP_MACD_RSI`
 - [x] A strategy with too little data is reported (scanner warning, backtest flag) instead of quietly giving no signal
 - [x] One shared settings file (`config/trading.json`) for fund size, leverage, risk cap and costs, read by engine and API
 - [x] Engine dependencies pinned; database driver named explicitly (a fresh image build would otherwise have broken)
-- [ ] Parity test: one day of stored candles gives the same trades in scanner and backtest
+- [ ] Parity test: one day of stored candles gives the same trades in scanner and backtest (not started; needs the scanner's exit decisions pulled into a function that can be replayed)
 
 ## Phase 2 — Strategy cleanup and fresh backtest
 
-- [ ] Remove `EMA20_Pullback`, `Volume_Profile_POC`, `VWAP_Supertrend`
-- [ ] Fix `Gap_And_Go` (cannot fire live today)
-- [ ] Fix `Fibonacci_Golden_Zone` (does not check trend direction)
-- [ ] Fix `RSI_Divergence` (fires on every bar while true)
-- [ ] Fix `BB_Squeeze` (measures the squeeze on the breakout bar)
-- [ ] Fix `MTF_Alignment` (crashes in backtest)
-- [ ] `Bollinger_Mean_Reversion`, `Channel_Oscillation`: keep the strategy's own target
-- [ ] `docs/strategies.md`: one rule sheet per strategy with its status and reason
-- [ ] Price-jump check on stored history (demerger and split cliffs)
-- [ ] Walk-forward folds get warm-up data
-- [ ] Re-run all backtests on latest data; use only as a first filter (drop clearly broken cells)
+- [x] Remove `EMA20_Pullback`, `Volume_Profile_POC`, `VWAP_Supertrend`
+- [x] Fix `Gap_And_Go` (could not fire live)
+- [x] Fix `Fibonacci_Golden_Zone` (did not check trend direction)
+- [x] Fix `RSI_Divergence` (fired on every bar while true)
+- [x] Fix `BB_Squeeze` (measured the squeeze on the breakout bar)
+- [x] Fix `MTF_Alignment` (crashed in backtest)
+- [ ] `Bollinger_Mean_Reversion`, `Channel_Oscillation`: measure own target against the 4R override before changing anything (the July measurement said the override helps)
+- [x] `docs/strategies.md`: one rule sheet per strategy with its status and evidence
+- [ ] Price-jump check on stored history: the backtest tool now flags them (16 of 60 stocks); reviewing and quarantining them is still to do
+- [x] Walk-forward folds get warm-up data (one shared implementation)
+- [x] Re-run all backtests on latest data with the corrected engine (read-only tool `apps/engine/tools/backtest_all.py`; results in `docs/strategies.md`)
+- [x] Cost rule: a trade is skipped when costs are more than 25% of its risk (engine and API)
+- [x] Scanner acts on signals from candles completed between polls
 - [ ] Fresh roster on a fixed list of liquid stocks
+
+### What the fresh backtest showed (2026-11-19)
+
+With honest fills and costs at ₹10,000 per cell, **every intraday strategy is negative on
+average** across the 60 stocks (−0.35R per trade; −0.14R with the cost rule). The best four
+are near break-even on the most volatile stocks. Four swing strategies are positive in both
+halves of 5.5 years, on a stock list that flatters them. Detail and limits:
+[strategies.md](strategies.md). This is the baseline the 3–6 months of paper trading starts
+from; it is not a reason to expect profit.
 
 ## Phase 3 — Cell lifecycle and scorecard
 
