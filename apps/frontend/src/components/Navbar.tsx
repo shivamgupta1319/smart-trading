@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import axios from "axios";
 import { API } from "../config";
 
@@ -275,68 +275,105 @@ function isMarketOpen() {
 
 export function Navbar() {
   const open = isMarketOpen();
+  // Below the desktop width the links fold into a menu opened by one button.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { pathname } = useLocation();
+
+  // Going to another page closes the menu.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   return (
-    <nav className="navbar">
+    <nav className="navbar" aria-label="Main">
       <NavLink to="/" className="navbar-brand">
         <span className="brand-icon">⚡</span>
         <span>SmartTrader</span>
       </NavLink>
 
-      <div className="navbar-links">
+      <button
+        type="button"
+        className="navbar-toggle"
+        aria-expanded={menuOpen}
+        aria-controls="navbar-links"
+        onClick={() => setMenuOpen((v) => !v)}
+      >
+        <span className="navbar-toggle-bars" aria-hidden="true" />
+        {menuOpen ? "Close" : "Menu"}
+      </button>
+
+      <div id="navbar-links" className={`navbar-links ${menuOpen ? "open" : ""}`}>
         <NavLink
           to="/dashboard"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          📊 Dashboard
+          <span className="nav-icon" aria-hidden="true">📊</span>
+          Dashboard
         </NavLink>
         <NavLink
           to="/scanner"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          📡 Live Scanner
+          <span className="nav-icon" aria-hidden="true">📡</span>
+          Live Scanner
         </NavLink>
         <NavLink
           to="/portfolio"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          💼 Portfolio
+          <span className="nav-icon" aria-hidden="true">💼</span>
+          Portfolio
         </NavLink>
         <NavLink
           to="/scorecard"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          🎯 Scorecard
+          <span className="nav-icon" aria-hidden="true">🎯</span>
+          Scorecard
         </NavLink>
         <NavLink
           to="/news"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          📰 News
+          <span className="nav-icon" aria-hidden="true">📰</span>
+          News
         </NavLink>
         <NavLink
           to="/sectors"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          🗂️ Sectors
+          <span className="nav-icon" aria-hidden="true">🗂️</span>
+          Sectors
         </NavLink>
         <NavLink
           to="/backtesting"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          ⚡ Backtesting
+          <span className="nav-icon" aria-hidden="true">⚡</span>
+          Backtesting
         </NavLink>
         <NavLink
           to="/builder"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          🧩 Builder
+          <span className="nav-icon" aria-hidden="true">🧩</span>
+          Builder
         </NavLink>
         <NavLink
           to="/settings"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
-          ⚙️ Settings
+          <span className="nav-icon" aria-hidden="true">⚙️</span>
+          Settings
         </NavLink>
         <RegimeChip />
         <div className="market-status">
