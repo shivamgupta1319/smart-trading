@@ -19,8 +19,8 @@ export class TelegramService {
   constructor(private configService: ConfigService) {
     this.botToken = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     this.chatId = this.configService.get<string>('TELEGRAM_CHAT_ID');
-    // Allow an explicit kill-switch (e.g. the cloned v2 stack) so two API
-    // instances don't both fire alerts to the same chat.
+    // Allow an explicit kill-switch, so a second API instance pointed at the same
+    // chat (a test stack, say) does not double every alert.
     const flag = this.configService.get<string>('TELEGRAM_ENABLED');
     const notDisabled = String(flag ?? 'true').toLowerCase() !== 'false';
     this.enabled = !!(this.botToken && this.chatId) && notDisabled;
@@ -33,6 +33,31 @@ export class TelegramService {
       this.logger.warn(
         'Telegram notifications DISABLED — set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env',
       );
+    }
+  }
+
+  /**
+   * Send a ready-made message (HTML parse mode). Returns false when Telegram is
+   * switched off or the send failed; it never throws.
+   */
+  async sendText(text: string): Promise<boolean> {
+    if (!this.enabled) return false;
+    try {
+      await axios.post(
+        `https://api.telegram.org/bot${this.botToken}/sendMessage`,
+        { chat_id: this.chatId, text, parse_mode: 'HTML', disable_web_page_preview: true },
+        { timeout: 10000, family: 4 },
+      );
+      return true;
+    } catch (err: unknown) {
+      const detail =
+        typeof err === 'object' && err && 'response' in err
+          ? JSON.stringify((err as { response?: { data?: unknown } }).response?.data)
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      this.logger.error(`Failed to send Telegram message: ${detail}`);
+      return false;
     }
   }
 

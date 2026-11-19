@@ -121,6 +121,41 @@ from; it is not a reason to expect profit.
 - [ ] Swing: 52-week-high breakout with volume, only when the market is up
 - [ ] Swing: relative-strength momentum basket
 
+## After go-live: adding what is still missing (plan of 2026-11-19)
+
+Everything useful from the first app (git tag `archive/roadmap-v1`), the second app and the
+July rebuild goes into this one product. Six packages, in this order.
+
+### 1. Telegram digests
+- [x] Daily (15:45 IST), weekly and since-the-start (Fridays) digests, after costs, main book and test book reported apart, with the day's status changes
+- [x] `GET /api/reports/digest-preview?period=DAILY|WEEKLY|OVERALL` shows what would be sent
+- [ ] Deployed to work-pc
+
+### 2. Data you can trust
+- [ ] Candle data checks where candles are written
+- [ ] Price-jump detector with a reviewed allow-list; flagged stocks shown in the app
+- [ ] Full re-fetch when a split or demerger is detected
+- [ ] The 16 flagged stocks reviewed
+
+### 3. Honest numbers
+- [ ] Slippage by tick size (engine and API)
+- [ ] Luck-correction statistics and a trials ledger
+- [ ] NIFTY buy-and-hold comparison
+- [ ] Portfolio totals split into main book and test book
+
+### 4. Market condition and switching
+- [ ] See Phase 4 above
+
+### 5. Real-money layer (Dhan), switched off
+- [ ] Service, tables and settings ported; known weaknesses fixed
+- [ ] Two locks: a cell must be `PROVEN` and switched on by the owner
+- [ ] Runbook and "what live can and cannot do" rewritten for this product
+
+### 6. Finish and retire
+- [ ] Manual close needs a price; planned stop shown; journal shows all trades
+- [ ] Replay test; phone menu; README; plain-language user guide
+- [ ] July rebuild: useful pieces in, the rest copied to `docs/archive/july-rebuild/`, folder deleted
+
 ## Not yet verified
 
 - Whether the 2% risk-cap setting is correct on work-pc today. (From the next deploy a wrong value stops the service at start-up instead of silently disabling the cap.)

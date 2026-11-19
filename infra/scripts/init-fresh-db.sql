@@ -193,6 +193,16 @@ ALTER TABLE "Trade" ADD CONSTRAINT "Trade_signalId_fkey" FOREIGN KEY ("signalId"
 -- AddForeignKey
 ALTER TABLE "Trade" ADD CONSTRAINT "Trade_stockId_fkey" FOREIGN KEY ("stockId") REFERENCES "Stock"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- CreateTable
+CREATE TABLE IF NOT EXISTS "SentDigest" (
+    "id" SERIAL NOT NULL,
+    "period" TEXT NOT NULL,
+    "periodKey" TEXT NOT NULL,
+    "sentAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "SentDigest_pkey" PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "SentDigest_period_periodKey_key" ON "SentDigest"("period", "periodKey");
+
 -- At most one ACTIVE signal per cell. This is the real guard behind the API's
 -- duplicate check (a partial unique index, not expressible in schema.prisma).
 CREATE UNIQUE INDEX IF NOT EXISTS "LiveSignal_active_unique"

@@ -167,3 +167,13 @@ model Trade {
   @@index([status])
   @@index([strategyName])
 }
+
+// One row per Telegram digest already sent, so a restart never sends a second copy.
+model SentDigest {
+  id        Int      @id @default(autoincrement())
+  period    String   // "DAILY" | "WEEKLY" | "OVERALL"
+  periodKey String   // IST date: the day (DAILY, OVERALL) or that week's Monday (WEEKLY)
+  sentAt    DateTime @default(now())
+
+  @@unique([period, periodKey])
+}
