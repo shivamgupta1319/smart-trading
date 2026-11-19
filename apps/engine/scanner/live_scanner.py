@@ -25,6 +25,7 @@ from db.client import engine
 from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
 from entry_limits import entry_allowed, limits_for_bucket
 from live_fills import entry_geometry_ok, stop_exit_price, target_exit_price
+from data_checks import back_adjust
 # Shared intraday-exit primitives — same source of truth the backtest models.
 from intraday_exits import (
     calculate_progress,
@@ -144,6 +145,16 @@ def fetch_live_candles(symbol: str, timeframe: str) -> pd.DataFrame:
     # Use previous complete candle (not the currently forming one)
     df = df.iloc[:-1]
     df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    # Scale prices before a reviewed demerger so indicators see one continuous series,
+    # the same adjustment backtests get when they load stored history.
+    return back_adjust(_ist_naive(df), symbol)
+
+
+def _ist_naive(df: pd.DataFrame) -> pd.DataFrame:
+    """IST clock-time index with no timezone (what data_checks and stored history use)."""
+    if isinstance(df.index, pd.DatetimeIndex) and df.index.tz is not None:
+        df = df.copy()
+        df.index = df.index.tz_convert("Asia/Kolkata").tz_localize(None)
     return df
 
 

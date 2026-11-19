@@ -11,6 +11,7 @@ from typing import List
 from sqlalchemy import text
 from db.client import engine
 from cache import cached, cache_get, cache_set
+from data_checks import adjustment_shift, clean_candles, unexplained_jumps
 
 router = APIRouter()
 
@@ -128,14 +129,76 @@ def fetch_and_store(symbol: str, timeframes=None, incremental: bool = True) -> d
             if df.empty:
                 results[tf] = {"rows": 0, "status": "empty", "mode": mode}
                 continue
-            df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
+            df = normalize_to_ist_naive(df[['Open', 'High', 'Low', 'Close', 'Volume']])
+
+            # Has the source re-scaled its history (split / dividend adjustment) since
+            # we stored ours? Then the stored bars are on the old scale and topping up
+            # would stitch two scales together. Replace the whole series instead.
+            if mode == "incremental":
+                shift = adjustment_shift(_stored_closes(stock_id, tf, df.index.min()), df["Close"])
+                if shift is not None:
+                    print(f"[history] {original_symbol} {tf}: source re-scaled its prices "
+                          f"(x{shift:.4f}); replacing the stored series")
+                    full = ticker.history(period=cfg["period"], interval=cfg["interval"])
+                    if not full.empty:
+                        df = normalize_to_ist_naive(full[['Open', 'High', 'Low', 'Close', 'Volume']])
+                        _delete_series(stock_id, tf)
+                        mode = "replaced (re-scaled)"
+
+            # Leave out rows that cannot be real, and say how many (never silently).
+            df, problems = clean_candles(df, tf)
             rows = upsert_ohlcv(stock_id, df, tf)
             results[tf] = {"rows": rows, "status": "ok", "mode": mode}
+            if problems:
+                results[tf]["left_out"] = [str(p) for p in problems]
+                print(f"[history] {original_symbol} {tf}: " + "; ".join(str(p) for p in problems))
+            if tf == "1D":
+                results[tf]["needs_review"] = update_data_flag(stock_id, original_symbol)
         except Exception as e:
             results[tf] = {"rows": 0, "status": f"error: {str(e)}", "mode": mode}
         time.sleep(1)  # Rate limit friendly
 
     return {"symbol": original_symbol, "results": results}
+
+
+def _stored_closes(stock_id: int, timeframe: str, since) -> pd.Series:
+    """Stored closes from `since` on, indexed by timestamp (for the re-scaling check)."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT "timestamp", close FROM "HistoricalData"
+            WHERE "stockId" = :sid AND timeframe = :tf AND "timestamp" >= :since
+            ORDER BY "timestamp"
+        """), {"sid": stock_id, "tf": timeframe, "since": pd.Timestamp(since).to_pydatetime()}).fetchall()
+    return pd.Series({pd.Timestamp(r[0]): float(r[1]) for r in rows}, dtype=float)
+
+
+def _delete_series(stock_id: int, timeframe: str) -> None:
+    with engine.begin() as conn:
+        conn.execute(text('DELETE FROM "HistoricalData" WHERE "stockId" = :sid AND timeframe = :tf'),
+                     {"sid": stock_id, "tf": timeframe})
+
+
+def update_data_flag(stock_id: int, symbol: str) -> list[str]:
+    """Mark the stock when its stored daily history has a large move nobody has reviewed
+    (config/known_price_actions.json), or clear the mark when it has none. Returns the
+    unreviewed moves as text. A failure here never fails the fetch."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT "timestamp", close FROM "HistoricalData"
+                WHERE "stockId" = :sid AND timeframe = '1D' ORDER BY "timestamp"
+            """), {"sid": stock_id}).fetchall()
+        close = pd.Series({pd.Timestamp(r[0]): float(r[1]) for r in rows}, dtype=float)
+        jumps = [str(j) for j in unexplained_jumps(symbol, close)]
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE "Stock" SET "dataFlag" = :flag, "dataFlagDetail" = :detail WHERE id = :sid
+            """), {"sid": stock_id, "flag": "PRICE_JUMP" if jumps else None,
+                   "detail": "; ".join(jumps) if jumps else None})
+        return jumps
+    except Exception as exc:
+        print(f"[history] {symbol}: data flag not updated: {type(exc).__name__}: {exc}")
+        return []
 
 
 def upsert_ohlcv(stock_id: int, df: pd.DataFrame, timeframe: str):

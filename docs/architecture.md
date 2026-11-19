@@ -174,6 +174,19 @@ window of new trades averaging above +0.05R. `GET /api/configs/scorecard` return
 the status and reason, the live record, main-book and test-book totals, and the latest
 backtest. `infra/scripts/e2e-smoke.sh` exercises all of this against a throwaway database.
 
+**Data checks.** `apps/engine/data_checks.py` guards the candles everything else is built on.
+- *When candles are stored* (`routers/history.py::fetch_and_store`): rows that cannot be real
+  (missing values, zero or negative prices, a high below the open or close, intraday bars
+  outside 09:15–15:30, repeated timestamps) are left out and counted in the fetch result.
+- *Re-scaled history:* if re-fetched closes no longer line up with stored ones, the source has
+  adjusted its history for a split or dividend; the stored series is replaced in full instead
+  of being stitched across two scales.
+- *Price jumps:* a daily move above 20% must be listed in `config/known_price_actions.json` as
+  a `real_move` or a `demerger`. A stock with an unlisted move gets `Stock.dataFlag`.
+- *Demergers:* the data source does not adjust for them, so earlier prices are scaled by the
+  size of the step whenever history is loaded (backtests and the live scanner).
+`python tools/check_data.py` reports on every stock and refreshes the flags.
+
 **AI analysis.** Every AI call (market overview, stock, sector and indicator write-ups) goes
 through the owner's AI router, an OpenAI-compatible gateway on work-pc that tracks which free
 models are answering. The engine's only AI code is `apps/engine/ai_client.py`: it posts to

@@ -129,13 +129,19 @@ July rebuild goes into this one product. Six packages, in this order.
 ### 1. Telegram digests
 - [x] Daily (15:45 IST), weekly and since-the-start (Fridays) digests, after costs, main book and test book reported apart, with the day's status changes
 - [x] `GET /api/reports/digest-preview?period=DAILY|WEEKLY|OVERALL` shows what would be sent
-- [ ] Deployed to work-pc
+- [x] Deployed to work-pc (2026-11-19)
+
+Also done that day, from issues seen on the live app: dashboard prices are fetched six at a
+time (61 quotes in about 8 seconds, was about 30) and all AI analysis goes through the AI
+router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are gone.
 
 ### 2. Data you can trust
-- [ ] Candle data checks where candles are written
-- [ ] Price-jump detector with a reviewed allow-list; flagged stocks shown in the app
-- [ ] Full re-fetch when a split or demerger is detected
-- [ ] The 16 flagged stocks reviewed
+- [x] Candle data checks where candles are written (`apps/engine/data_checks.py`); rows left out are counted and reported
+- [x] Price-jump check with a reviewed list (`config/known_price_actions.json`); unreviewed stocks get `Stock.dataFlag`
+- [x] Reviewed demergers are scaled out when history is loaded (backtests and scanner)
+- [ ] Flag shown in the app
+- [x] Whole series replaced when the data source has re-scaled its prices (split or dividend)
+- [x] The 27 flagged moves reviewed: 24 real market moves and 2 demergers listed; TRENT is a series stitched across its 1.5-for-1 split (repaired by a full re-download); KAYNES 2026-05-14 left for the owner
 
 ### 3. Honest numbers
 - [ ] Slippage by tick size (engine and API)
