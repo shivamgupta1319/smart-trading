@@ -87,5 +87,50 @@ def test_catch_up_is_bounded_and_takes_the_most_recent_signal():
     assert pick_signal_row(df2, df2.index[0])["signal"] == -1                        # newest of the two
 
 
+# ── Engine: live-prices endpoint ─────────────────────────────────────────────
+
+def test_live_prices_fetches_missing_quotes_together_and_survives_a_bad_symbol(monkeypatch):
+    import threading
+    import time as _time
+    import brokers
+    import routers.history as history
+
+    history.cache_set("live:CACHED", {"price": 1.0})
+    seen, lock = [], threading.Lock()
+
+    def fake_quote(sym):
+        with lock:
+            seen.append(sym)
+        _time.sleep(0.2)
+        if sym == "BROKEN":
+            raise RuntimeError("provider down")
+        if sym == "NOQUOTE":
+            return None
+        return {"price": 100.0, "symbol": sym}
+
+    monkeypatch.setattr(brokers, "get_live_price", fake_quote)
+    symbols = ["CACHED", "AAA", "BBB", "CCC", "BROKEN", "NOQUOTE", "AAA"]
+    started = _time.monotonic()
+    out = history.get_live_prices(history.LivePriceRequest(symbols=symbols))
+    took = _time.monotonic() - started
+
+    assert out["CACHED"] == {"price": 1.0} and "CACHED" not in seen       # cache respected
+    assert out["AAA"]["price"] == 100.0 and out["BBB"]["price"] == 100.0
+    assert out["BROKEN"] is None and out["NOQUOTE"] is None                # no crash, no fake price
+    assert sorted(seen) == ["AAA", "BBB", "BROKEN", "CCC", "NOQUOTE"]      # each asked once
+    assert took < 0.8                                                      # 5 x 0.2s in a row would be 1.0s
+
+
+def test_live_prices_keeps_a_recent_quote_when_the_refresh_fails(monkeypatch):
+    import brokers
+    import routers.history as history
+
+    history.cache_set("live:STALE", {"price": 55.0})
+    monkeypatch.setattr(history, "LIVE_PRICE_TTL", 0)       # force a refresh
+    monkeypatch.setattr(brokers, "get_live_price", lambda sym: None)
+    out = history.get_live_prices(history.LivePriceRequest(symbols=["STALE"]))
+    assert out["STALE"] == {"price": 55.0}
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))

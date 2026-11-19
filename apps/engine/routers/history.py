@@ -1,6 +1,7 @@
 """POST /api/engine/fetch-history — Downloads OHLCV from yfinance and stores in PostgreSQL"""
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
@@ -177,22 +178,47 @@ def fetch_history(req: FetchHistoryRequest):
 class LivePriceRequest(BaseModel):
     symbols: List[str]
 
-@router.post("/live-prices")
-def get_live_prices(req: LivePriceRequest):
+# How many quotes to fetch at once. The dashboard asks for every active stock; one at a
+# time that was 60 slow calls in a row (prices sat on "loading" for half a minute and the
+# next poll piled on top), and a burst of that size is what gets the data source to
+# answer "currently down".
+LIVE_PRICE_WORKERS = 6
+# A quote that failed to refresh is still shown if it is at most this old (seconds).
+LIVE_PRICE_STALE_OK = 300
+
+
+def _fetch_quote(sym: str):
     from brokers import get_live_price as _broker_live_price
 
+    try:
+        return _broker_live_price(sym)  # Dhan/Upstox when configured, else yfinance
+    except Exception as exc:  # one bad symbol must not fail the whole request
+        print(f"[live-prices] {sym}: {type(exc).__name__}: {exc}")
+        return None
+
+
+@router.post("/live-prices")
+def get_live_prices(req: LivePriceRequest):
     results = {}
-    for sym in req.symbols:
+    missing = []
+    for sym in dict.fromkeys(req.symbols):  # de-duplicate, keep order
         cached_val = cache_get(f"live:{sym}", LIVE_PRICE_TTL)
         if cached_val is not None:
             results[sym] = cached_val
-            continue
-        # Routes to Dhan/Upstox when configured, else yfinance (see brokers/).
-        payload = _broker_live_price(sym)
-        if payload is not None:
-            cache_set(f"live:{sym}", payload)
-        results[sym] = payload
-    return results
+        else:
+            missing.append(sym)
+
+    if missing:
+        with ThreadPoolExecutor(max_workers=LIVE_PRICE_WORKERS) as pool:
+            fetched = dict(zip(missing, pool.map(_fetch_quote, missing)))
+        for sym, payload in fetched.items():
+            if payload is not None:
+                cache_set(f"live:{sym}", payload)
+                results[sym] = payload
+            else:
+                # Refresh failed: an older quote is more useful than a blank.
+                results[sym] = cache_get(f"live:{sym}", LIVE_PRICE_STALE_OK)
+    return {sym: results.get(sym) for sym in req.symbols}
 
 
 @router.get("/chart-data/{symbol}")
