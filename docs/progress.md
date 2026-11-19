@@ -155,9 +155,11 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [ ] Stage C: weekly/monthly analyst report
 
 ### 5. Real-money layer (Dhan), switched off
-- [ ] Service, tables and settings ported; known weaknesses fixed
-- [ ] Two locks: a cell must be `PROVEN` and switched on by the owner
-- [ ] Runbook and "what live can and cannot do" rewritten for this product
+- [x] Service, tables and settings ported from the first app. Fixed while porting: exits keep working when entries are off or halted; sizing limits reach the service and default to the paper book's; the token is cached in the database, respects Dhan's two-minute limit and alerts on failure; the list of tradable pairs is no longer in the source code
+- [x] Two locks: a cell must be `PROVEN` and switched on by the owner (`POST /api/configs/:id/live`); `GET /api/dhan/status`
+- [ ] The switch and the status shown on the Scorecard page
+- [x] Runbook and "what live can and cannot do" rewritten for this product (`docs/real-money-trading.md`, `docs/live-capabilities.md`)
+- [ ] Deployed to work-pc with the mode `off`
 
 ### 6. Finish and retire
 - [ ] Manual close needs a price; planned stop shown; journal shows all trades

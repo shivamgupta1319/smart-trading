@@ -61,6 +61,12 @@ export class TelegramService {
     }
   }
 
+  /** An urgent notice (a real-money problem, say): a bold title, then the detail. */
+  async sendAlert(title: string, body: string): Promise<boolean> {
+    const when = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    return this.sendText([`🚨 <b>${title}</b>`, '', body, '', `⏰ ${when}`].join('\n'));
+  }
+
   async sendSignalAlert(signal: {
     signalType: string;
     symbol?: string;

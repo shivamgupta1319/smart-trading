@@ -15,6 +15,7 @@ import { TradesModule } from '../trades/trades.module';
 import { TelegramModule } from '../telegram/telegram.module';
 import { AdminModule } from '../admin/admin.module';
 import { ReportsModule } from '../reports/reports.module';
+import { DhanModule } from '../dhan/dhan.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ReportsModule } from '../reports/reports.module';
     TelegramModule,
     AdminModule,
     ReportsModule,
+    DhanModule,
   ],
   controllers: [AuthController],
   providers: [
