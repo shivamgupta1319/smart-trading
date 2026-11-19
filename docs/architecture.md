@@ -174,6 +174,12 @@ window of new trades averaging above +0.05R. `GET /api/configs/scorecard` return
 the status and reason, the live record, main-book and test-book totals, and the latest
 backtest. `infra/scripts/e2e-smoke.sh` exercises all of this against a throwaway database.
 
+**AI analysis.** Every AI call (market overview, stock, sector and indicator write-ups) goes
+through the owner's AI router, an OpenAI-compatible gateway on work-pc that tracks which free
+models are answering. The engine's only AI code is `apps/engine/ai_client.py`: it posts to
+`AI_ROUTER_URL` with `AI_ROUTER_KEY` and model `auto`, and turns every failure into a
+plain-words notice. There are no provider keys or fallback loops in this app.
+
 **Telegram digests.** `apps/api/src/reports/` sends a daily digest at 15:45 IST on weekdays
 and, on Fridays, the week (15:50) and everything since the start (15:55). Figures are after
 costs; trades opened while a cell was paused are reported as the test book, apart from the
