@@ -99,13 +99,14 @@ from; it is not a reason to expect profit.
 
 - [ ] Dhan service and its tables (mode stays `off`)
 - [ ] Telegram daily and weekly digests
-- [ ] Landing page at `/`
+- [x] Landing page at `/`
 - [ ] Dhan fixes: risk-cap settings passed through compose; `off` must not block exits on open positions; token failure alert
 
 ## Phase 6 — Cutover
 
-- [ ] Final stack on work-pc from `main`, fresh database, served at `trading.pseo.cloud`
-- [ ] v1 and v2 stacks stopped; `trading-v2.pseo.cloud` retired
+- [x] Final stack on work-pc from `main`, fresh database, served at `trading.pseo.cloud` (2026-11-19, 387 cells in testing)
+- [x] Both earlier stacks stopped (their volumes, images and files are kept on work-pc for now)
+- [ ] `trading-v2.pseo.cloud` hostname removed in Cloudflare; old volumes, images and the old stack folder deleted on work-pc
 - [ ] Old branch tips tagged `archive/*`, then all branches except `main` deleted
 - [ ] `smart-trading-v2` worktree removed
 - [ ] README rewritten; old docs moved to `docs/archive/`; single `docs/HANDOFF.md`
