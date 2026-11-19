@@ -22,6 +22,18 @@ def _atr_array(h, low, c, period: int):
     return pd.Series(tr).rolling(period, min_periods=1).mean().to_numpy()
 
 
+def stop_fill_price(stop: float, bar_open: float, is_buy: bool) -> float:
+    """Price a triggered stop actually fills at on a bar.
+
+    If the bar opens beyond the stop (a gap through it), the fill is that open:
+    a long with a ₹100 stop on a bar opening at ₹92 exits at ₹92, not ₹100.
+    Otherwise the stop price itself. Slippage is applied by the caller.
+    """
+    if not RISK.gap_through_stop_at_open or not math.isfinite(bar_open):
+        return stop
+    return min(stop, bar_open) if is_buy else max(stop, bar_open)
+
+
 class BaseStrategy(ABC):
     name: str
     timeframe: str
@@ -117,6 +129,8 @@ class BaseStrategy(ABC):
           * Stop-loss / target evaluated against each subsequent bar's intrabar
             High/Low — not the close. If a single bar straddles both levels we
             assume the worse (SL) filled first (pessimistic_intrabar).
+          * A bar that opens beyond the stop fills at that open, not at the stop
+            (gap_through_stop_at_open) — see `stop_fill_price`.
           * Notional position sizing: qty = cell equity × bucket leverage / entry
             (intraday 5×, swing/delivery 1×), matching the live per-cell fund model.
             Notional is capped at max_position_value unless BT_CAP_POSITION_VALUE
@@ -241,11 +255,11 @@ class BaseStrategy(ABC):
                     else:
                         hit_sl, hit_tp = hi >= cur_sl, lo <= tp
                     if hit_sl and hit_tp:
-                        exit_price = cur_sl if RISK.pessimistic_intrabar else tp
+                        exit_price = stop_fill_price(cur_sl, o[j], ttype == 1) if RISK.pessimistic_intrabar else tp
                         exit_idx = j
                         break
                     if hit_sl:
-                        exit_price, exit_idx = cur_sl, j
+                        exit_price, exit_idx = stop_fill_price(cur_sl, o[j], ttype == 1), j
                         break
                     if hit_tp:
                         exit_price, exit_idx = tp, j
@@ -371,7 +385,7 @@ class BaseStrategy(ABC):
 
             # 1) Stop first (pessimistic).
             if (is_buy and lo <= cur_sl) or (not is_buy and hi >= cur_sl):
-                legs.append((remaining, cur_sl))
+                legs.append((remaining, stop_fill_price(cur_sl, o[j], is_buy)))
                 remaining = 0
                 exit_idx = j
                 break
