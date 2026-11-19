@@ -108,9 +108,13 @@ class BaseStrategy(ABC):
         df["target"] = tgt
         return df
 
-    def run_backtest(self, df: pd.DataFrame) -> dict:
-        """Run a realistic backtest and return aggregate metrics."""
-        sim = self.simulate(df)
+    def run_backtest(self, df: pd.DataFrame, trade_from: int = 0) -> dict:
+        """Run a realistic backtest and return aggregate metrics.
+
+        trade_from: bar position before which signals are ignored. The earlier bars
+        are still fed to the strategy so its indicators are warmed up (walk-forward).
+        """
+        sim = self.simulate(df, trade_from=trade_from)
         m = self._metrics(
             sim["net_trades"], sim["gross_trades"], sim["total_costs"],
             sim["max_dd"], sim["max_dd_pct"], sim["skipped_invalid"],
@@ -137,7 +141,7 @@ class BaseStrategy(ABC):
         except (TypeError, ValueError, AttributeError):
             return 0.0
 
-    def simulate(self, df: pd.DataFrame) -> dict:
+    def simulate(self, df: pd.DataFrame, trade_from: int = 0) -> dict:
         """Run the realistic fill simulation and return per-trade P&L lists.
 
         Fill model (removes the optimistic biases of the old close-only engine):
@@ -171,6 +175,10 @@ class BaseStrategy(ABC):
         # zero-trade backtest on too little data is not read as a clean result.
         no_signal_column = "signal" not in df.columns
         sig = df.get("signal", pd.Series(0, index=df.index)).fillna(0).to_numpy(dtype=float)
+        if trade_from > 0:
+            # Warm-up bars: indicators have seen them, but no trade may start there.
+            sig = sig.copy()
+            sig[:trade_from] = 0
         sl_arr = df.get("stop_loss", pd.Series(np.nan, index=df.index)).to_numpy(dtype=float)
         tp_arr = df.get("target", pd.Series(np.nan, index=df.index)).to_numpy(dtype=float)
         vol = df.get("Volume", pd.Series(0.0, index=df.index)).to_numpy(dtype=float)

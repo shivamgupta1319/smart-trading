@@ -26,6 +26,8 @@ from routers.backtest import load_historical
 from routers.history import fetch_and_store
 from reports import save_report as _save_report  # shared UPSERT writer (one row per cell)
 
+from walkforward import run_folds, summarise
+
 router = APIRouter()
 
 
@@ -77,32 +79,12 @@ class AutoSelectRequest(BaseModel):
 
 
 def _walk_forward(strategy, df) -> dict:
-    """Rolling out-of-sample folds. Mirrors /run-walk-forward, on an in-memory df."""
-    folds = max(2, min(WF_FOLDS, 12))
-    n = len(df)
-    size = n // folds
-    rois, traded = [], 0
-    for k in range(folds):
-        start = k * size
-        end = n if k == folds - 1 else (k + 1) * size
-        window = df.iloc[start:end]
-        if len(window) < 30:
-            continue
-        try:
-            m = strategy.run_backtest(window)
-        except Exception:
-            continue
-        if m["totalTrades"] > 0:
-            traded += 1
-            rois.append(m["roiPercentage"])
-    if not rois:
-        return {"consistent": False, "pctProfitableFolds": 0.0, "meanOosRoi": 0.0}
-    mean, std = float(np.mean(rois)), float(np.std(rois))
-    pct_prof = len([r for r in rois if r > 0]) / len(rois) * 100
+    """Rolling out-of-sample folds with warm-up — the same code /run-walk-forward uses."""
+    agg = summarise(run_folds(strategy, df, WF_FOLDS))
     return {
-        "consistent": bool(mean > 0 and std <= abs(mean)),
-        "pctProfitableFolds": round(pct_prof, 2),
-        "meanOosRoi": round(mean, 2),
+        "consistent": agg["consistent"],
+        "pctProfitableFolds": agg["pctProfitableFolds"],
+        "meanOosRoi": agg["meanOosRoi"],
     }
 
 
