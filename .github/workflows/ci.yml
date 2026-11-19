@@ -20,7 +20,7 @@ jobs:
       - name: Install deps
         run: pip install -r requirements-dev.txt
       - name: Run engine tests
-        run: python -m pytest test/test_backtest_engine.py test/test_roadmap_fixes.py test/test_entry_limits.py test/test_live_fills.py test/test_shared_config.py test/test_strategy_fixes.py test/test_walkforward.py test/test_ai_client.py test/test_data_checks.py -q
+        run: python -m pytest test/test_backtest_engine.py test/test_roadmap_fixes.py test/test_entry_limits.py test/test_live_fills.py test/test_shared_config.py test/test_strategy_fixes.py test/test_walkforward.py test/test_ai_client.py test/test_data_checks.py test/test_research_stats.py test/test_research_trials.py -q
 
   api-build:
     name: NestJS API — build
