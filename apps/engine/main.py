@@ -11,6 +11,7 @@ from routers.auto_select import router as auto_select_router
 from routers.custom_strategy import router as custom_strategy_router
 from routers.broker import router as broker_router
 from routers.regime import router as regime_router
+from routers.luck_check import router as luck_check_router
 from routers.analysis import router as analysis_router
 
 load_dotenv()
@@ -62,6 +63,10 @@ app.include_router(
 )
 app.include_router(
     regime_router, prefix="/api/engine", tags=["regime"],
+    dependencies=[Depends(require_api_key)],
+)
+app.include_router(
+    luck_check_router, prefix="/api/engine", tags=["luck-check"],
     dependencies=[Depends(require_api_key)],
 )
 # Analysis hits paid LLMs — also rate-limited per IP.

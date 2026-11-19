@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API } from '../config';
+import { LuckCheck } from '../components/LuckCheck';
 
 interface Strategy {
   name: string;
@@ -83,12 +84,12 @@ export function Backtesting() {
 
   return (
     <div className="page animate-fade-in">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
-        <div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
+        <div style={{ minWidth: 0 }}>
           <h1 className="page-title">Backtesting Hub</h1>
           <p className="page-subtitle">Test predefined strategies against the entire stock database</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
           <button className="btn btn-primary" onClick={runAutoSelect} disabled={autoRunning}>
             {autoRunning ? '⏳ Selecting…' : '✨ Auto-select stocks'}
           </button>
@@ -99,6 +100,8 @@ export function Backtesting() {
           )}
         </div>
       </div>
+
+      <LuckCheck />
 
       {(autoRunning || autoResult || autoError) && (
         <div className="card animate-fade-in-up" style={{ padding: '1.5rem', marginBottom: '2rem', borderTop: '4px solid var(--cyan)' }}>

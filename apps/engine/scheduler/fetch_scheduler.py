@@ -68,6 +68,19 @@ def run_fetch(reason: str):
     print(f"   Done: {ok}/{len(symbols)} stocks, {total_rows} rows upserted.")
 
 
+def run_luck_check():
+    """After the daily fetch: refresh the luck check shown on the Backtesting page."""
+    try:
+        import luck_check
+        run = luck_check.run_and_store()
+        if run:
+            names = ", ".join(run["standOut"]) or "none"
+            print(f"   🎲 Luck check: {run['strategies']} strategies, {run['trials']} tries on record. "
+                  f"Stand out beyond luck: {names}")
+    except Exception as e:
+        print(f"   luck check failed: {e}")
+
+
 def main():
     print("🗓️  Fetch scheduler started")
     print(f"   Daily run at {RUN_HOUR:02d}:{RUN_MINUTE:02d} IST (Mon–Fri); timeframes {TIMEFRAMES}")
@@ -96,6 +109,7 @@ def main():
                 run_fetch("scheduled daily")
             except Exception as e:
                 print(f"   scheduled fetch failed: {e}")
+            run_luck_check()
             last_run_date = now.date()
         time.sleep(CHECK_INTERVAL)
 

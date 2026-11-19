@@ -1747,3 +1747,104 @@ tbody td {
 .sc-liveform-actions .btn {
   min-height: 44px;
 }
+
+/* ===== Luck check (Backtesting page) ===== */
+.lc-card {
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.lc-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.lc-head > div {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.lc-title {
+  margin: 0 0 0.4rem;
+}
+
+.lc-lead,
+.lc-meta,
+.lc-empty p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  max-width: 72ch;
+  margin: 0;
+}
+
+.lc-btn {
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.lc-verdict {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--border-light);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.lc-verdict.good {
+  border-left-color: var(--green);
+}
+
+.lc-verdict-note {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.lc-strategy {
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-align: left;
+}
+
+.lc-empty {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+}
+
+.lc-foot {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+  margin-top: 1rem;
+}
+
+.lc-foot .sc-linkbtn {
+  min-height: 44px;
+}
+
+@media (max-width: 1100px) {
+  .lc-card {
+    padding: 1rem;
+  }
+
+  .lc-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (min-width: 1101px) {
+  /* In the table the strategy name is one of several links in a row: no tall tap area. */
+  .lc-strategy {
+    min-height: 0;
+    padding: 0.15rem 0;
+  }
+}

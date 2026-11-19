@@ -91,9 +91,11 @@ price-data problem is marked. The real-money line and switch are here too.
 **News** and **Sectors.** Market news and sector write-ups from the AI router. They are
 reading material; no trade depends on them.
 
-**Backtesting.** Run a strategy on past prices. A good-looking row here is not proof:
-with hundreds of rows, some look good by luck. The luck check is not on this page yet;
-its result is in [strategies.md](strategies.md) under "Is any of it more than luck?".
+**Backtesting.** Run a strategy on past prices. At the top, "Is any of it more than
+luck?" lists the strategies with a positive average and, for each, the chance that its
+result is luck. With many strategies tested together some always look good by chance, so
+a good row is a reason to watch a strategy, not proof. It refreshes each trading day
+after the close.
 
 **Builder.** Compose a strategy from indicators and backtest it.
 

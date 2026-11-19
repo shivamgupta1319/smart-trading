@@ -84,6 +84,20 @@ export class EngineController {
     return response.data;
   }
 
+  /** The latest stored luck check: is any strategy's backtest more than chance? */
+  @Get('luck-check')
+  async luckCheck() {
+    const response = await this.http.get(`/api/engine/luck-check`);
+    return response.data;
+  }
+
+  /** Recompute the luck check on stored candles. About a minute, so a long timeout. */
+  @Post('luck-check/run')
+  async runLuckCheck() {
+    const response = await this.http.post(`/api/engine/luck-check/run`, {}, { timeout: 600000 });
+    return response.data;
+  }
+
   /** What simply holding NIFTY 50 returned since a date (for the Portfolio comparison). */
   @Get('benchmark')
   async benchmark(@Query('since') since?: string) {

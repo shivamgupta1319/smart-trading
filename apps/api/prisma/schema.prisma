@@ -192,6 +192,17 @@ model SentDigest {
   @@unique([period, periodKey])
 }
 
+// One stored luck check (apps/engine/luck_check.py): every strategy on every active stock,
+// with the corrected chance that its result is luck. Written by the engine.
+model LuckCheckRun {
+  id            Int      @id @default(autoincrement())
+  computedAt    DateTime @default(now())
+  engineVersion String
+  stocks        Int
+  trials        Int // tries on record when this run was judged
+  rows          Json // one object per strategy
+}
+
 // A real position at the Dhan broker, kept in the database so a restart never orphans it:
 // on boot the service reloads OPEN rows and reconciles them against Dhan's own records.
 // Deliberately separate from Trade (real quantity and fills differ from the paper trade);
