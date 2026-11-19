@@ -73,10 +73,10 @@ export function StockDetail() {
       if (res.data.status === 'success') {
         setResearchData(res.data.analysis);
       } else {
-        setResearchData(`> [!WARNING]\n> Failed to fetch analysis: ${res.data.message}`);
+        setResearchData(`> [!WARNING]\n> ${res.data.message}`);
       }
     } catch (e: any) {
-      setResearchData(`> [!WARNING]\n> Failed to fetch analysis: ${e.message}`);
+      setResearchData('> [!WARNING]\n> The analysis could not be loaded. Check your connection and try again.');
     } finally {
       setLoadingResearch(false);
     }
