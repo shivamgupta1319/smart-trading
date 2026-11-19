@@ -8,6 +8,7 @@ import { MarketNews } from "../pages/MarketNews";
 import { Sectors } from "../pages/Sectors";
 import { SectorDetail } from "../pages/SectorDetail";
 import { Portfolio } from "../pages/Portfolio";
+import { Scorecard } from "../pages/Scorecard";
 import { Backtesting } from "../pages/Backtesting";
 import { BacktestingStrategy } from "../pages/BacktestingStrategy";
 import { Settings } from "../pages/Settings";
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="/stock/:symbol" element={<StockDetail />} />
         <Route path="/scanner" element={<LiveScanner />} />
         <Route path="/portfolio" element={<Portfolio />} />
+        <Route path="/scorecard" element={<Scorecard />} />
         <Route path="/news" element={<MarketNews />} />
         <Route path="/sectors" element={<Sectors />} />
         <Route path="/sectors/:sectorName" element={<SectorDetail />} />

@@ -303,6 +303,12 @@ export function Navbar() {
           💼 Portfolio
         </NavLink>
         <NavLink
+          to="/scorecard"
+          className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+        >
+          🎯 Scorecard
+        </NavLink>
+        <NavLink
           to="/news"
           className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
         >
