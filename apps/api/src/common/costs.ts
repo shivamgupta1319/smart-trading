@@ -81,6 +81,15 @@ export function roundTripCost(
 
 /** Slippage assumed per side, as a fraction of price (shared with the engine). */
 export const SLIPPAGE_FRACTION = shared('BT_SLIPPAGE_BPS') / 10_000;
+/** Smallest price step on NSE cash equities, in rupees (shared with the engine). */
+export const TICK_SIZE = shared('TICK_SIZE');
+
+/**
+ * Rupees of slippage per share on one side of a trade: the larger of one price tick and
+ * the configured basis points of the price. MUST match `slippage_per_share` in
+ * apps/engine/backtest_config.py.
+ */
+export const slippagePerShare = (price: number): number => Math.max(TICK_SIZE, price * SLIPPAGE_FRACTION);
 
 /**
  * A trade is rejected when its round-trip cost is more than this share of the rupees
@@ -99,6 +108,6 @@ export function costToRisk(
   holdDuration: string | null | undefined,
 ): number {
   const value = quantity * entryPrice;
-  const friction = roundTripCost(value, value, holdDuration) + 2 * SLIPPAGE_FRACTION * value;
+  const friction = roundTripCost(value, value, holdDuration) + 2 * quantity * slippagePerShare(entryPrice);
   return friction / (quantity * riskPerShare);
 }

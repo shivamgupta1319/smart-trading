@@ -144,7 +144,7 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] The 27 flagged moves reviewed: 24 real market moves and 2 demergers listed; TRENT is a series stitched across its 1.5-for-1 split (repaired by a full re-download); KAYNES 2026-05-14 left for the owner
 
 ### 3. Honest numbers
-- [ ] Slippage by tick size (engine and API)
+- [x] Slippage per share = the larger of one tick (₹0.05) and 5 basis points, in the engine and the API cost rule
 - [ ] Luck-correction statistics and a trials ledger
 - [ ] NIFTY buy-and-hold comparison
 - [ ] Portfolio totals split into main book and test book

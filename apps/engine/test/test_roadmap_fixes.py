@@ -216,8 +216,8 @@ def test_swing_time_stop_exits_on_the_bar_after_n(monkeypatch):
     import backtest_config as bc
 
     df = _flat_swing_frame()
-    slip = RISK.slippage_bps / 10_000.0
-    entry = 100.0 * (1 + slip)  # bar 1 open + adverse slippage
+    sps = bc.slippage_per_share
+    entry = 100.0 + sps(100.0)  # bar 1 open + adverse slippage
 
     # qty = min(notional, risk cap) — the FEAT-005 cap binds here (wide 10-pt stop).
     notional_qty = int(RISK.slot_capital * 1.0 / entry)  # 1D → delivery leverage 1×
@@ -226,7 +226,7 @@ def test_swing_time_stop_exits_on_the_bar_after_n(monkeypatch):
 
     sim = _SwingHold().simulate(df)
     assert len(sim["gross_trades"]) == 1
-    expected = (105.0 * (1 - slip) - entry) * qty  # exit at bar 12's OPEN
+    expected = (105.0 - sps(105.0) - entry) * qty  # exit at bar 12's OPEN
     assert sim["gross_trades"][0] == pytest.approx(expected, abs=0.01)
 
     # Same frame with the stop disabled → the walk runs to the series end and marks
@@ -235,7 +235,7 @@ def test_swing_time_stop_exits_on_the_bar_after_n(monkeypatch):
     monkeypatch.setattr(bc, "TIME_STOP_BARS_BY_BUCKET", {})
     off = _SwingHold().simulate(df)
     assert len(off["gross_trades"]) == 1
-    assert off["gross_trades"][0] == pytest.approx((90.5 * (1 - slip) - entry) * qty, abs=0.01)
+    assert off["gross_trades"][0] == pytest.approx((90.5 - sps(90.5) - entry) * qty, abs=0.01)
     assert off["gross_trades"][0] < 0 < sim["gross_trades"][0]
 
 

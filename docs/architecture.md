@@ -151,7 +151,7 @@ figures. API-only constants (`MAX_HEAT_PCT`, `MIN_TRADES_FOR_CONFIDENCE`) stay i
 
 **Fill model (backtest and live).** Backtest: entry at the next bar's open, stops and
 targets checked against each bar's high/low, a bar that opens beyond the stop fills at that
-open, costs and 5 bps slippage charged. Live: entry at the live quote when the signal is
+open, costs and slippage charged (per share and side: the larger of one ₹0.05 tick and 5 basis points). Live: entry at the live quote when the signal is
 found, stop-outs at the worse of stop and live price, P&L booked after costs. Entry limits
 (`apps/engine/entry_limits.py`) and intraday exit rules (`apps/engine/intraday_exits.py`) are
 single modules imported by both paths. Known remaining difference: live polls every 100

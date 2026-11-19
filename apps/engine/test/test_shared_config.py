@@ -51,7 +51,10 @@ def test_cost_to_risk_matches_the_typescript_twin():
     # A Rs 817.50 stock with a Rs 1.20 stop: the costs are 140% of the risk.
     assert cost_to_risk(61, 817.5, 1.2, "15m") == pytest.approx(1.403437675, abs=1e-8)
     assert cost_to_risk(30, 1600.0, 26.0, "15m") == pytest.approx(0.1267748923, abs=1e-8)
-    assert cost_to_risk(38, 78.0, 5.14, "1D") == pytest.approx(0.1244126597, abs=1e-8)
+    # Rs 78 and Rs 60.54 shares: one tick is more than 5 basis points, so the tick applies.
+    assert cost_to_risk(38, 78.0, 5.14, "1D") == pytest.approx(0.1286928153, abs=1e-8)
+    assert cost_to_risk(350, 60.54, 0.57, "5m") == pytest.approx(0.2880315258, abs=1e-8)
+    assert _file()["costs"]["TICK_SIZE"] == 0.05
 
 
 def test_backtest_skips_a_trade_whose_costs_are_too_large_a_share_of_the_risk():
