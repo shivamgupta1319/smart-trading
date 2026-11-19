@@ -12,7 +12,7 @@ import {
   marginOf,
 } from "../common/risk";
 import { toNum, round2, safePct, normalizeTradeMoney } from "../common/money";
-import { roundTripCost, LIVE_COSTS_ENABLED } from "../common/costs";
+import { roundTripCost, LIVE_COSTS_ENABLED, MAX_COST_TO_RISK, costToRisk } from "../common/costs";
 
 @Injectable()
 export class SignalsService {
@@ -120,6 +120,17 @@ export class SignalsService {
               `₹${riskPerShare.toFixed(2)} vs a ₹${riskBudget.toFixed(0)} risk budget ` +
               `(₹${notionalBudget.toFixed(0)} notional budget).`,
           );
+        }
+        // Cost-to-risk gate: with a tight stop the round-trip cost alone can be most of
+        // the risk. Reject those; the backtest skips the same signals.
+        if (MAX_COST_TO_RISK > 0 && riskPerShare > 0) {
+          const ratio = costToRisk(quantity, dto.entryPrice, riskPerShare, dto.holdDuration);
+          if (ratio > MAX_COST_TO_RISK) {
+            throw new BadRequestException(
+              `Rejected ${dto.strategyName}: costs would be ${(ratio * 100).toFixed(0)}% of the risk ` +
+                `(limit ${(MAX_COST_TO_RISK * 100).toFixed(0)}%). The stop is too tight for the costs.`,
+            );
+          }
         }
         capitalUsed = round2(quantity * dto.entryPrice);
         riskAmount = round2(quantity * riskPerShare);

@@ -78,3 +78,27 @@ export function roundTripCost(
   const dp = p.dpChargePerSell;
   return brok + stt + exch + sebi + stamp + gst + dp;
 }
+
+/** Slippage assumed per side, as a fraction of price (shared with the engine). */
+export const SLIPPAGE_FRACTION = shared('BT_SLIPPAGE_BPS') / 10_000;
+
+/**
+ * A trade is rejected when its round-trip cost is more than this share of the rupees
+ * it risks (0 = rule off). Shared with the engine, which skips the same signals.
+ */
+export const MAX_COST_TO_RISK = shared('MAX_COST_TO_RISK');
+
+/**
+ * Round-trip cost of a position (charges + slippage on both sides) divided by the
+ * rupees it risks. MUST match `cost_to_risk` in apps/engine/backtest_config.py.
+ */
+export function costToRisk(
+  quantity: number,
+  entryPrice: number,
+  riskPerShare: number,
+  holdDuration: string | null | undefined,
+): number {
+  const value = quantity * entryPrice;
+  const friction = roundTripCost(value, value, holdDuration) + 2 * SLIPPAGE_FRACTION * value;
+  return friction / (quantity * riskPerShare);
+}

@@ -4,13 +4,15 @@
     "This file is the ONLY place the defaults live. Both runtimes read it at start.",
     "An environment variable with the same name overrides a value (for experiments).",
     "Percent fields ending in _PCT under 'costs' are percentages (0.03 = 0.03%).",
-    "RISK_PER_TRADE_PCT is a FRACTION of the cell fund (0.02 = 2%), never 2."
+    "RISK_PER_TRADE_PCT is a FRACTION of the cell fund (0.02 = 2%), never 2.",
+    "MAX_COST_TO_RISK: a trade is skipped when its round-trip cost (charges + slippage both ways) is more than this share of the rupees it risks. 0 turns the rule off."
   ],
   "capital": {
     "BASE_CELL_CAPITAL": 10000,
     "LEVERAGE_INTRADAY": 5,
     "LEVERAGE_DELIVERY": 1,
-    "RISK_PER_TRADE_PCT": 0.02
+    "RISK_PER_TRADE_PCT": 0.02,
+    "MAX_COST_TO_RISK": 0.25
   },
   "costs": {
     "BT_BROKERAGE_FLAT_CAP": 20,
@@ -25,6 +27,7 @@
     "BT_DELIVERY_STT_BUY_PCT": 0.1,
     "BT_DELIVERY_STT_SELL_PCT": 0.1,
     "BT_DELIVERY_STAMP_BUY_PCT": 0.015,
-    "BT_DP_CHARGE_PER_DELIVERY_SELL": 14.75
+    "BT_DP_CHARGE_PER_DELIVERY_SELL": 14.75,
+    "BT_SLIPPAGE_BPS": 5
   }
 }
