@@ -88,83 +88,8 @@ def parse_news_item(item):
             "providerPublishTime": item.get("providerPublishTime") or 0
         }
 
-class LLMClient:
-    def __init__(self):
-        self.openrouter_key = os.getenv("OPENROUTER_API_KEY")
-        self.gemini_key = os.getenv("GEMINI_API_KEY")
-
-    async def generate(self, prompt: str) -> str:
-        # Try providers in order, falling back on any failure so a single dead
-        # key (e.g. a revoked OpenRouter key) doesn't take AI analysis down when
-        # another working provider is configured.
-        errors = []
-        if self.openrouter_key:
-            try:
-                return await self._call_openrouter(prompt)
-            except Exception as e:
-                errors.append(f"OpenRouter: {e}")
-        if self.gemini_key:
-            try:
-                return await self._call_gemini(prompt)
-            except Exception as e:
-                errors.append(f"Gemini: {e}")
-        if errors:
-            return (
-                "> [!WARNING]\n> **AI analysis unavailable.**\n\n"
-                "All configured LLM providers failed:\n\n- "
-                + "\n- ".join(errors)
-                + "\n\nCheck your `OPENROUTER_API_KEY` / `GEMINI_API_KEY` in the engine `.env`."
-            )
-        return (
-            "> [!WARNING]\n> **Missing API Keys!**\n\n"
-            "To enable AI Research & Analysis, please add `OPENROUTER_API_KEY` or `GEMINI_API_KEY` "
-            "to your `apps/engine/.env` file and restart the engine container.\n\n"
-            "Example:\n```env\nOPENROUTER_API_KEY=\"sk-or-v1-...\"\n```\n"
-        )
-
-    async def _call_openrouter(self, prompt: str) -> str:
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.openrouter_key}",
-            "HTTP-Referer": "http://localhost:3000",
-            "X-Title": "SmartTrader AI",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": "openai/gpt-4o-mini", # Fast, cheap, and smart
-            "messages": [
-                {"role": "system", "content": "You are an expert Indian Stock Market Quantitative Analyst. You provide concise, insightful, and highly technical fundamental, technical, and sentimental analysis."},
-                {"role": "user", "content": prompt}
-            ]
-        }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
-            else:
-                raise RuntimeError(f"HTTP {resp.status_code} {resp.text}")
-
-    async def _call_gemini(self, prompt: str) -> str:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.gemini_key}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "contents": [{
-                "parts": [{"text": "You are an expert Indian Stock Market Quantitative Analyst.\n\n" + prompt}]
-            }]
-        }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                try:
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                except KeyError:
-                    return "Error parsing Gemini response."
-            else:
-                return f"Error from Gemini: {resp.text}"
-
-llm = LLMClient()
+# All AI calls go through the AI router (see ai_client.py).
+from ai_client import llm  # noqa: E402
 
 @router.get("/dashboard")
 async def get_dashboard_analysis():

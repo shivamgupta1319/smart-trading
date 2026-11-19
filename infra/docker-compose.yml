@@ -57,8 +57,10 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       NESTJS_SIGNAL_URL: http://api:3000/api/signals/new
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      # AI analysis goes through the AI router (apps/engine/ai_client.py).
+      AI_ROUTER_URL: ${AI_ROUTER_URL:-http://172.17.0.1:8771/v1}
+      AI_ROUTER_KEY: ${AI_ROUTER_KEY:-}
+      AI_ROUTER_MODEL: ${AI_ROUTER_MODEL:-auto}
       API_KEY: ${API_KEY}
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,https://trading.pseo.cloud}"
       # Auto-select persistent denylist (strategies / SYMBOL|STRATEGY cells never re-promoted).

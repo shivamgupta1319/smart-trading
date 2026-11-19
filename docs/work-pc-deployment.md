@@ -94,6 +94,7 @@ Secrets live only in this file. Do not commit it or paste it anywhere.
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_ENABLED` | Alerts |
 | `DB_PORT`, `API_PORT`, `ENGINE_PORT`, `FRONTEND_PORT` | Host ports (5470, 3000, 8000, 5173) |
 | `DATA_SOURCE`, `BROKER`, `DHAN_*`, `UPSTOX_*` | Where prices come from (`yfinance` today) |
+| `AI_ROUTER_KEY` (and optionally `AI_ROUTER_URL`, `AI_ROUTER_MODEL`) | AI analysis through the AI router. Mint the key with `cd ~/workspace/AI-ROUTER/deploy && docker compose exec api node dist/auth/mint-key.js mint smart-trading` |
 | `FETCH_*` | When the scheduler fetches history |
 
 Trading rules are **not** in `.env`. Fund size, leverage, the risk cap, costs, the cost rule
