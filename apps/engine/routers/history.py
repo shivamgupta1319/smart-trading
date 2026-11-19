@@ -284,6 +284,52 @@ def get_live_prices(req: LivePriceRequest):
     return {sym: results.get(sym) for sym in req.symbols}
 
 
+BENCHMARK_SYMBOL = "^NSEI"
+BENCHMARK_TTL = 600  # seconds
+
+
+def benchmark_return(closes: pd.Series, since) -> dict | None:
+    """Return of simply holding the index from the first close on or after `since` to the
+    latest close. None when there is no bar on or after that date."""
+    closes = closes.dropna()
+    window = closes[closes.index >= pd.Timestamp(since)]
+    if window.empty:
+        return None
+    start, last = float(window.iloc[0]), float(closes.iloc[-1])
+    return {
+        "name": "NIFTY 50",
+        "since": window.index[0].strftime("%Y-%m-%d"),
+        "to": closes.index[-1].strftime("%Y-%m-%d"),
+        "start_close": round(start, 2),
+        "last_close": round(last, 2),
+        "return_pct": round((last / start - 1) * 100, 2),
+    }
+
+
+@router.get("/benchmark")
+def get_benchmark(since: str):
+    """What holding NIFTY 50 did since `since` (YYYY-MM-DD). The honest yardstick: a
+    strategy that makes less than this was not worth the effort."""
+    try:
+        start = pd.Timestamp(since[:10])
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="since must be a date like 2026-11-19")
+
+    def _load():
+        hist = yf.Ticker(BENCHMARK_SYMBOL).history(start=(start - timedelta(days=7)).date().isoformat())
+        return normalize_to_ist_naive(hist)["Close"] if not hist.empty else pd.Series(dtype=float)
+
+    try:
+        closes = cached(f"benchmark:{start.date()}", BENCHMARK_TTL, _load)
+    except Exception as exc:
+        print(f"[benchmark] {type(exc).__name__}: {exc}")
+        return {"status": "unavailable", "message": "The index data could not be loaded just now."}
+    result = benchmark_return(closes, start) if len(closes) else None
+    if result is None:
+        return {"status": "unavailable", "message": "No index data for that period yet."}
+    return {"status": "ok", **result}
+
+
 @router.get("/chart-data/{symbol}")
 def get_chart_data(symbol: str, timeframe: str = "1d"):
     """Return OHLCV + indicators for the candlestick chart component."""

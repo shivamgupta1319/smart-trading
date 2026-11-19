@@ -84,6 +84,13 @@ export class EngineController {
     return response.data;
   }
 
+  /** What simply holding NIFTY 50 returned since a date (for the Portfolio comparison). */
+  @Get('benchmark')
+  async benchmark(@Query('since') since?: string) {
+    const response = await this.http.get(`/api/engine/benchmark`, { params: { since } });
+    return response.data;
+  }
+
   @Get('regime')
   async marketRegime() {
     const response = await this.http.get(`/api/engine/regime`);

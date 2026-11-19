@@ -73,6 +73,9 @@ interface PortfolioStats {
   closedTrades: number;
   totalPnl: number;
   netPnl: number;
+  mainBook?: { trades: number; netPnl: number };
+  testBook?: { trades: number; netPnl: number };
+  firstTradeAt?: string | null;
   investedNow: number;
   notionalNow: number;
   openPositions: number;
@@ -103,6 +106,10 @@ export function Portfolio() {
   const [holdFilter, setHoldFilter] = useState<string>('ALL');
   const [livePrices, setLivePrices] = useState<Record<string, number | null>>({});
   const [activeTab, setActiveTab] = useState<'PORTFOLIO' | 'MONITORED' | 'ANALYSIS' | 'RISK'>('PORTFOLIO');
+  // What simply holding NIFTY 50 returned since the first trade here.
+  const [benchmark, setBenchmark] = useState<
+    { status: string; return_pct: number; since: string; message?: string } | null
+  >(null);
   const [configs, setConfigs] = useState<any[]>([]);
   const [windowDays, setWindowDays] = useState<number | null>(null);
   const [risk, setRisk] = useState<any | null>(null);
@@ -185,6 +192,24 @@ export function Portfolio() {
       setLoading(false);
     }
   }, [windowDays]);
+
+  // The NIFTY comparison starts on the day of the first trade and is re-read with the stats.
+  const firstTradeAt = stats?.firstTradeAt ?? null;
+  useEffect(() => {
+    if (!firstTradeAt) return;
+    let cancelled = false;
+    axios
+      .get(`${API}/api/engine/benchmark`, { params: { since: firstTradeAt.slice(0, 10) } })
+      .then((res) => {
+        if (!cancelled) setBenchmark(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) setBenchmark({ status: 'unavailable', return_pct: 0, since: '', message: 'The NIFTY comparison is not available right now.' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [firstTradeAt]);
 
   useEffect(() => {
     fetchData();
@@ -306,7 +331,7 @@ export function Portfolio() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', borderBottom: '1px solid var(--border-light)' }}>
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', borderBottom: '1px solid var(--border-light)', overflowX: 'auto' }}>
         <button
           className={`tab-btn ${activeTab === 'PORTFOLIO' ? 'active' : ''}`}
           style={{
@@ -387,7 +412,7 @@ export function Portfolio() {
             const deactivated = portfolioNet - activeGrowth;                          // pruned cells still in history
             return (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '0.75rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 11rem), 1fr))', gap: '1rem', marginBottom: '0.75rem' }}>
                   <div className="metric-card">
                     <p className="metric-label">Monitored Pairs</p>
                     <p className="metric-value" style={{ fontSize: '1.3rem' }}>{monitoredCells.length}</p>
@@ -523,7 +548,7 @@ export function Portfolio() {
               )}
 
               {/* Top metrics */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 11rem), 1fr))', gap: '1rem', marginBottom: '2rem' }}>
                 <div className="metric-card">
                   <p className="metric-label">Open Positions</p>
                   <p className="metric-value">{risk.openPositions}</p>
@@ -598,7 +623,40 @@ export function Portfolio() {
       {/* Summary cards */}
       {stats && activeTab === 'PORTFOLIO' && (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+          <div className="sc-books">
+            <div className="sc-book">
+              <span className="sc-book-name">Main book</span>
+              <span className={`sc-book-pnl mono ${stats.netPnl > 0 ? 'up' : stats.netPnl < 0 ? 'down' : 'flat'}`}>
+                {stats.netPnl < 0 ? '−' : ''}₹{Math.abs(Math.round(stats.netPnl)).toLocaleString('en-IN')}
+              </span>
+              <span className="sc-book-note">
+                {stats.mainBook?.trades ?? stats.closedTrades} closed trades, after costs. Every figure on this page is the main book.
+              </span>
+            </div>
+            <div className="sc-book">
+              <span className="sc-book-name">Test book</span>
+              <span className={`sc-book-pnl mono ${(stats.testBook?.netPnl ?? 0) > 0 ? 'up' : (stats.testBook?.netPnl ?? 0) < 0 ? 'down' : 'flat'}`}>
+                {(stats.testBook?.netPnl ?? 0) < 0 ? '−' : ''}₹{Math.abs(Math.round(stats.testBook?.netPnl ?? 0)).toLocaleString('en-IN')}
+              </span>
+              <span className="sc-book-note">
+                {stats.testBook?.trades ?? 0} trades taken while a cell was paused. Kept apart from the main book.
+              </span>
+            </div>
+            <div className="sc-book">
+              <span className="sc-book-name">Just holding NIFTY 50</span>
+              <span className={`sc-book-pnl mono ${benchmark?.status === 'ok' ? (benchmark.return_pct > 0 ? 'up' : benchmark.return_pct < 0 ? 'down' : 'flat') : 'flat'}`}>
+                {benchmark?.status === 'ok' ? `${benchmark.return_pct > 0 ? '+' : benchmark.return_pct < 0 ? '−' : ''}${Math.abs(benchmark.return_pct).toFixed(2)}%` : '–'}
+              </span>
+              <span className="sc-book-note">
+                {benchmark?.status === 'ok'
+                  ? `Since ${new Date(benchmark.since).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}, the first trade here. A strategy has to beat this to be worth running.`
+                  : !stats.firstTradeAt
+                    ? 'Shown once the first trade is taken.'
+                    : benchmark?.message || 'Loading the index…'}
+              </span>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 11rem), 1fr))', gap: '1rem', marginBottom: '2rem' }}>
             <div className="metric-card">
               <p className="metric-label">Net P&L (realized)</p>
               <p className={`metric-value ${stats.netPnl >= 0 ? 'positive' : 'negative'}`} style={{ fontSize: '1.3rem' }}>
@@ -641,7 +699,7 @@ export function Portfolio() {
           </div>
 
           {/* Secondary stats row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 11rem), 1fr))', gap: '1rem', marginBottom: '2rem' }}>
             <div className="metric-card" style={{ background: 'var(--bg-input)' }}>
               <p className="metric-label">W / L</p>
               <p className="metric-value" style={{ fontSize: '1.1rem' }}>

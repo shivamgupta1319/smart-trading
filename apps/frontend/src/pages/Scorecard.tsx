@@ -19,6 +19,8 @@ interface LiveStats {
 interface Cell {
   id: number;
   symbol: string;
+  dataFlag: string | null;
+  dataFlagDetail: string | null;
   strategyName: string;
   timeframe: string;
   status: Status;
@@ -314,6 +316,11 @@ export function Scorecard() {
                         <div className="sc-strategy">
                           {c.strategyName.replace(/_/g, ' ')} <span className="sc-tf mono">{c.timeframe}</span>
                         </div>
+                        {c.dataFlag && (
+                          <div className="sc-flag">
+                            Price history needs review{c.dataFlagDetail ? `: ${c.dataFlagDetail}` : ''}
+                          </div>
+                        )}
                       </td>
                       <td data-label="Status">
                         <span className={`badge sc-status ${c.status.toLowerCase()}`}>{STATUS_LABEL[c.status]}</span>
