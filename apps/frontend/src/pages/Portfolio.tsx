@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { createChart, ColorType, type IChartApi, AreaSeries } from 'lightweight-charts';
 import { API } from '../config';
+import { closeTradeAtRealPrice } from '../hooks/closeTrade';
 
 const HOLD_LABELS: Record<string, { label: string; color: string; icon: string }> = {
   INTRADAY: { label: 'Intraday', color: '#22d3ee', icon: '⏱' },
@@ -140,25 +141,7 @@ export function Portfolio() {
   };
 
   const closeTrade = async (signalId: number, symbol: string) => {
-    try {
-      let payload = {};
-      try {
-        const liveRes = await axios.post(`${API}/api/engine/live-prices`, { symbols: [symbol] });
-        const livePriceData = liveRes.data[symbol];
-        const livePrice = livePriceData ? (typeof livePriceData === 'object' ? livePriceData.price : livePriceData) : undefined;
-        if (livePrice) {
-          payload = { exitPrice: livePrice };
-        }
-      } catch (e) {
-        console.error('Failed to fetch live price for closing', e);
-      }
-      
-      await axios.patch(`${API}/api/signals/${signalId}/close`, payload);
-      // Refresh portfolio after closing
-      fetchData();
-    } catch (e) {
-      console.error('Failed to close trade', e);
-    }
+    if (await closeTradeAtRealPrice(signalId, symbol)) fetchData();
   };
 
   const removeTrade = async (tradeId: number) => {
@@ -179,7 +162,8 @@ export function Portfolio() {
         : `${API}/api/trades/stats`;
       const [statsRes, tradesRes, configsRes] = await Promise.all([
         axios.get(statsUrl),
-        axios.get(`${API}/api/trades`),
+        // A high limit so the journal lists every trade, not only the latest 200.
+        axios.get(`${API}/api/trades?limit=5000`),
         axios.get(`${API}/api/configs`),
       ]);
       setStats(statsRes.data);
@@ -1060,7 +1044,14 @@ export function Portfolio() {
                         <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--green)' }}>₹{t.target.toFixed(2)}</span>
                       </td>
                       <td>
-                        <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--red)' }}>₹{t.stopLoss.toFixed(2)}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--red)' }}>₹{t.stopLoss.toFixed(2)}</span>
+                          {t.originalStopLoss != null && Math.abs(t.originalStopLoss - t.stopLoss) > 0.01 && (
+                            <span className="mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }} title="The stop this trade was planned with, before it was moved">
+                              planned ₹{t.originalStopLoss.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td>
                         {(() => {

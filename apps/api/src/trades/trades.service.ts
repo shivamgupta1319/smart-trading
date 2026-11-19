@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   BASE_CELL_CAPITAL,
@@ -348,6 +348,10 @@ export class TradesService {
    * a divergent price-move % metric.
    */
   async manualClose(id: number, exitPrice: number) {
+    exitPrice = Number(exitPrice);
+    if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
+      throw new BadRequestException('The exit price must be a number above zero.');
+    }
     const raw = await this.prisma.trade.findUnique({ where: { id } });
     if (!raw || raw.status === 'CLOSED') return raw;
     const trade = normalizeTradeMoney(raw)!;
