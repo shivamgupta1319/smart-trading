@@ -2,6 +2,7 @@
 
 Run from apps/engine:  python -m pytest test/test_backtest_engine.py -q
 """
+import dataclasses
 import os
 import sys
 
@@ -11,7 +12,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from strategies.base import BaseStrategy  # noqa: E402
+import strategies.base as base_module  # noqa: E402
+from backtest_config import RISK  # noqa: E402
+from strategies.base import BaseStrategy, stop_fill_price  # noqa: E402
 
 
 class _FixedSignalStrategy(BaseStrategy):
@@ -77,6 +80,54 @@ def test_pessimistic_when_bar_straddles_both():
     assert res["totalTrades"] == 1
     assert res["winRate"] == 0.0  # pessimistic tie-break books the SL
     assert res["netProfit"] < 0  # treated as the loss
+
+
+def _gross_of_single_trade(rows, sl=95, tp=120):
+    sim = _FixedSignalStrategy(sl=sl, tp=tp).simulate(_make_df(rows))
+    assert len(sim["gross_trades"]) == 1
+    return sim["gross_trades"][0]
+
+
+_SLIP = RISK.slippage_bps / 10_000.0
+_ENTRY = 100 * (1 + _SLIP)  # long entry at next-bar open 100, adverse slippage
+
+
+def test_gap_through_stop_fills_at_the_open_not_the_stop():
+    # Same trade twice (entry 100, SL 95). In one the stop is touched intrabar;
+    # in the other the bar OPENS at 92, below the stop. Sizing is identical, so
+    # the ratio of the two losses is the ratio of the per-share losses.
+    touched = _gross_of_single_trade([
+        (100, 101, 99, 100), (100, 102, 99, 101),
+        (101, 102, 94, 96),    # opens 101, trades down through 95 -> fills at 95
+    ])
+    gapped = _gross_of_single_trade([
+        (100, 101, 99, 100), (100, 102, 99, 101),
+        (92, 93, 90, 91),      # opens 92, already through 95 -> fills at 92
+    ])
+    assert touched < 0 and gapped < 0
+    expected = (_ENTRY - 92 * (1 - _SLIP)) / (_ENTRY - 95 * (1 - _SLIP))
+    assert gapped / touched == pytest.approx(expected, rel=1e-9)
+    assert gapped < touched  # the gap costs more than the stop distance
+
+
+def test_gap_fill_can_be_switched_off_for_attribution(monkeypatch):
+    # RISK is a frozen dataclass: swap the engine's reference for an edited copy.
+    monkeypatch.setattr(base_module, "RISK", dataclasses.replace(RISK, gap_through_stop_at_open=False))
+    rows_touched = [(100, 101, 99, 100), (100, 102, 99, 101), (101, 102, 94, 96)]
+    rows_gapped = [(100, 101, 99, 100), (100, 102, 99, 101), (92, 93, 90, 91)]
+    # Old behaviour: both book the stop price, so the losses are equal.
+    assert _gross_of_single_trade(rows_gapped) == pytest.approx(_gross_of_single_trade(rows_touched))
+
+
+def test_stop_fill_price_long_and_short():
+    # Long: a gap down through the stop fills lower; no gap fills at the stop.
+    assert stop_fill_price(95, 92, is_buy=True) == 92
+    assert stop_fill_price(95, 101, is_buy=True) == 95
+    # Short: a gap up through the stop fills higher; no gap fills at the stop.
+    assert stop_fill_price(105, 108, is_buy=False) == 108
+    assert stop_fill_price(105, 99, is_buy=False) == 105
+    # A missing open falls back to the stop instead of propagating NaN.
+    assert stop_fill_price(95, float("nan"), is_buy=True) == 95
 
 
 def test_invalid_geometry_is_skipped():

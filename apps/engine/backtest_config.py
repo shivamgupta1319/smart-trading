@@ -35,7 +35,7 @@ def _i(name: str, default: int) -> int:
 # whenever the fill/exit model changes so stored reports produced by an older engine
 # are identifiable — they won't reproduce. Current model: C3 (live intraday exits) + F3
 # (swing time-stop).
-ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.07.15-f3")
+ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.11.19-gapfill")
 
 
 # Buying-power multiple by hold bucket. Intraday (MIS) deploys ~5× the cell fund as
@@ -69,6 +69,11 @@ class RiskConfig:
     pessimistic_intrabar: bool = os.getenv("BT_PESSIMISTIC_INTRABAR", "true").lower() != "false"
     # Enter on the NEXT bar's open (realistic) rather than the signal bar close.
     next_bar_entry: bool = os.getenv("BT_NEXT_BAR_ENTRY", "true").lower() != "false"
+    # When a bar OPENS beyond the stop (overnight gap, circuit), fill the stop at
+    # that open, not at the stop price. A stop is a market order once triggered:
+    # the stop price never traded, so booking it there invents money on exactly
+    # the bars where swing stops get hit. "false" restores the old stop-price fill.
+    gap_through_stop_at_open: bool = os.getenv("BT_GAP_THROUGH_STOP_AT_OPEN", "true").lower() != "false"
     # Cap each position's notional at `max_position_value` (fund × intraday leverage)
     # instead of letting it compound with the cell's running equity. Without this,
     # `qty = current_capital × leverage / entry` compounds geometrically over a long
