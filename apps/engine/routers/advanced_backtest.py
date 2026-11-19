@@ -15,6 +15,8 @@ from strategies import STRATEGY_REGISTRY
 from backtest_config import RISK
 from routers.backtest import get_stock_id, load_historical
 
+from walkforward import run_folds, summarise
+
 router = APIRouter()
 
 
@@ -98,44 +100,8 @@ def _resolve(strategy_name: str, symbol: str, timeframe: str):
 @router.post("/run-walk-forward")
 def run_walk_forward(req: WalkForwardRequest):
     strategy, df = _resolve(req.strategy, req.symbol, req.timeframe)
-    folds = max(2, min(req.folds, 12))
-    n = len(df)
-    size = n // folds
-
-    fold_results = []
-    for k in range(folds):
-        start = k * size
-        end = n if k == folds - 1 else (k + 1) * size
-        window = df.iloc[start:end]
-        if len(window) < 30:
-            continue
-        # A strategy can raise on a short fold (e.g. an indicator that needs more
-        # bars). Skip that fold instead of 500-ing the whole validation.
-        try:
-            m = strategy.run_backtest(window)
-        except Exception:
-            continue
-        fold_results.append({
-            "fold": k + 1,
-            "bars": len(window),
-            "trades": m["totalTrades"],
-            "roiPercentage": m["roiPercentage"],
-            "winRate": m["winRate"],
-            "profitFactor": m["profitFactor"],
-        })
-
-    traded = [f for f in fold_results if f["trades"] > 0]
-    rois = [f["roiPercentage"] for f in traded]
-    profitable = [f for f in traded if f["roiPercentage"] > 0]
-    aggregate = {
-        "foldsEvaluated": len(fold_results),
-        "foldsWithTrades": len(traded),
-        "pctProfitableFolds": round(len(profitable) / len(traded) * 100, 2) if traded else 0.0,
-        "meanOosRoi": round(float(np.mean(rois)), 2) if rois else 0.0,
-        "stdOosRoi": round(float(np.std(rois)), 2) if rois else 0.0,
-        # Consistency: low std relative to mean is good; flag erratic strategies.
-        "consistent": bool(rois and np.mean(rois) > 0 and np.std(rois) <= abs(np.mean(rois))),
-    }
+    fold_results = run_folds(strategy, df, req.folds)
+    aggregate = summarise(fold_results)
     return {
         "symbol": req.symbol.upper(),
         "strategy": req.strategy,
