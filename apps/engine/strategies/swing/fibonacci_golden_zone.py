@@ -7,7 +7,9 @@ class FibonacciGoldenZoneStrategy(BaseStrategy):
     Fibonacci "Golden Zone" Retracements Strategy
     Timeframe: 1D
     Logic:
-    - Finds a 30-day swing low and swing high.
+    - Finds a 30-day swing low and swing high, and requires the HIGH to have come
+      after the LOW (an up-move being pulled back). Without that check the same
+      zone also fired in a downtrend, where it is a bounce inside a fall.
     - If price retraces to the 50% - 61.8% Fibonacci zone and prints a bullish candle, enter long.
     """
     name = "Fibonacci_Golden_Zone"
@@ -30,7 +32,11 @@ class FibonacciGoldenZoneStrategy(BaseStrategy):
         df['Low_30'] = df['Low'].rolling(window=30).min().shift(1)
 
         trend_size = (df['High_30'] - df['Low_30']) / df['Low_30']
-        valid_trend = trend_size >= 0.10
+        # Position (0..29) of the high and of the low inside the same 30 bars: the swing
+        # is an UP-move only if its high is more recent than its low.
+        hi_pos = df['High'].rolling(window=30).apply(np.argmax, raw=True).shift(1)
+        lo_pos = df['Low'].rolling(window=30).apply(np.argmin, raw=True).shift(1)
+        valid_trend = (trend_size >= 0.10) & (hi_pos > lo_pos)
 
         diff = df['High_30'] - df['Low_30']
         fib_50 = df['High_30'] - (diff * 0.50)

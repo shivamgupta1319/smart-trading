@@ -33,23 +33,24 @@ class MTFAlignmentStrategy(BaseStrategy):
             'Volume': 'sum'
         })
         
-        weekly_df['SMA_50_W'] = ta.sma(weekly_df['Close'], length=50)
+        weekly_sma = ta.sma(weekly_df['Close'], length=50)
+        if weekly_sma is None:
+            # Fewer than 50 weekly bars: pandas_ta returns None. No trend filter means
+            # no trade — return a clean zero-signal frame instead of crashing later.
+            df = df.copy()
+            df['signal'] = 0
+            df['stop_loss'] = 0.0
+            df['target'] = 0.0
+            return df
+        weekly_df['SMA_50_W'] = weekly_sma
         weekly_df['SMA_50_W_Prev'] = weekly_df['SMA_50_W'].shift(1)
 
-        weekly_mapping = weekly_df[['SMA_50_W_Prev']].copy()
-        
-        df_reset = df.reset_index()
-        weekly_reset = weekly_mapping.reset_index()
-        
-        merged = pd.merge_asof(
-            df_reset.sort_values('Date'),
-            weekly_reset.sort_values('Date'),
-            on='Date',
-            direction='backward'
-        )
-        
-        merged.set_index('Date', inplace=True)
-        df['SMA_50_W'] = merged['SMA_50_W_Prev']
+        # Map each day to the last weekly value labelled on or before it. Done by
+        # index position, not by merging on a column NAME: the old merge needed the
+        # index to be called 'Date', which is true for live yfinance data but not for
+        # stored history ('timestamp'), so every backtest of this strategy crashed.
+        df = df.copy()
+        df['SMA_50_W'] = weekly_df['SMA_50_W_Prev'].reindex(df.index, method='ffill')
 
         df['High_20'] = df['High'].rolling(window=20).max().shift(1)
 

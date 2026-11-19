@@ -1,13 +1,26 @@
+from datetime import time as dtime
+
 import pandas as pd
 from strategies.base import BaseStrategy
+
+# The live scanner takes no new setups before 09:30, and it only sees COMPLETED
+# candles. The first candle it can act on is therefore 09:25–09:30. The old version
+# signalled on the 09:15 candle, which live could never see — the strategy had
+# backtest results but could not fire a single live trade.
+CONFIRM_BAR_TIME = dtime(9, 25)
+GAP_THRESHOLD = 0.005  # 0.5%
+
 
 class GapAndGoStrategy(BaseStrategy):
     """
     Gap and Go Strategy
     Timeframe: 5m
-    Logic:
-    - Target stocks opening with a significant gap (>= 0.5%).
-    - If the first 5-minute candle closes in the direction of the gap without filling it, enter.
+    Logic (one possible trade per day, decided on the 09:25 candle):
+    - The day opens with a gap of at least 0.5% from the previous close.
+    - The first 5-minute candle closes in the direction of the gap.
+    - After the first 15 minutes price is still beyond the day's open in that
+      direction (the gap has held).
+    - Stop: the low (long) or high (short) of the day so far. Target: 2R.
     """
     name = "Gap_And_Go"
     timeframe = "5m"
@@ -24,35 +37,35 @@ class GapAndGoStrategy(BaseStrategy):
         if not pd.api.types.is_datetime64_any_dtype(df.index):
             df.index = pd.to_datetime(df.index)
 
-        df['Date'] = df.index.date
-        
-        first_candles = df.groupby('Date').first()
-        last_closes = df.groupby('Date')['Close'].last().shift(1)
-        
-        # map last_closes to df index based on Date
-        df['Prev_Close'] = df['Date'].map(last_closes)
+        day = pd.Series(df.index.date, index=df.index)
+        by_day = df.groupby(day)
 
-        gap_threshold = 0.005 # 0.5%
-        gap_pct = (df['Open'] - df['Prev_Close']) / df['Prev_Close']
+        prev_close = day.map(by_day['Close'].last().shift(1))
+        day_open = by_day['Open'].transform('first')
+        first_close = by_day['Close'].transform('first')
+        low_so_far = by_day['Low'].cummin()
+        high_so_far = by_day['High'].cummax()
 
-        # We only consider the FIRST candle of the day
-        is_first = df.groupby('Date').cumcount() == 0
+        gap_pct = (day_open - prev_close) / prev_close
+        is_confirm_bar = pd.Series(df.index.time == CONFIRM_BAR_TIME, index=df.index)
 
-        # Bullish Gap
-        bullish_gap = (gap_pct >= gap_threshold) & is_first
-        bullish_cond = bullish_gap & (df['Close'] > df['Open'])
+        bullish = (
+            is_confirm_bar & (gap_pct >= GAP_THRESHOLD)
+            & (first_close > day_open) & (df['Close'] > day_open)
+            & (df['Close'] > low_so_far)
+        )
+        bearish = (
+            is_confirm_bar & (gap_pct <= -GAP_THRESHOLD)
+            & (first_close < day_open) & (df['Close'] < day_open)
+            & (df['Close'] < high_so_far)
+        )
 
-        # Bearish Gap
-        bearish_gap = (gap_pct <= -gap_threshold) & is_first
-        bearish_cond = bearish_gap & (df['Close'] < df['Open'])
+        df.loc[bullish, 'signal'] = 1
+        df.loc[bullish, 'stop_loss'] = low_so_far[bullish]
+        df.loc[bullish, 'target'] = df['Close'][bullish] + 2 * (df['Close'][bullish] - low_so_far[bullish])
 
-        df.loc[bullish_cond, 'signal'] = 1
-        df.loc[bullish_cond, 'stop_loss'] = df['Low'][bullish_cond]
-        df.loc[bullish_cond, 'target'] = df['Close'][bullish_cond] + 2 * (df['Close'][bullish_cond] - df['Low'][bullish_cond])
+        df.loc[bearish, 'signal'] = -1
+        df.loc[bearish, 'stop_loss'] = high_so_far[bearish]
+        df.loc[bearish, 'target'] = df['Close'][bearish] - 2 * (high_so_far[bearish] - df['Close'][bearish])
 
-        df.loc[bearish_cond, 'signal'] = -1
-        df.loc[bearish_cond, 'stop_loss'] = df['High'][bearish_cond]
-        df.loc[bearish_cond, 'target'] = df['Close'][bearish_cond] - 2 * (df['High'][bearish_cond] - df['Close'][bearish_cond])
-
-        df.drop(columns=['Date', 'Prev_Close'], inplace=True)
         return df
