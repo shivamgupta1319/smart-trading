@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from "@nestjs/common";
 import axios from "axios";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateSignalDto } from "./dto/create-signal.dto";
+import { LifecycleService } from "../configs/lifecycle.service";
 import {
   BASE_CELL_CAPITAL,
   MIN_CELL_CAPITAL,
@@ -19,7 +20,10 @@ export class SignalsService {
   private readonly logger = new Logger(SignalsService.name);
   private readonly engineUrl = process.env.ENGINE_URL || "http://localhost:8000";
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private lifecycle: LifecycleService,
+  ) {}
 
   async findAll() {
     return this.prisma.liveSignal.findMany({
@@ -135,6 +139,13 @@ export class SignalsService {
         capitalUsed = round2(quantity * dto.entryPrice);
         riskAmount = round2(quantity * riskPerShare);
 
+        // The cell's lifecycle status right now: a trade opened while the cell is
+        // PAUSED belongs to the test book, not the main one.
+        const cell = await tx.activeConfiguration.findUnique({
+          where: { stockId_strategyName: { stockId: dto.stockId, strategyName: dto.strategyName } },
+          select: { status: true },
+        });
+
         const sig = await tx.liveSignal.create({
           data: {
             stockId: dto.stockId,
@@ -168,6 +179,7 @@ export class SignalsService {
             trailingState: "INITIAL",
             peakPrice: dto.entryPrice,
             remainingQty: quantity,
+            cellStatusAtEntry: cell?.status ?? null,
           },
         });
         return sig;
@@ -283,6 +295,22 @@ export class SignalsService {
   }
 
   async closeWithPrice(id: number, exitPrice: number, extraNote?: string) {
+    const closed = await this.closeInTransaction(id, exitPrice, extraNote);
+    // A closed trade is new evidence about its cell: re-apply the lifecycle rules.
+    // Never let this fail the close itself.
+    if (closed) {
+      try {
+        await this.lifecycle.evaluate(closed.stockId, closed.strategyName);
+      } catch (err) {
+        this.logger.error(
+          `Lifecycle evaluation failed for signal #${id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return closed;
+  }
+
+  private async closeInTransaction(id: number, exitPrice: number, extraNote?: string) {
     return this.prisma.$transaction(async (tx) => {
       const signal = await tx.liveSignal.update({
         where: { id },

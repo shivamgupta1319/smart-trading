@@ -3,9 +3,10 @@ import { SignalsService } from './signals.service';
 import { SignalsController } from './signals.controller';
 import { SignalsGateway } from './signals.gateway';
 import { PrismaModule } from '../prisma/prisma.module';
+import { ConfigsModule } from '../configs/configs.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, ConfigsModule],
   providers: [SignalsService, SignalsGateway],
   controllers: [SignalsController],
 })
