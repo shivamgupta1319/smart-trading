@@ -23,7 +23,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from db.client import engine
 from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
-from entry_limits import entry_allowed, intraday_entry_time_ok, limits_for_bucket
+from entry_limits import candle_length, entry_allowed, intraday_entry_time_ok, limits_for_bucket
 from live_fills import entry_geometry_ok, stop_exit_price, target_exit_price
 from data_checks import back_adjust
 from market_condition import aligned, breadth_pct, direction_from_moves, move_from_day_open
@@ -315,9 +315,10 @@ def check_and_fire_signal(config, cache, last_fired_times):
         
         now_ist = datetime.now(IST)
         if hold_duration == "INTRADAY":
-            # Entry window, and never a candle from an earlier day: after a night the
-            # catch-up window reaches back into yesterday's last candles.
-            ok, why = intraday_entry_time_ok(candle_time, now_ist.replace(tzinfo=None))
+            # Entry window, and only a candle that completed today inside it: the
+            # catch-up window reaches back into yesterday's last candles after a night,
+            # and into the 09:15-09:30 candles when scanning starts at 09:30.
+            ok, why = intraday_entry_time_ok(candle_time + candle_length(timeframe), now_ist.replace(tzinfo=None))
             if not ok:
                 print(f"  [INFO] {symbol} ({strategy_name}): Skipped INTRADAY signal ({why})")
                 return

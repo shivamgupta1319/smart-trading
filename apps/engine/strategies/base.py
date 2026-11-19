@@ -9,7 +9,7 @@ from backtest_config import (
     LEVERAGE_INTRADAY, LEVERAGE_DELIVERY, RISK_PER_TRADE_PCT, time_stop_bars_for_bucket,
     MAX_COST_TO_RISK, cost_to_risk, slippage_per_share,
 )
-from entry_limits import entry_allowed, intraday_entry_time_ok, limits_for_bucket
+from entry_limits import candle_length, entry_allowed, intraday_entry_time_ok, limits_for_bucket
 from intraday_exits import (
     PHASE2_TRIGGER, PHASE3_TRIGGER, REVERSAL_ZONE_START,
     PARTIAL_FRACTION, MIN_QTY_FOR_PARTIAL, SQUARE_OFF_TIME,
@@ -246,7 +246,8 @@ class BaseStrategy(ABC):
             # scanner applies. Without it the backtest opened trades at 15:00 and 15:15
             # that live never takes, and squared them off at once for a cost.
             if _bucket == "INTRADAY" and hasattr(entry_ts, "time"):
-                ok, _why = intraday_entry_time_ok(ts[i], entry_ts)
+                # The signal candle completes as the entry candle opens.
+                ok, _why = intraday_entry_time_ok(entry_ts, entry_ts)
                 if not ok:
                     skipped_window += 1
                     i += 1
@@ -404,7 +405,10 @@ class BaseStrategy(ABC):
 
             if limits is not None:
                 trades_on_day += 1
-                last_exit_ts = ts[exit_idx] if hasattr(ts[exit_idx], "date") else None
+                # The exit happened somewhere inside the exit candle. Count the cooldown
+                # from that candle's END: live counts from the real exit time, and from
+                # the candle's start the backtest re-entered a candle earlier than live.
+                last_exit_ts = ts[exit_idx] + candle_length(tf) if hasattr(ts[exit_idx], "date") else None
 
             i = exit_idx + 1  # no overlapping positions
 

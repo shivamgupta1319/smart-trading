@@ -170,18 +170,25 @@ single modules imported by both paths. INTRADAY entries are opened only between 
 exit functions over a candle series (network, clock and API replaced by `test/replay.py`)
 and compares the trades with `simulate()` on the same candles. Entries must be identical.
 Exits must land on the same candle in at least 80% of trades and within one candle in 90%
-(today: 91% and 95%). When it was written it found three rules that only one side had: the
-backtest opened trades at 15:00 and 15:15 that the scanner never takes; the scanner could
-act next morning on a signal from yesterday's last candles; and the cost rule was judged on
-slightly different prices, so borderline trades were dropped on one side only. All three
-are fixed.
+(today: about 90% and 95%). It covers 15-minute and 5-minute strategies. When it was
+written it found five rules that only one side had: the backtest opened trades at 15:00 and
+15:15 that the scanner never takes; the scanner could act next morning on a signal from
+yesterday's last candles; the scanner could enter at 09:30 on a 5-minute candle that had
+completed at 09:20; the cost rule was judged on slightly different prices, so borderline
+trades were dropped on one side only; and the 30-minute cooldown was counted from the exit
+candle's start in the backtest, which let it re-enter a candle before live. All five are
+fixed.
+
+**One default for the swing time-stop.** The time-stop (exit a swing flat after 10, 20 or
+40 days) is off. Until 2026-11-19 it was off only in the live containers' settings while
+the code default was on, so a backtest run outside those containers used a rule live does
+not have. The code default is now off as well.
 
 Known remaining differences: live polls every 100 seconds, so a stop can be noticed late
 (the backtest books the stop level); live moves through at most one exit phase per poll and
 books partial exits at the price it sees, the backtest books them at the 50% and 75%
-levels; the 30-minute cooldown is counted from the exit candle's start in the backtest and
-from the real exit time live; a position of one or two shares still gets the breakeven
-stop and the trail live, but not in the backtest.
+levels; a position of one or two shares still gets the breakeven stop and the trail live,
+but not in the backtest.
 
 **Cell lifecycle.** Every cell (`ActiveConfiguration`) has a `status` that the API sets from
 the cell's own closed paper trades, after costs, measured in R (`common/lifecycle.ts`,

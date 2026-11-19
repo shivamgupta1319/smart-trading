@@ -194,12 +194,27 @@ class _SwingHold(BaseStrategy):
         return df
 
 
-def test_time_stop_bars_for_bucket_semantics():
+_TIME_STOP_ON = {"SHORT_SWING": 10, "MID_SWING": 20, "LONG_POSITIONAL": 40}
+
+
+def test_time_stop_is_off_by_default_like_the_live_stack(monkeypatch):
+    """The code default must be what live runs with (off), or a backtest run outside
+    the live containers uses a rule live does not have."""
+    import backtest_config as bc
+
+    for name in ("TIME_STOP_BARS_SHORT_SWING", "TIME_STOP_BARS_MID_SWING", "TIME_STOP_BARS_LONG_POSITIONAL"):
+        if os.getenv(name) is None:
+            bucket = name.removeprefix("TIME_STOP_BARS_")
+            assert bc.time_stop_bars_for_bucket(bucket) is None, name
+
+
+def test_time_stop_bars_for_bucket_semantics(monkeypatch):
     """INTRADAY is unbounded (15:15 square-off already ends it); 0 disables a bucket."""
     import backtest_config as bc
 
+    monkeypatch.setattr(bc, "TIME_STOP_BARS_BY_BUCKET", {**_TIME_STOP_ON, "MID_SWING": 0})
     assert bc.time_stop_bars_for_bucket("SHORT_SWING") == 10
-    assert bc.time_stop_bars_for_bucket("MID_SWING") == 20
+    assert bc.time_stop_bars_for_bucket("MID_SWING") is None
     assert bc.time_stop_bars_for_bucket("LONG_POSITIONAL") == 40
     assert bc.time_stop_bars_for_bucket("INTRADAY") is None
     assert bc.time_stop_bars_for_bucket(None) is None
@@ -215,6 +230,7 @@ def test_swing_time_stop_exits_on_the_bar_after_n(monkeypatch):
     """
     import backtest_config as bc
 
+    monkeypatch.setattr(bc, "TIME_STOP_BARS_BY_BUCKET", dict(_TIME_STOP_ON))  # off by default
     df = _flat_swing_frame()
     sps = bc.slippage_per_share
     entry = 100.0 + sps(100.0)  # bar 1 open + adverse slippage
@@ -274,10 +290,14 @@ def test_run_backtest_reports_measured_span_years():
     assert _Noop().run_backtest(df.iloc[:1])["spanYears"] == 0.0
 
 
-def test_metrics_expose_the_edge_fields_reports_persists():
+def test_metrics_expose_the_edge_fields_reports_persists(monkeypatch):
     """The four edge metrics + spanYears must be present on EVERY run_backtest result —
     reports.save_report writes exactly these, and they were silently dropped before
     (F3), leaving roiPercentage as the only rankable column."""
+    import backtest_config as bc
+
+    # The frame is built so the trade ends in profit at the time-stop (off by default).
+    monkeypatch.setattr(bc, "TIME_STOP_BARS_BY_BUCKET", dict(_TIME_STOP_ON))
     df = _flat_swing_frame()
     m = _SwingHold().run_backtest(df)
     for k in ("avgRMultiple", "profitFactor", "maxDrawdownPct", "expectancy",

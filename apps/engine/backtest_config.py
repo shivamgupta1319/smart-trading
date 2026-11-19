@@ -37,7 +37,7 @@ def _i(name: str, default: int) -> int:
 # whenever the fill/exit model changes so stored reports produced by an older engine
 # are identifiable — they won't reproduce. Current model: C3 (live intraday exits) + F3
 # (swing time-stop).
-ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.11.19-parity")
+ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.11.19-parity2")
 
 
 # Buying-power multiple by hold bucket. Intraday (MIS) deploys ~5× the cell fund as
@@ -255,12 +255,20 @@ def trail_mult_for_bucket(bucket: str | None) -> float:
 # "N bars" == "N trading days" — which is what lets live count completed daily
 # candles and stay in parity with the backtest's bar walk.
 # INTRADAY is deliberately absent: the 15:15 square-off already bounds it.
-# 0 / negative disables the stop for that bucket. Env: TIME_STOP_BARS_MID_SWING=0.
+# 0 / negative disables the stop for that bucket.
 # MUST stay mirrored in scanner/live_scanner.auto_close_signals or backtest≠live.
+#
+# OFF by default (0). It was measured to hurt 15 of 16 swing strategies (it cuts a
+# trade that is aiming for 3R to 5R after 10 to 40 days) and the live stack has run with
+# it off since July 2026. The code default used to be 10/20/40 while the live containers
+# were set to 0, so a backtest run outside those containers used a rule live does not
+# have: the swing figures published on 2026-11-19 were wrong for that reason. The default
+# now matches live. To try a time-stop, set e.g. TIME_STOP_BARS_SHORT_SWING=10 on the
+# engine AND the scanner.
 TIME_STOP_BARS_BY_BUCKET = {
-    "SHORT_SWING": _i("TIME_STOP_BARS_SHORT_SWING", 10),
-    "MID_SWING": _i("TIME_STOP_BARS_MID_SWING", 20),
-    "LONG_POSITIONAL": _i("TIME_STOP_BARS_LONG_POSITIONAL", 40),
+    "SHORT_SWING": _i("TIME_STOP_BARS_SHORT_SWING", 0),
+    "MID_SWING": _i("TIME_STOP_BARS_MID_SWING", 0),
+    "LONG_POSITIONAL": _i("TIME_STOP_BARS_LONG_POSITIONAL", 0),
 }
 
 
