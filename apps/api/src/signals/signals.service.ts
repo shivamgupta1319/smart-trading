@@ -7,6 +7,7 @@ import {
   MIN_CELL_CAPITAL,
   leverageFor,
   riskBudgetFor,
+  sizePosition,
   classifyOutcome,
   marginOf,
 } from "../common/risk";
@@ -108,10 +109,18 @@ export class SignalsService {
         // so wide-stop trades stop out-risking tight-stop ones (fixes avg₹loss > avg₹win).
         // MUST match the engine sizing in apps/engine/strategies/base.py.
         const notionalBudget = cellCapital * leverage;
-        const notionalQty = dto.entryPrice > 0 ? Math.floor(notionalBudget / dto.entryPrice) : 1;
         const riskBudget = riskBudgetFor(cellCapital);
-        const riskCappedQty = riskPerShare > 0 ? Math.floor(riskBudget / riskPerShare) : notionalQty;
-        quantity = Math.max(1, Math.min(notionalQty, riskCappedQty));
+        quantity = sizePosition(notionalBudget, riskBudget, dto.entryPrice, riskPerShare);
+        if (quantity < 1) {
+          // One share already breaks the notional or the risk cap. Reject before any
+          // row is written (the throw rolls the transaction back); the backtest skips
+          // the same signal, so the two stay in step.
+          throw new BadRequestException(
+            `Cannot size ${dto.strategyName} within limits: one share at ₹${dto.entryPrice} risks ` +
+              `₹${riskPerShare.toFixed(2)} vs a ₹${riskBudget.toFixed(0)} risk budget ` +
+              `(₹${notionalBudget.toFixed(0)} notional budget).`,
+          );
+        }
         capitalUsed = round2(quantity * dto.entryPrice);
         riskAmount = round2(quantity * riskPerShare);
 
@@ -166,6 +175,11 @@ export class SignalsService {
           include: { stock: true },
         });
         if (dup) return { signal: dup, isNew: false };
+      }
+      if (err instanceof BadRequestException) {
+        // An expected rejection (e.g. unsizable trade), not a failure.
+        this.logger.warn(`Signal rejected: ${err.message}`);
+        throw err;
       }
       this.logger.error(
         `Failed to create signal/trade: ${err instanceof Error ? err.message : String(err)}`,

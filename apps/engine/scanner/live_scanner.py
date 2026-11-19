@@ -243,7 +243,11 @@ def check_and_fire_signal(config, cache, last_fired_times):
 
         print(f"  🚨 SIGNAL: {signal_type} {symbol} @ ₹{payload['entryPrice']} ({strategy_name})")
         response = httpx.post(NESTJS_URL, json=payload, headers=NEST_HEADERS, timeout=10)
-        print(f"  ✅ Posted to NestJS: {response.status_code}")
+        if response.status_code >= 400:
+            # e.g. 400 when one share cannot fit the risk cap — say why, don't claim success.
+            print(f"  ⚠️ NestJS rejected the signal ({response.status_code}): {response.text[:200]}")
+        else:
+            print(f"  ✅ Posted to NestJS: {response.status_code}")
         
         # Mark this candle as fired
         last_fired_times[fired_key] = candle_time
