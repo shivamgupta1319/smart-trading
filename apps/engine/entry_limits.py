@@ -68,17 +68,33 @@ INTRADAY_ENTRY_FROM = dtime(9, 30)
 INTRADAY_ENTRY_UNTIL = dtime(15, 0)
 
 
-def intraday_entry_time_ok(signal_candle: datetime, now: datetime) -> tuple[bool, str]:
-    """Whether an INTRADAY trade may be opened at `now` on a signal from `signal_candle`.
+CANDLE_MINUTES = {"5m": 5, "15m": 15}
 
-    Two rules, shared by the backtest and the live scanner:
+
+def candle_length(timeframe: str | None) -> timedelta:
+    """Length of one candle of an intraday timeframe (zero for anything else)."""
+    return timedelta(minutes=CANDLE_MINUTES.get(timeframe or "", 0))
+
+
+def intraday_entry_time_ok(candle_close: datetime, now: datetime) -> tuple[bool, str]:
+    """Whether an INTRADAY trade may be opened at `now` on a signal from the candle that
+    completed at `candle_close`.
+
+    One rule set for the backtest and the live scanner:
       * `now` is inside 09:30-15:00;
+      * the signal candle completed inside that window too. The scanner looks back a few
+        candles when it starts scanning at 09:30; a 5-minute candle that completed at
+        09:20 or 09:25 is not traded late at 09:30;
       * the signal candle is from the same trading day. A signal on yesterday's last
-        candles is stale by the next morning and is never acted on.
+        candles is stale by the next morning.
+    The backtest enters at the open of the next candle, so there `candle_close == now`.
     Returns (allowed, reason); reason is empty when allowed.
     """
     if not (INTRADAY_ENTRY_FROM <= now.time() < INTRADAY_ENTRY_UNTIL):
         return False, "outside the 09:30-15:00 entry window"
-    if hasattr(signal_candle, "date") and signal_candle.date() != now.date():
-        return False, "signal is from an earlier day"
+    if hasattr(candle_close, "date"):
+        if candle_close.date() != now.date():
+            return False, "signal is from an earlier day"
+        if candle_close.time() < INTRADAY_ENTRY_FROM:
+            return False, "signal candle completed before 09:30"
     return True, ""
