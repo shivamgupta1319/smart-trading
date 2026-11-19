@@ -9,7 +9,7 @@ from backtest_config import (
     LEVERAGE_INTRADAY, LEVERAGE_DELIVERY, RISK_PER_TRADE_PCT, time_stop_bars_for_bucket,
     MAX_COST_TO_RISK, cost_to_risk, slippage_per_share,
 )
-from entry_limits import entry_allowed, limits_for_bucket
+from entry_limits import entry_allowed, intraday_entry_time_ok, limits_for_bucket
 from intraday_exits import (
     PHASE2_TRIGGER, PHASE3_TRIGGER, REVERSAL_ZONE_START,
     PARTIAL_FRACTION, MIN_QTY_FOR_PARTIAL, SQUARE_OFF_TIME,
@@ -216,8 +216,12 @@ class BaseStrategy(ABC):
         trades_on_day = 0
         last_exit_ts = None    # bar on which this cell's previous trade closed
         skipped_limits = 0
+        skipped_window = 0     # INTRADAY signals outside 09:30-15:00 or from an earlier day
         skipped_unsizable = 0  # signals where one share already broke a sizing bound
         skipped_costly = 0     # signals whose round-trip cost was too large a share of the risk
+        # One row per trade taken: which candle signalled, where it entered and exited.
+        # Read by the replay test that compares this engine with the live scanner.
+        trade_log: list[dict] = []
 
         i = 0
         while i < n - 1:
@@ -238,6 +242,15 @@ class BaseStrategy(ABC):
             # `entry_allowed` the live scanner calls. A blocked signal is dropped,
             # exactly as live drops it; the next signal is judged on its own.
             entry_ts = ts[entry_idx]
+            # INTRADAY entry window and no stale overnight signals: the rule the live
+            # scanner applies. Without it the backtest opened trades at 15:00 and 15:15
+            # that live never takes, and squared them off at once for a cost.
+            if _bucket == "INTRADAY" and hasattr(entry_ts, "time"):
+                ok, _why = intraday_entry_time_ok(ts[i], entry_ts)
+                if not ok:
+                    skipped_window += 1
+                    i += 1
+                    continue
             if limits is not None and hasattr(entry_ts, "date"):
                 if entry_ts.date() != limit_day:
                     limit_day, trades_on_day = entry_ts.date(), 0
@@ -283,7 +296,9 @@ class BaseStrategy(ABC):
             # ways) as a share of the rupees risked. With a tight stop the costs alone
             # can be half the risk, so the trade needs an unrealistic edge to pay.
             if MAX_COST_TO_RISK > 0:
-                if cost_to_risk(qty, entry, risk_per_share, tf) > MAX_COST_TO_RISK:
+                # Judged on the quote and the stop as the API sees them (before the
+                # simulated slippage), so both sides drop the same borderline trades.
+                if cost_to_risk(qty, entry_raw, abs(entry_raw - sl), tf) > MAX_COST_TO_RISK:
                     skipped_costly += 1
                     i += 1
                     continue
@@ -369,6 +384,11 @@ class BaseStrategy(ABC):
             # honest edge metric to rank cells on. Uses NET (after costs).
             r_trades.append(net / (risk_per_share * qty))
 
+            trade_log.append({
+                "signal_ts": ts[i], "entry_ts": ts[entry_idx], "exit_ts": ts[exit_idx],
+                "side": "BUY" if ttype == 1 else "SELL", "entry": float(entry_raw), "qty": int(qty),
+            })
+
             current_capital += net
             if current_capital > peak:
                 peak = current_capital
@@ -391,6 +411,7 @@ class BaseStrategy(ABC):
         return {
             "no_signal_column": no_signal_column,
             "skipped_limits": skipped_limits,
+            "skipped_window": skipped_window,
             "skipped_unsizable": skipped_unsizable,
             "skipped_costly": skipped_costly,
             "net_trades": net_trades,
@@ -400,6 +421,7 @@ class BaseStrategy(ABC):
             "max_dd": max_dd,
             "max_dd_pct": max_dd_pct,
             "skipped_invalid": skipped_invalid,
+            "trade_log": trade_log,
         }
 
     def _intraday_exit(self, entry_idx, entry, sl0, tp, ttype, qty,

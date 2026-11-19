@@ -162,8 +162,26 @@ targets checked against each bar's high/low, a bar that opens beyond the stop fi
 open, costs and slippage charged (per share and side: the larger of one ₹0.05 tick and 5 basis points). Live: entry at the live quote when the signal is
 found, stop-outs at the worse of stop and live price, P&L booked after costs. Entry limits
 (`apps/engine/entry_limits.py`) and intraday exit rules (`apps/engine/intraday_exits.py`) are
-single modules imported by both paths. Known remaining difference: live polls every 100
-seconds, so a stop can be noticed late; the backtest books the stop level.
+single modules imported by both paths. INTRADAY entries are opened only between 09:30 and
+15:00 and never on a candle from an earlier day (`intraday_entry_time_ok`, also in
+`entry_limits.py`).
+
+**Replay test.** `apps/engine/test/test_replay_parity.py` runs the scanner's own entry and
+exit functions over a candle series (network, clock and API replaced by `test/replay.py`)
+and compares the trades with `simulate()` on the same candles. Entries must be identical.
+Exits must land on the same candle in at least 80% of trades and within one candle in 90%
+(today: 91% and 95%). When it was written it found three rules that only one side had: the
+backtest opened trades at 15:00 and 15:15 that the scanner never takes; the scanner could
+act next morning on a signal from yesterday's last candles; and the cost rule was judged on
+slightly different prices, so borderline trades were dropped on one side only. All three
+are fixed.
+
+Known remaining differences: live polls every 100 seconds, so a stop can be noticed late
+(the backtest books the stop level); live moves through at most one exit phase per poll and
+books partial exits at the price it sees, the backtest books them at the 50% and 75%
+levels; the 30-minute cooldown is counted from the exit candle's start in the backtest and
+from the real exit time live; a position of one or two shares still gets the breakeven
+stop and the trail live, but not in the backtest.
 
 **Cell lifecycle.** Every cell (`ActiveConfiguration`) has a `status` that the API sets from
 the cell's own closed paper trades, after costs, measured in R (`common/lifecycle.ts`,

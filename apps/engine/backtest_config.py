@@ -37,7 +37,7 @@ def _i(name: str, default: int) -> int:
 # whenever the fill/exit model changes so stored reports produced by an older engine
 # are identifiable — they won't reproduce. Current model: C3 (live intraday exits) + F3
 # (swing time-stop).
-ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.11.19-tick")
+ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.11.19-parity")
 
 
 # Buying-power multiple by hold bucket. Intraday (MIS) deploys ~5× the cell fund as
