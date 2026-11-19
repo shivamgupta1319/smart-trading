@@ -166,6 +166,10 @@ class BaseStrategy(ABC):
         h = df["High"].to_numpy(dtype=float)
         low = df["Low"].to_numpy(dtype=float)
         c = df["Close"].to_numpy(dtype=float)
+        # A strategy that bails out early (its minimum-bars guard) returns no `signal`
+        # column. That is "could not evaluate", not "no trades" — report it so a
+        # zero-trade backtest on too little data is not read as a clean result.
+        no_signal_column = "signal" not in df.columns
         sig = df.get("signal", pd.Series(0, index=df.index)).fillna(0).to_numpy(dtype=float)
         sl_arr = df.get("stop_loss", pd.Series(np.nan, index=df.index)).to_numpy(dtype=float)
         tp_arr = df.get("target", pd.Series(np.nan, index=df.index)).to_numpy(dtype=float)
@@ -367,6 +371,7 @@ class BaseStrategy(ABC):
             i = exit_idx + 1  # no overlapping positions
 
         return {
+            "no_signal_column": no_signal_column,
             "skipped_limits": skipped_limits,
             "skipped_unsizable": skipped_unsizable,
             "net_trades": net_trades,

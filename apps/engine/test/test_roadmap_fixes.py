@@ -401,3 +401,24 @@ def test_episodic_pivot_can_emit_a_signal():
     # Geometry must be executable or simulate() discards it as invalid anyway.
     i = int(np.argmax(sig > 0))
     assert out["stop_loss"].to_numpy()[i] < df["Close"].to_numpy()[i] < out["target"].to_numpy()[i]
+
+
+def test_strategy_without_a_signal_column_is_reported_not_silent():
+    """A strategy that bails out on too few bars returns no `signal` column. The
+    backtest flags it and the scanner warns once per cell per day (audit F1)."""
+    from strategies.intraday.vwap_macd_rsi import VWAPMACDRSIStrategy as Strat
+    import scanner.live_scanner as scanner
+
+    short = _random_ohlc(20, seed=3, freq="15min")         # below its 50-bar guard
+    assert "signal" not in Strat().generate_signals(short.copy()).columns
+    sim = Strat().simulate(short.copy())
+    assert sim["no_signal_column"] is True and sim["net_trades"] == []
+
+    enough = _random_ohlc(200, seed=3, freq="15min")
+    assert Strat().simulate(enough.copy())["no_signal_column"] is False
+
+    scanner.cannot_evaluate.clear()
+    assert scanner.warn_cannot_evaluate("TEST", "VWAP_MACD_RSI", "5m", 20) is True
+    assert scanner.warn_cannot_evaluate("TEST", "VWAP_MACD_RSI", "5m", 20) is False  # once a day
+    assert ("TEST", "VWAP_MACD_RSI") in scanner.cannot_evaluate
+

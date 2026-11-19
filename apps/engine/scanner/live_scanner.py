@@ -168,6 +168,23 @@ def cell_activity_today(stock_id: int, strategy_name: str, now_ist: datetime):
     return trades_today, last_exit
 
 
+# Cells whose strategy could not evaluate today: {(symbol, strategy): date warned}.
+cannot_evaluate = {}
+
+
+def warn_cannot_evaluate(symbol: str, strategy_name: str, timeframe: str, bars: int) -> bool:
+    """Record (and print once per day) that a cell's strategy produced no `signal`
+    column. Returns True when this call printed the warning."""
+    today = datetime.now(IST).date()
+    key = (symbol, strategy_name)
+    first_today = cannot_evaluate.get(key) != today
+    cannot_evaluate[key] = today
+    if first_today:
+        print(f"  ⚠️ CANNOT EVALUATE {symbol} ({strategy_name}, {timeframe}): strategy returned no "
+              f"signal column from {bars} bars — this cell is NOT being scanned.")
+    return first_today
+
+
 def check_and_fire_signal(config, cache, last_fired_times):
     stock_id = config[1]
     strategy_name = config[2]
@@ -190,7 +207,14 @@ def check_and_fire_signal(config, cache, last_fired_times):
             print(f"  [INFO] {symbol}: insufficient data ({len(df)} bars)")
             return
 
+        bars = len(df)
         df = strategy.generate_signals(df)
+        if 'signal' not in df.columns:
+            # The strategy gave up before producing signals (usually its minimum-bars
+            # guard). Treating that as "no signal" is how 20 cells sat silent for the
+            # system's whole life (audit F1) — so say it, once per cell per day.
+            warn_cannot_evaluate(symbol, strategy_name, timeframe, bars)
+            return
         df = strategy._apply_bucket_target(df)  # bucket reward:risk override (matches backtest)
         latest = df.iloc[-1]
         candle_time = latest.name
@@ -601,6 +625,9 @@ def main():
             print(f"  ⚠️ STALL: cycle #{cycle} took {elapsed:.0f}s > poll interval {POLL_INTERVAL}s — scanner is behind.")
         else:
             print(f"  Done in {elapsed:.1f}s ({len(configs)} configs). Sleeping {POLL_INTERVAL}s...")
+        blind = sum(1 for d in cannot_evaluate.values() if d == now.date())
+        if blind:
+            print(f"  ⚠️ {blind} cell(s) could not be evaluated today (strategy returned no signals column).")
         time.sleep(POLL_INTERVAL)
 
 
