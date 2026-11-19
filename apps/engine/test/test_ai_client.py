@@ -91,6 +91,55 @@ def test_the_engine_no_longer_calls_a_provider_directly():
         assert gone not in src
 
 
+# ── Headlines: Yahoo's news feed may fail without taking the analysis down ───
+
+class _Ticker:
+    def __init__(self, news=None, fail=False):
+        self._news, self._fail = news, fail
+
+    @property
+    def news(self):
+        if self._fail:
+            raise RuntimeError("*** YAHOO! FINANCE IS CURRENTLY DOWN! ***")
+        return self._news
+
+
+def _with_rss(monkeypatch, titles=None, fail=False):
+    import routers.analysis as analysis
+
+    async def fake_rss():
+        if fail:
+            raise RuntimeError("feeds unreachable")
+        return list(titles or [])
+
+    monkeypatch.setattr(analysis, "_rss_titles", fake_rss)
+    return analysis
+
+
+def test_yahoo_headlines_are_used_when_they_work(monkeypatch):
+    analysis = _with_rss(monkeypatch, ["rss one"])
+    yahoo = [{"content": {"title": "ONGC wins block"}}, {"content": {"title": "Oil steady"}}]
+    out = asyncio.run(analysis.headlines_for(_Ticker(news=yahoo), 5))
+    assert out and "rss one" not in out
+
+
+def test_a_failed_or_empty_yahoo_feed_falls_back_to_the_apps_own_feeds(monkeypatch):
+    analysis = _with_rss(monkeypatch, ["Sensex ends higher", "ONGC Q2 profit rises", "Rupee weakens"])
+    assert asyncio.run(analysis.headlines_for(_Ticker(fail=True), 2)) == ["Sensex ends higher", "ONGC Q2 profit rises"]
+    assert asyncio.run(analysis.headlines_for(_Ticker(news=[]), 5, match="ONGC.NS")) == ["ONGC Q2 profit rises"]
+    assert asyncio.run(analysis.headlines_for(_Ticker(fail=True), 5, match="INFY")) == []
+
+
+def test_when_every_news_source_fails_the_answer_is_empty_not_an_error(monkeypatch):
+    analysis = _with_rss(monkeypatch, fail=True)
+    assert asyncio.run(analysis.headlines_for(_Ticker(fail=True), 5)) == []
+
+
+def test_analysis_endpoints_never_return_a_raw_exception_message():
+    src = open(os.path.join(os.path.dirname(__file__), "..", "routers", "analysis.py")).read()
+    assert '"message": str(e)' not in src
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-q"]))
