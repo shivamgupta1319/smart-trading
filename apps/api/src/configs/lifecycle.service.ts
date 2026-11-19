@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { toNum } from '../common/money';
-import { BASE_CELL_CAPITAL, LEVERAGE_DELIVERY, LEVERAGE_INTRADAY } from '../common/risk';
+import { BASE_CELL_CAPITAL } from '../common/risk';
 import {
   cellStats,
   evaluateCell,
@@ -33,14 +33,6 @@ export class LifecycleService {
   }
 
   /**
-   * What a cell's loss limit is a share of: its fund times its leverage. A cell on daily
-   * candles is swing (1×); one on intraday candles trades at the intraday leverage.
-   */
-  static lossBase(timeframe: string): number {
-    return BASE_CELL_CAPITAL * (timeframe === '1D' ? LEVERAGE_DELIVERY : LEVERAGE_INTRADAY);
-  }
-
-  /**
    * Re-evaluate one cell and store a changed status. Safe to call after every close;
    * returns the status now in force (or null when the cell is not on the roster).
    */
@@ -60,7 +52,7 @@ export class LifecycleService {
       : rows.length;
 
     const current = config.status as CellStatus;
-    const next = evaluateCell(current, stats, sinceChange, LifecycleService.lossBase(config.timeframe), rules);
+    const next = evaluateCell(current, stats, sinceChange, BASE_CELL_CAPITAL, rules);
     if (next.status !== current) {
       await this.prisma.activeConfiguration.update({
         where: { id: config.id },

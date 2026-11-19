@@ -58,12 +58,12 @@ The app sets the status itself from the cell's own closed paper trades.
 | Status | Meaning | Rule |
 |---|---|---|
 | **Testing** | Still collecting evidence | Where every cell starts |
-| **Paused** | It kept losing | Last 20 trades average below −0.15R, or those 20 trades lost more than 15% of what the cell may hold (₹1,500 swing, ₹7,500 intraday: about 7.5 full stop-outs either way) |
+| **Paused** | It kept losing | Last 20 trades average below −0.15R, or only ₹5,000 is left of the cell's ₹10,000 fund |
 | **Proven** | It has earned trust | 40 or more trades, average above +0.10R, profit factor 1.3 or more, and positive in both the first and second half of its history |
 
 A paused cell keeps paper trading so it can recover. Those trades go into the **test
 book** and are not counted in the main results. It returns to Testing after 20 new
-trades that average above +0.05R.
+trades that average above +0.05R, provided its fund is back above ₹5,000.
 
 - **Main book:** trades from cells that were Testing or Proven when the trade opened.
   This is the result to judge the app by.
