@@ -35,6 +35,21 @@ def stop_fill_price(stop: float, bar_open: float, is_buy: bool) -> float:
     return min(stop, bar_open) if is_buy else max(stop, bar_open)
 
 
+def position_qty(notional_budget: float, risk_budget: float, entry: float, risk_per_share: float) -> int:
+    """Shares to trade: the smaller of what the notional budget buys and what the
+    rupee-risk budget allows (FEAT-005). Returns 0 when even ONE share breaks either
+    bound — the caller skips the trade. It used to be forced to 1 share, which on a
+    ₹10k fund let a high-priced, wide-stop stock risk several times the 2% cap.
+
+    MUST match `sizePosition` in apps/api/src/common/risk.ts.
+    """
+    if entry <= 0:
+        return 0
+    notional_qty = int(notional_budget / entry)
+    risk_qty = int(risk_budget / risk_per_share) if risk_per_share > 0 else notional_qty
+    return max(0, min(notional_qty, risk_qty))
+
+
 class BaseStrategy(ABC):
     name: str
     timeframe: str
@@ -189,6 +204,7 @@ class BaseStrategy(ABC):
         trades_on_day = 0
         last_exit_ts = None    # bar on which this cell's previous trade closed
         skipped_limits = 0
+        skipped_unsizable = 0  # signals where one share already broke a sizing bound
 
         i = 0
         while i < n - 1:
@@ -235,23 +251,20 @@ class BaseStrategy(ABC):
             # Per-cell fund sizing, COMPOUNDING + leverage — size from this cell's
             # CURRENT equity (grows with prior P&L), identical to the live model
             # (cellCapital × leverage of notional). Intraday (MIS) deploys 5× the
-            # fund, swing/delivery (CNC) 1×. qty = floor(equity × lev / entry),
-            # min 1 — notional, not risk-based, so the backtest takes exactly the
-            # trades the live ledger would.
+            # fund, swing/delivery (CNC) 1×. See `position_qty` for the two bounds.
             leverage = LEVERAGE_INTRADAY if _bucket == "INTRADAY" else LEVERAGE_DELIVERY
             notional = current_capital * leverage
             if RISK.cap_position_value:
                 # Bound notional so a compounding cell doesn't size geometrically —
                 # keeps ROI/DD/PF honest for selection (see backtest_config).
                 notional = min(notional, RISK.max_position_value)
-            notional_qty = int(notional / entry)
-            # Per-trade risk cap (FEAT-005): also bound rupee-risk so a wide-stop trade
-            # doesn't risk multiples of a tight-stop one on the same fund. riskBudget =
-            # fund × RISK_PER_TRADE_PCT; risk_per_share = |entry − sl| (entry-time stop,
-            # computed above). MUST match apps/api/src/common/risk.ts sizing.
-            risk_budget = current_capital * RISK_PER_TRADE_PCT
-            risk_qty = int(risk_budget / risk_per_share) if risk_per_share > 0 else notional_qty
-            qty = max(1, min(notional_qty, risk_qty))
+            qty = position_qty(notional, current_capital * RISK_PER_TRADE_PCT, entry, risk_per_share)
+            if qty < 1:
+                # One share already breaks the notional or the risk cap: live rejects
+                # this signal (signals.service), so the backtest must not take it either.
+                skipped_unsizable += 1
+                i += 1
+                continue
 
             # Walk forward to the exit bar. INTRADAY models the live 3-phase exit
             # (partials + breakeven + candle-trail + reversal + 15:15 square-off);
@@ -355,6 +368,7 @@ class BaseStrategy(ABC):
 
         return {
             "skipped_limits": skipped_limits,
+            "skipped_unsizable": skipped_unsizable,
             "net_trades": net_trades,
             "gross_trades": gross_trades,
             "r_trades": r_trades,

@@ -113,14 +113,10 @@ def test_per_trade_risk_cap_bounds_wide_stops():
     apps/api/src/common/risk.ts (parity)."""
     from backtest_config import RISK_PER_TRADE_PCT, LEVERAGE_INTRADAY, LEVERAGE_DELIVERY
 
-    def qty(cell, lev, entry, stop, pct=RISK_PER_TRADE_PCT, cap=None):
-        notional = cell * lev
-        if cap is not None:
-            notional = min(notional, cap)
-        notional_qty = int(notional / entry)
-        rps = abs(entry - stop)
-        risk_qty = int((cell * pct) / rps) if rps > 0 else notional_qty
-        return max(1, min(notional_qty, risk_qty))
+    from strategies.base import position_qty  # the engine's real sizing function
+
+    def qty(cell, lev, entry, stop, pct=RISK_PER_TRADE_PCT):
+        return position_qty(cell * lev, cell * pct, entry, abs(entry - stop))
 
     assert RISK_PER_TRADE_PCT == 0.02  # keep in lockstep with risk.ts default
     # Wide-stop swing (live open #241 IFCI·Fibonacci): notional 128 sh, cap trims to 38.
@@ -129,8 +125,35 @@ def test_per_trade_risk_cap_bounds_wide_stops():
     assert qty(10000, LEVERAGE_DELIVERY, 78.00, 78.00) == int(10000 / 78.00)
     # Cap disabled (pct huge) → qty equals the pre-feature notional qty (purely additive).
     assert qty(10000, LEVERAGE_DELIVERY, 78.00, 72.86, pct=1.0) == int(10000 / 78.00)
-    # A fund too small for one risk-unit still trades ≥1 share.
-    assert qty(500, LEVERAGE_DELIVERY, 78.00, 40.00) >= 1
+    # One share would risk ₹38 against a ₹10 budget: skipped (0), no longer forced to 1.
+    assert qty(500, LEVERAGE_DELIVERY, 78.00, 40.00) == 0
+    # One share costs more than the whole notional budget (₹33,980 vs ₹10k): skipped.
+    assert qty(10000, LEVERAGE_DELIVERY, 33980.00, 32000.00) == 0
+    # Exactly one share fits both bounds → 1.
+    assert qty(10000, LEVERAGE_DELIVERY, 4000.00, 3800.00) == 1
+
+
+def test_backtest_skips_a_trade_it_cannot_size():
+    """The engine drops (and counts) a signal whose single share breaks the risk cap."""
+    idx = pd.date_range("2024-01-01", periods=6, freq="D")
+    df = pd.DataFrame({"Open": 5000.0, "High": 5050.0, "Low": 4950.0, "Close": 5000.0,
+                       "Volume": 1000}, index=idx)
+
+    class _WideStop(BaseStrategy):
+        name = "WIDE_STOP_TEST"
+        timeframe = "1D"
+
+        def generate_signals(self, d):
+            d = d.copy()
+            d["signal"] = 0
+            d.iloc[0, d.columns.get_loc("signal")] = 1
+            d["stop_loss"] = 4000.0   # ₹1,000 risk per share vs a ₹200 budget
+            d["target"] = 8000.0
+            return d
+
+    sim = _WideStop().simulate(df)
+    assert sim["net_trades"] == []
+    assert sim["skipped_unsizable"] == 1
 
 
 # ── FEAT-005 Phase 4 / audit F3 — swing time-stop ─────────────────────────────

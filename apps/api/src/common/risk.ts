@@ -27,6 +27,26 @@ export const RISK_PER_TRADE_PCT = Number(process.env.RISK_PER_TRADE_PCT || 0.02)
 /** Rupees a single trade may risk = cell fund × RISK_PER_TRADE_PCT. */
 export const riskBudgetFor = (cellCapital: number): number => cellCapital * RISK_PER_TRADE_PCT;
 
+/**
+ * Shares to trade: the smaller of what the notional budget buys and what the rupee-risk
+ * budget allows. Returns 0 when even ONE share breaks either bound, and the caller must
+ * reject the signal. It used to be forced to 1 share, which on a ₹10k fund let a
+ * high-priced, wide-stop stock risk several times the 2% cap.
+ *
+ * MUST match `position_qty` in apps/engine/strategies/base.py.
+ */
+export const sizePosition = (
+  notionalBudget: number,
+  riskBudget: number,
+  entryPrice: number,
+  riskPerShare: number,
+): number => {
+  if (!(entryPrice > 0)) return 0;
+  const notionalQty = Math.floor(notionalBudget / entryPrice);
+  const riskQty = riskPerShare > 0 ? Math.floor(riskBudget / riskPerShare) : notionalQty;
+  return Math.max(0, Math.min(notionalQty, riskQty));
+};
+
 // Portfolio "heat" = sum of money at risk if every open stop hits, as a % of total deployed
 // base (₹10k × active cells). A soft risk-dashboard flag threshold, not a funding gate.
 export const MAX_HEAT_PCT = Number(process.env.MAX_HEAT_PCT || 6); // 6% of deployed base
