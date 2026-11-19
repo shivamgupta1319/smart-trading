@@ -6,7 +6,8 @@
 #
 # Checks: a trade one share cannot fit is rejected; a trade whose costs dwarf its
 # risk is rejected; sizing of a normal trade; a cell is PAUSED after 20 losing
-# trades and its next trade goes to the test book.
+# trades and its next trade goes to the test book; the digest reports the two books
+# apart and cannot be sent twice.
 set -u
 cd "$(dirname "$0")/../.."
 export DATABASE_URL="postgresql://trader:trader@localhost:5499/smart_trading"
@@ -35,6 +36,14 @@ c=json.load(sys.stdin)[0]; l=c['live']
 print('after trade $n: status=%s | live trades=%d avgR=%.3f net=%.0f | main book %d trades, test book %d trades | reason=%s' % (c['status'], l['trades'], l['avgR'], l['netPnl'], c['mainBook']['trades'], c['testBook']['trades'], c['statusReason']))"
   fi
 done
+echo "--- digest preview (nothing is sent)"
+curl -s "localhost:3099/api/reports/digest-preview?period=DAILY" | python3 -c "
+import sys,json
+d=json.load(sys.stdin); x=d['data']
+print('main book %d trades %.0f | test book %d trades %.0f | status changes %d | cells %s' % (x['main']['trades'], x['main']['netPnl'], x['test']['trades'], x['test']['netPnl'], len(x['statusChanges']), x['cells']))
+print(d['text'])"
+docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "INSERT INTO \"SentDigest\"(period,\"periodKey\") VALUES ('DAILY','2026-01-01')" >/dev/null
+docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "INSERT INTO \"SentDigest\"(period,\"periodKey\") VALUES ('DAILY','2026-01-01')" 2>&1 | grep -q "duplicate key" && echo "second copy of the same digest is refused by the database"
 echo "--- first trade sizing"
 docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "SELECT quantity, \"capitalUsed\", \"riskAmount\", pnl, \"cellStatusAtEntry\" FROM \"Trade\" ORDER BY id LIMIT 1; SELECT \"cellStatusAtEntry\", COUNT(*) FROM \"Trade\" GROUP BY 1 ORDER BY 1;"
 curl -s -X POST localhost:3099/api/configs/evaluate; echo

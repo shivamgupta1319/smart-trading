@@ -174,6 +174,14 @@ window of new trades averaging above +0.05R. `GET /api/configs/scorecard` return
 the status and reason, the live record, main-book and test-book totals, and the latest
 backtest. `infra/scripts/e2e-smoke.sh` exercises all of this against a throwaway database.
 
+**Telegram digests.** `apps/api/src/reports/` sends a daily digest at 15:45 IST on weekdays
+and, on Fridays, the week (15:50) and everything since the start (15:55). Figures are after
+costs; trades opened while a cell was paused are reported as the test book, apart from the
+main book; the period's status changes are listed. Each digest is claimed in the
+`SentDigest` table before sending, so a restart cannot send a second copy.
+`GET /api/reports/digest-preview?period=…` returns what would be sent without sending it.
+The pure logic (when a digest is due, the period, the wording) is in `reports/digest.ts`.
+
 **Scanner UX.** `/scanner` is split into two tabs: **Live Scanner** (connection status +
 active signals) and **Monitored Stocks** (a table of each monitored stock×strategy with its
 latest persisted `BacktestReport`, plus Re-run — recomputes via `POST /api/engine/run-backtest`,
