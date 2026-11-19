@@ -1,59 +1,120 @@
--- Starting roster for the merged product (2026-11-19).
+-- Starting roster, chosen 2026-11-19 (evening) by the owner: "strict per cell".
 --
--- Every strategy runs in paper; the automatic pause (cell lifecycle) sorts them out.
--- The roster is NOT picked from backtest winners: the live data showed a cell's backtest
--- rank does not predict its live result. It is every strategy on a fixed stock list:
---   * the 11 intraday strategies on 12 volatile, liquid stocks. Costs are a smaller share
---     of the risk there; these were the least-bad stocks for intraday in the 2026-11
---     backtest (docs/strategies.md).
---   * the 17 swing strategies on 15 large, liquid stocks.
--- 132 + 255 = 387 cells. Safe to re-run: existing cells are left as they are.
--- Requires the Stock rows to exist.
+-- From the full backtest on engine 2026.11.19-risk5x, after costs
+-- (docs/agent-reports/data/2026-11-19-backtest-all-risk5x.csv). A cell is on the roster when:
+--   * its backtest average is above +0.10R,
+--   * it is positive in BOTH halves of its history,
+--   * it has enough trades: 30 for intraday, 10 for swing,
+--   * intraday: profit factor of 1.3 or more;
+--     swing: its strategy passes the first luck test (positive average, corrected chance
+--     of luck at or below 10%).
+-- 7 intraday cells + 93 swing cells = 100. Safe to re-run: existing cells are left alone.
+-- Requires the Stock rows to exist. A backtest is a first filter only: the cell's own
+-- paper trades decide whether it stays (cell lifecycle).
 
 INSERT INTO "ActiveConfiguration" ("stockId", "strategyName", timeframe, "updatedAt")
-SELECT s.id, x.name, x.tf, now()
-FROM "Stock" s
-CROSS JOIN (VALUES
-    ('15m_ORB', '15m'),
-    ('VWAP_MACD_RSI', '15m'),
-    ('EMA_RSI', '5m'),
-    ('MACD_Zero', '15m'),
-    ('Inside_Bar', '15m'),
-    ('Gap_And_Go', '5m'),
-    ('CPR_Breakout', '5m'),
-    ('PDH_PDL_Breakout', '5m'),
-    ('BB_Mean_Reversion_Intraday', '15m'),
-    ('SMC_FVG', '15m'),
-    ('RVOL_ORB', '15m')
-) AS x(name, tf)
-WHERE s.symbol IN ('MCX', 'OLAELEC', 'IFCI', 'KAYNES', 'NATIONALUM', 'BHEL', 'VEDL',
-                   'ADANIENT', 'ATGL', 'APOLLO', 'BSE', 'SUZLON')
+SELECT s.id, x.strategy, x.tf, now()
+FROM (VALUES
+    ('IFCI', 'CPR_Breakout', '5m'),
+    ('COFORGE', 'Inside_Bar', '15m'),
+    ('5PAISA', 'RVOL_ORB', '15m'),
+    ('ADANIENT', 'VWAP_MACD_RSI', '15m'),
+    ('ATGL', 'VWAP_MACD_RSI', '15m'),
+    ('TMPV', 'VWAP_MACD_RSI', '15m'),
+    ('VEDL', 'VWAP_MACD_RSI', '15m'),
+    ('HINDCOPPER', 'Bollinger_Mean_Reversion', '1D'),
+    ('HINDZINC', 'Bollinger_Mean_Reversion', '1D'),
+    ('ADANIPORTS', 'Break_And_Retest', '1D'),
+    ('BHARTIARTL', 'Break_And_Retest', '1D'),
+    ('BSE', 'Break_And_Retest', '1D'),
+    ('CANBK', 'Break_And_Retest', '1D'),
+    ('ETERNAL', 'Break_And_Retest', '1D'),
+    ('HINDCOPPER', 'Break_And_Retest', '1D'),
+    ('MCX', 'Break_And_Retest', '1D'),
+    ('ONGC', 'Break_And_Retest', '1D'),
+    ('SBIN', 'Break_And_Retest', '1D'),
+    ('SHRIRAMFIN', 'Break_And_Retest', '1D'),
+    ('TMPV', 'Break_And_Retest', '1D'),
+    ('TRENT', 'Break_And_Retest', '1D'),
+    ('TVSMOTOR', 'Break_And_Retest', '1D'),
+    ('APOLLO', 'EMA200_MACD', '1D'),
+    ('BHEL', 'EMA200_MACD', '1D'),
+    ('BSE', 'EMA200_MACD', '1D'),
+    ('ETERNAL', 'EMA200_MACD', '1D'),
+    ('HDFCBANK', 'EMA200_MACD', '1D'),
+    ('HINDALCO', 'EMA200_MACD', '1D'),
+    ('LTF', 'EMA200_MACD', '1D'),
+    ('MCX', 'EMA200_MACD', '1D'),
+    ('NATIONALUM', 'EMA200_MACD', '1D'),
+    ('TVSMOTOR', 'EMA200_MACD', '1D'),
+    ('ADANIPORTS', 'EMA_10_50_Cross', '1D'),
+    ('APOLLO', 'EMA_10_50_Cross', '1D'),
+    ('ASHOKLEY', 'EMA_10_50_Cross', '1D'),
+    ('COFORGE', 'EMA_10_50_Cross', '1D'),
+    ('HDFCBANK', 'EMA_10_50_Cross', '1D'),
+    ('HINDALCO', 'EMA_10_50_Cross', '1D'),
+    ('IFCI', 'EMA_10_50_Cross', '1D'),
+    ('ITC', 'EMA_10_50_Cross', '1D'),
+    ('MCX', 'EMA_10_50_Cross', '1D'),
+    ('ONGC', 'EMA_10_50_Cross', '1D'),
+    ('SHRIRAMFIN', 'EMA_10_50_Cross', '1D'),
+    ('TVSMOTOR', 'EMA_10_50_Cross', '1D'),
+    ('VEDL', 'EMA_10_50_Cross', '1D'),
+    ('ADANIPORTS', 'MACD_Stoch_Confluence', '1D'),
+    ('AETHER', 'MACD_Stoch_Confluence', '1D'),
+    ('ASHOKLEY', 'MACD_Stoch_Confluence', '1D'),
+    ('BHEL', 'MACD_Stoch_Confluence', '1D'),
+    ('BSE', 'MACD_Stoch_Confluence', '1D'),
+    ('CANBK', 'MACD_Stoch_Confluence', '1D'),
+    ('COALINDIA', 'MACD_Stoch_Confluence', '1D'),
+    ('ETERNAL', 'MACD_Stoch_Confluence', '1D'),
+    ('HCLTECH', 'MACD_Stoch_Confluence', '1D'),
+    ('HINDALCO', 'MACD_Stoch_Confluence', '1D'),
+    ('IFCI', 'MACD_Stoch_Confluence', '1D'),
+    ('M&M', 'MACD_Stoch_Confluence', '1D'),
+    ('MTARTECH', 'MACD_Stoch_Confluence', '1D'),
+    ('POWERGRID', 'MACD_Stoch_Confluence', '1D'),
+    ('SBIN', 'MACD_Stoch_Confluence', '1D'),
+    ('TRENT', 'MACD_Stoch_Confluence', '1D'),
+    ('VEDL', 'MACD_Stoch_Confluence', '1D'),
+    ('ADANIPOWER', 'MTF_Alignment', '1D'),
+    ('APOLLO', 'MTF_Alignment', '1D'),
+    ('ASHOKLEY', 'MTF_Alignment', '1D'),
+    ('BHEL', 'MTF_Alignment', '1D'),
+    ('BSE', 'MTF_Alignment', '1D'),
+    ('ETERNAL', 'MTF_Alignment', '1D'),
+    ('HINDALCO', 'MTF_Alignment', '1D'),
+    ('LTF', 'MTF_Alignment', '1D'),
+    ('MCX', 'MTF_Alignment', '1D'),
+    ('NATIONALUM', 'MTF_Alignment', '1D'),
+    ('SBIN', 'MTF_Alignment', '1D'),
+    ('SHRIRAMFIN', 'MTF_Alignment', '1D'),
+    ('SUZLON', 'MTF_Alignment', '1D'),
+    ('VEDL', 'MTF_Alignment', '1D'),
+    ('AETHER', 'SMA44_Pullback', '1D'),
+    ('APOLLO', 'SMA44_Pullback', '1D'),
+    ('AXISBANK', 'SMA44_Pullback', '1D'),
+    ('BHARTIARTL', 'SMA44_Pullback', '1D'),
+    ('BHEL', 'SMA44_Pullback', '1D'),
+    ('BPCL', 'SMA44_Pullback', '1D'),
+    ('DATAPATTNS', 'SMA44_Pullback', '1D'),
+    ('HDFCBANK', 'SMA44_Pullback', '1D'),
+    ('HINDALCO', 'SMA44_Pullback', '1D'),
+    ('HINDCOPPER', 'SMA44_Pullback', '1D'),
+    ('M&M', 'SMA44_Pullback', '1D'),
+    ('MTARTECH', 'SMA44_Pullback', '1D'),
+    ('SAIL', 'SMA44_Pullback', '1D'),
+    ('SBIN', 'SMA44_Pullback', '1D'),
+    ('TRENT', 'SMA44_Pullback', '1D'),
+    ('VEDL', 'SMA44_Pullback', '1D'),
+    ('WIPRO', 'SMA44_Pullback', '1D'),
+    ('APOLLO', 'SuperTrend_EMA', '1D'),
+    ('BHARTIARTL', 'SuperTrend_EMA', '1D'),
+    ('HINDCOPPER', 'SuperTrend_EMA', '1D'),
+    ('HINDZINC', 'SuperTrend_EMA', '1D'),
+    ('LTF', 'SuperTrend_EMA', '1D'),
+    ('SHRIRAMFIN', 'SuperTrend_EMA', '1D'),
+    ('SUZLON', 'SuperTrend_EMA', '1D')
+) AS x(symbol, strategy, tf)
+JOIN "Stock" s ON s.symbol = x.symbol
 ON CONFLICT ("stockId", "strategyName") DO NOTHING;
-
-INSERT INTO "ActiveConfiguration" ("stockId", "strategyName", timeframe, "updatedAt")
-SELECT s.id, x.name, x.tf, now()
-FROM "Stock" s
-CROSS JOIN (VALUES
-    ('SMA44_Pullback', '1D'),
-    ('EMA200_MACD', '1D'),
-    ('BB_Squeeze', '1D'),
-    ('RSI_Divergence', '1D'),
-    ('Golden_Cross', '1D'),
-    ('SuperTrend_EMA', '1D'),
-    ('Bollinger_Mean_Reversion', '1D'),
-    ('MACD_Stoch_Confluence', '1D'),
-    ('VCP', '1D'),
-    ('Episodic_Pivot', '1D'),
-    ('Break_And_Retest', '1D'),
-    ('EMA_10_50_Cross', '1D'),
-    ('DMA20_Pullback', '1D'),
-    ('Fibonacci_Golden_Zone', '1D'),
-    ('MTF_Alignment', '1D'),
-    ('Channel_Oscillation', '1D'),
-    ('Volume_Climax', '1D')
-) AS x(name, tf)
-WHERE s.symbol IN ('HDFCBANK', 'ICICIBANK', 'RELIANCE', 'SBIN', 'INFY', 'TCS', 'LT', 'ITC',
-                   'BHARTIARTL', 'M&M', 'NTPC', 'COALINDIA', 'TATASTEEL', 'HINDALCO', 'BEL')
-ON CONFLICT ("stockId", "strategyName") DO NOTHING;
-
-SELECT status, COUNT(*) AS cells FROM "ActiveConfiguration" GROUP BY status;

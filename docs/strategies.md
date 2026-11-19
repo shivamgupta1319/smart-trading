@@ -4,6 +4,26 @@ Last updated 2026-11-19. 28 strategies are registered (`apps/engine/strategies/_
 11 intraday and 17 swing. This page says what each one trades, what the evidence says about
 it, and its status. Rules shared by every strategy are in [architecture.md](architecture.md).
 
+## What is on the roster
+
+Since the evening of 2026-11-19 the roster is 100 cells, picked per cell from the backtest
+(the owner's choice, "strict per cell"). A cell is on it when its backtest average is above
++0.10R, it is positive in both halves of its history and it has enough trades (30 intraday,
+10 swing). Intraday cells also need a profit factor of 1.3; swing cells must belong to a
+strategy that passes the first luck test.
+
+- **Swing, 93 cells** on 38 stocks: MACD_Stoch_Confluence 17, SMA44_Pullback 17,
+  MTF_Alignment 14, Break_And_Retest 13, EMA_10_50_Cross 13, EMA200_MACD 10,
+  SuperTrend_EMA 7, Bollinger_Mean_Reversion 2. Golden_Cross has the best average but
+  trades about twice per stock in five years, so no single cell reaches 10 trades.
+- **Intraday, 7 cells**: VWAP_MACD_RSI on ADANIENT, ATGL, TMPV and VEDL; RVOL_ORB on 5PAISA;
+  Inside_Bar on COFORGE; CPR_Breakout on IFCI. Seven of 645 intraday cells passing is about
+  what chance alone would give, so these are being watched, not trusted.
+
+The list is `infra/scripts/seed-starting-roster.sql`. The strategies below that are not on
+the roster stay in the code and can be backtested; they are not paper trading. A good
+backtest row puts a cell on the roster; only its own paper trades keep it there.
+
 ## How to read the numbers
 
 - **R** is the result of a trade divided by the rupees it risked. +1R means it made what it
