@@ -3,52 +3,179 @@
     "Reviewed daily price moves above 20%. The price-jump check flags every such move and marks",
     "the stock as needing review until the date is listed here.",
     "kind 'real_move': a genuine market move (a crash, a news day). Kept as it is.",
-    "kind 'demerger': the price stepped down because part of the company was split off. The data",
-    "  source does not adjust for this, so the engine scales the earlier prices by the size of",
-    "  the step when it loads history, the same way a stock split is handled.",
-    "Each entry is a claim someone checked. Add the date the move printed (IST) and how you know."
+    "kind 'demerger': the price stepped down because part of the company was split off.",
+    "kind 'bonus': the price stepped down because of a bonus issue or split that the data source",
+    "  did not carry back through its history.",
+    "For 'demerger' and 'bonus' the engine scales the earlier prices by the size of the step when",
+    "it loads history, so indicators and backtests see one continuous series.",
+    "Each entry is a claim someone checked. Add the date the step appears in OUR stored data (IST)",
+    "and how you know."
   ],
   "ETERNAL": [
-    {"date": "2022-01-24", "kind": "real_move", "note": "New-age tech sell-off; Zomato fell with the sector."}
+    {
+      "date": "2022-01-24",
+      "kind": "real_move",
+      "note": "New-age tech sell-off; Zomato fell with the sector."
+    }
   ],
   "ADANIENT": [
-    {"date": "2023-01-27", "kind": "real_move", "note": "Hindenburg report sell-off."},
-    {"date": "2023-02-01", "kind": "real_move", "note": "Hindenburg sell-off; FPO withdrawn that evening."},
-    {"date": "2023-02-02", "kind": "real_move", "note": "Hindenburg sell-off continued."},
-    {"date": "2024-06-04", "kind": "real_move", "note": "General-election result day crash."},
-    {"date": "2024-11-21", "kind": "real_move", "note": "US indictment news."}
+    {
+      "date": "2023-01-27",
+      "kind": "real_move",
+      "note": "Hindenburg report sell-off."
+    },
+    {
+      "date": "2023-02-01",
+      "kind": "real_move",
+      "note": "Hindenburg sell-off; FPO withdrawn that evening."
+    },
+    {
+      "date": "2023-02-02",
+      "kind": "real_move",
+      "note": "Hindenburg sell-off continued."
+    },
+    {
+      "date": "2024-06-04",
+      "kind": "real_move",
+      "note": "General-election result day crash."
+    },
+    {
+      "date": "2024-11-21",
+      "kind": "real_move",
+      "note": "US indictment news."
+    }
   ],
   "ADANIGREEN": [
-    {"date": "2023-01-27", "kind": "real_move", "note": "Hindenburg report sell-off (lower circuit)."},
-    {"date": "2023-01-30", "kind": "real_move", "note": "Hindenburg sell-off (lower circuit)."},
-    {"date": "2024-06-04", "kind": "real_move", "note": "General-election result day crash."},
-    {"date": "2024-11-21", "kind": "real_move", "note": "US indictment news."}
+    {
+      "date": "2023-01-27",
+      "kind": "real_move",
+      "note": "Hindenburg report sell-off (lower circuit)."
+    },
+    {
+      "date": "2023-01-30",
+      "kind": "real_move",
+      "note": "Hindenburg sell-off (lower circuit)."
+    },
+    {
+      "date": "2024-06-04",
+      "kind": "real_move",
+      "note": "General-election result day crash."
+    },
+    {
+      "date": "2024-11-21",
+      "kind": "real_move",
+      "note": "US indictment news."
+    }
   ],
   "ATGL": [
-    {"date": "2023-01-27", "kind": "real_move", "note": "Hindenburg report sell-off (lower circuit)."},
-    {"date": "2023-01-30", "kind": "real_move", "note": "Hindenburg sell-off (lower circuit)."},
-    {"date": "2024-06-04", "kind": "real_move", "note": "General-election result day crash."}
+    {
+      "date": "2023-01-27",
+      "kind": "real_move",
+      "note": "Hindenburg report sell-off (lower circuit)."
+    },
+    {
+      "date": "2023-01-30",
+      "kind": "real_move",
+      "note": "Hindenburg sell-off (lower circuit)."
+    },
+    {
+      "date": "2024-06-04",
+      "kind": "real_move",
+      "note": "General-election result day crash."
+    }
   ],
   "ADANIPORTS": [
-    {"date": "2023-02-01", "kind": "real_move", "note": "Hindenburg sell-off."},
-    {"date": "2024-06-04", "kind": "real_move", "note": "General-election result day crash."}
+    {
+      "date": "2023-02-01",
+      "kind": "real_move",
+      "note": "Hindenburg sell-off."
+    },
+    {
+      "date": "2024-06-04",
+      "kind": "real_move",
+      "note": "General-election result day crash."
+    }
   ],
   "IFCI": [
-    {"date": "2024-01-23", "kind": "real_move", "note": "PSU financials rally (upper circuit)."}
+    {
+      "date": "2024-01-23",
+      "kind": "real_move",
+      "note": "PSU financials rally (upper circuit)."
+    }
   ],
   "HINDZINC": [
-    {"date": "2024-05-21", "kind": "real_move", "note": "Metals rally and special-dividend expectations."}
+    {
+      "date": "2024-05-21",
+      "kind": "real_move",
+      "note": "Metals rally and special-dividend expectations."
+    }
   ],
-  "BEL": [{"date": "2024-06-04", "kind": "real_move", "note": "General-election result day crash."}],
-  "BHEL": [{"date": "2024-06-04", "kind": "real_move", "note": "General-election result day crash."}],
-  "HINDCOPPER": [{"date": "2024-06-04", "kind": "real_move", "note": "General-election result day crash."}],
-  "KAYNES": [{"date": "2024-06-04", "kind": "real_move", "note": "General-election result day crash."}],
-  "NATIONALUM": [{"date": "2024-06-04", "kind": "real_move", "note": "General-election result day crash."}],
-  "SAIL": [{"date": "2024-06-04", "kind": "real_move", "note": "General-election result day crash."}],
+  "BEL": [
+    {
+      "date": "2024-06-04",
+      "kind": "real_move",
+      "note": "General-election result day crash."
+    }
+  ],
+  "BHEL": [
+    {
+      "date": "2024-06-04",
+      "kind": "real_move",
+      "note": "General-election result day crash."
+    }
+  ],
+  "HINDCOPPER": [
+    {
+      "date": "2024-06-04",
+      "kind": "real_move",
+      "note": "General-election result day crash."
+    }
+  ],
+  "KAYNES": [
+    {
+      "date": "2024-06-04",
+      "kind": "real_move",
+      "note": "General-election result day crash."
+    },
+    {
+      "date": "2026-05-14",
+      "kind": "real_move",
+      "note": "Fell about 19% after Q4 FY26 results missed estimates; previous close Rs 4,177.85. Checked against news reports of that day."
+    }
+  ],
+  "NATIONALUM": [
+    {
+      "date": "2024-06-04",
+      "kind": "real_move",
+      "note": "General-election result day crash."
+    }
+  ],
+  "SAIL": [
+    {
+      "date": "2024-06-04",
+      "kind": "real_move",
+      "note": "General-election result day crash."
+    }
+  ],
   "TMPV": [
-    {"date": "2025-10-14", "kind": "demerger", "note": "Tata Motors demerger of the commercial-vehicle business; 14 Oct 2025 was the record date."}
+    {
+      "date": "2025-10-14",
+      "kind": "demerger",
+      "note": "Tata Motors demerger of the commercial-vehicle business; 14 Oct 2025 was the record date."
+    }
   ],
   "VEDL": [
-    {"date": "2026-04-30", "kind": "demerger", "note": "Vedanta demerger (-64.9%). Reviewed in the July 2026 rebuild; not adjusted by the data source."}
+    {
+      "date": "2026-04-30",
+      "kind": "demerger",
+      "note": "Vedanta demerger (-64.9%). Reviewed in the July 2026 rebuild; not adjusted by the data source."
+    }
+  ],
+  "TRENT": [
+    {
+      "date": "2026-01-01",
+      "kind": "bonus",
+      "note": "1-for-2 bonus issue, ex-date 2026-06-04 (ratio exactly 1.5). The data source adjusted its prices for the bonus only back to 2026-01-01, so the step appears on that date in stored history. Still present after a full re-download on 2026-11-19."
+    }
   ]
 }
