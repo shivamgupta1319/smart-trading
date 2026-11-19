@@ -92,7 +92,7 @@ def test_the_shipped_review_list_loads_and_is_well_formed():
     known = load_known_actions()
     assert known["VEDL"][0] == {"date": date(2026, 4, 30), "kind": "demerger",
                                 "note": known["VEDL"][0]["note"]}
-    assert {e["kind"] for entries in known.values() for e in entries} <= {"real_move", "demerger"}
+    assert {e["kind"] for entries in known.values() for e in entries} <= {"real_move", "demerger", "bonus"}
     assert not any(k.startswith("_") for k in known)
 
 
@@ -131,6 +131,24 @@ def test_real_moves_and_unlisted_stocks_are_never_scaled():
     df = _bars(idx, [(3380, 3400, 3350, 3382.8), (3300, 3320, 2700, 2756.4)])
     assert back_adjust(df, "ADANIENT", KNOWN) is df      # a crash stays a crash
     assert back_adjust(df, "RELIANCE", KNOWN) is df
+
+
+def test_a_bonus_step_the_source_did_not_carry_back_is_scaled_like_a_demerger():
+    # TRENT: 1-for-2 bonus, prices adjusted by the source only back to 2026-01-01.
+    known = {"TRENT": [{"date": date(2026, 1, 1), "kind": "bonus", "note": ""}]}
+    idx = pd.to_datetime(["2025-12-30", "2025-12-31", "2026-01-01", "2026-01-02"])
+    df = _bars(idx, [(4250, 4290, 4240, 4265), (4265, 4300, 4250, 4272.7), (2850, 2880, 2840, 2860.7), (2860, 2890, 2850, 2875)])
+    out = back_adjust(df, "TRENT", known)
+    assert out["Close"].iloc[1] == pytest.approx(2860.7)
+    assert price_jumps(out["Close"]) == []
+    assert unexplained_jumps("TRENT", df["Close"], known) == []
+
+
+def test_the_shipped_list_explains_every_move_that_was_flagged_in_november_2026():
+    load_known_actions.cache_clear()
+    known = load_known_actions()
+    assert {e["date"] for e in known["KAYNES"]} >= {date(2024, 6, 4), date(2026, 5, 14)}
+    assert known["TRENT"][0]["kind"] == "bonus" and known["TMPV"][0]["kind"] == "demerger"
 
 
 def test_a_frame_that_does_not_span_the_date_is_unchanged():

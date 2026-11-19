@@ -141,7 +141,7 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Reviewed demergers are scaled out when history is loaded (backtests and scanner)
 - [x] Flag shown on the Scorecard
 - [x] Whole series replaced when the data source has re-scaled its prices (split or dividend)
-- [x] The 27 flagged moves reviewed: 24 real market moves and 2 demergers listed. Two are left for the owner: TRENT 2026-01-01 (−33.0%, exactly a 1.5 ratio; a full re-download did not change it, so it is in the source data, most likely a corporate action the source did not adjust for) and KAYNES 2026-05-14 (−20.1%)
+- [x] The 27 flagged moves reviewed: 24 real market moves and 2 demergers listed. The last two were confirmed from news reports: KAYNES 2026-05-14 was a real fall after results; TRENT's step is its 1-for-2 bonus issue, which the data source carried back only to 2026-01-01 (listed as kind `bonus` and scaled out). No stock is flagged now
 
 ### 3. Honest numbers
 - [x] Slippage per share = the larger of one tick (₹0.05) and 5 basis points, in the engine and the API cost rule

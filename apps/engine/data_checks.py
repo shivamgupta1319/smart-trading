@@ -14,9 +14,9 @@ or a stitched price series produced confident, wrong numbers with no warning. Th
                      so each one must be reviewed and listed in config/known_price_actions.json.
                      A stock with an unlisted jump is flagged.
 
-3. `back_adjust`     For a reviewed demerger, earlier prices are scaled by the size of the
-                     step so indicators and backtests see one continuous series, the way a
-                     stock split is treated.
+3. `back_adjust`     For a reviewed demerger, or a bonus issue the source did not carry back
+                     through its history, earlier prices are scaled by the size of the step
+                     so indicators and backtests see one continuous series.
 
 `adjustment_shift` detects the other fault: the source re-scaled its whole history (a split
 or dividend), so newly fetched bars no longer line up with stored ones and the stored
@@ -41,7 +41,9 @@ MARKET_OPEN = time(9, 15)
 MARKET_CLOSE = time(15, 30)
 JUMP_LOG_RETURN = 0.20      # |ln(close / previous close)| above this needs review
 ADJUSTMENT_TOLERANCE = 0.005  # stored vs re-fetched closes differing by more than 0.5%
-KINDS = frozenset({"real_move", "demerger"})
+KINDS = frozenset({"real_move", "demerger", "bonus"})
+# Kinds where the price stepped without any change in value: earlier prices are scaled.
+STEP_KINDS = frozenset({"demerger", "bonus"})
 
 _HERE = Path(__file__).resolve().parent
 
@@ -151,7 +153,7 @@ def unexplained_jumps(symbol: str, daily_close: pd.Series, known: dict[str, list
 
 
 def back_adjust(df: pd.DataFrame, symbol: str, known: dict[str, list[dict]] | None = None) -> pd.DataFrame:
-    """Scale prices BEFORE each reviewed demerger by the size of the step on that day.
+    """Scale prices BEFORE each reviewed demerger or bonus step by the size of the step.
 
     The step is measured from the frame itself: the last close before the date against the
     first price on it (the close on daily bars; the open on intraday bars, so the day's own
@@ -159,7 +161,7 @@ def back_adjust(df: pd.DataFrame, symbol: str, known: dict[str, list[dict]] | No
     safe to call on every load. A frame that does not span the date is returned unchanged.
     """
     known = load_known_actions() if known is None else known
-    demergers = sorted(e["date"] for e in known.get(symbol.upper(), []) if e["kind"] == "demerger")
+    demergers = sorted(e["date"] for e in known.get(symbol.upper(), []) if e["kind"] in STEP_KINDS)
     if not demergers or df.empty or not isinstance(df.index, pd.DatetimeIndex):
         return df
     out = df

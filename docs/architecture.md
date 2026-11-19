@@ -191,9 +191,10 @@ condition before any switching rule is trusted.
   adjusted its history for a split or dividend; the stored series is replaced in full instead
   of being stitched across two scales.
 - *Price jumps:* a daily move above 20% must be listed in `config/known_price_actions.json` as
-  a `real_move` or a `demerger`. A stock with an unlisted move gets `Stock.dataFlag`.
-- *Demergers:* the data source does not adjust for them, so earlier prices are scaled by the
-  size of the step whenever history is loaded (backtests and the live scanner).
+  a `real_move`, a `demerger` or a `bonus`. A stock with an unlisted move gets `Stock.dataFlag`.
+- *Demergers and bonus steps:* where the data source did not adjust its history, earlier
+  prices are scaled by the size of the step whenever history is loaded (backtests and the
+  live scanner).
 `python tools/check_data.py` reports on every stock and refreshes the flags.
 
 **AI analysis.** Every AI call (market overview, stock, sector and indicator write-ups) goes
