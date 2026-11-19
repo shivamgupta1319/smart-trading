@@ -16,6 +16,8 @@ COPY --from=builder /app/apps/api/dist ./dist
 # Only production node_modules are copied
 COPY --from=builder /app/node_modules ./node_modules
 COPY apps/api/prisma ./prisma
+# Settings shared with the engine (read at start by common/shared-config.ts).
+COPY config ./config
 RUN npx prisma generate
 EXPOSE 3000
 CMD ["node", "dist/main.js"]

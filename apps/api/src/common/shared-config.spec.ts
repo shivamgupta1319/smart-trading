@@ -1,0 +1,45 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { roundTripCost } from './costs';
+import { BASE_CELL_CAPITAL, LEVERAGE_DELIVERY, LEVERAGE_INTRADAY, RISK_PER_TRADE_PCT } from './risk';
+import { riskPerTradeFraction, shared } from './shared-config';
+
+// The Python twin is apps/engine/test/test_shared_config.py — it asserts the SAME
+// golden numbers, which is what proves the two runtimes agree.
+const file = JSON.parse(
+  readFileSync(join(process.cwd(), 'config', 'trading.json'), 'utf8'),
+) as { capital: Record<string, number> };
+
+describe('shared trading config', () => {
+  afterEach(() => {
+    delete process.env.LEVERAGE_INTRADAY;
+    delete process.env.RISK_PER_TRADE_PCT;
+  });
+
+  it('API constants come from the file', () => {
+    expect(BASE_CELL_CAPITAL).toBe(file.capital.BASE_CELL_CAPITAL);
+    expect(LEVERAGE_INTRADAY).toBe(file.capital.LEVERAGE_INTRADAY);
+    expect(LEVERAGE_DELIVERY).toBe(file.capital.LEVERAGE_DELIVERY);
+    expect(RISK_PER_TRADE_PCT).toBe(file.capital.RISK_PER_TRADE_PCT);
+  });
+
+  it('golden costs match the Python twin', () => {
+    expect(roundTripCost(100000, 101000, 'INTRADAY')).toBeCloseTo(82.695246, 6);
+    expect(roundTripCost(10000, 10300, 'SHORT_SWING')).toBeCloseTo(37.2817338, 6);
+  });
+
+  it('an environment variable overrides the file', () => {
+    process.env.LEVERAGE_INTRADAY = '3';
+    expect(shared('LEVERAGE_INTRADAY')).toBe(3);
+  });
+
+  it('an unknown key is an error, not a silent default', () => {
+    expect(() => shared('NOT_A_REAL_SETTING')).toThrow();
+  });
+
+  it.each(['2', '0', '-0.02', '0.5'])('refuses a percent-style risk value (%s)', (bad) => {
+    process.env.RISK_PER_TRADE_PCT = bad;
+    expect(() => riskPerTradeFraction()).toThrow();
+  });
+});

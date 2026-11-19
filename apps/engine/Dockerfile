@@ -4,7 +4,7 @@ WORKDIR /app
 # Install build dependencies (if any are needed for wheels)
 RUN apt-get update && apt-get install -y --no-install-recommends gcc python3-dev && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY apps/engine/requirements.txt .
 # Build wheels for all dependencies
 RUN pip wheel --no-cache-dir --wheel-dir /app/wheels -r requirements.txt
 
@@ -20,7 +20,9 @@ COPY --from=builder /app/requirements.txt .
 RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt && \
     rm -rf /wheels
 
-COPY . .
+# Build context is the REPO ROOT so the shared settings file can be copied in.
+COPY apps/engine/ .
+COPY config/ ./config/
 
 # Prevent python from generating .pyc files in the container to save space
 ENV PYTHONDONTWRITEBYTECODE=1

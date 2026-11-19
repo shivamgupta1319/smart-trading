@@ -54,11 +54,15 @@ User → React → POST /api/engine/run-backtest (NestJS proxy)
 
 ### Live Alert Flow
 ```
-live_scanner.py (every 60s, 09:30–15:15 IST)
-→ 1. Evaluate Trailing SL, Partial Exits (35%, 40%), & Reversals (80%+)
-→ 2. fetch yfinance candles → run strategy (if > 09:30 AM)
-→ 3. signal detected → POST /api/signals/new (NestJS)
-→ save LiveSignal → Create Trade (Risk Mgmt 2%) 
+live_scanner.py (every 100s, new setups 09:30–15:00/15:15 IST)
+→ 1. Open trades: trailing stop, partial exits (35% + 35%), reversal exit (80%+), 15:15 square-off
+     stop-out booked at the WORSE of stop and live price; target booked at the target
+→ 2. fetch yfinance candles → run strategy on the last completed candle
+     strategy returned no signal column → "CANNOT EVALUATE" warning (not "no signal")
+→ 3. signal found → entry limits (INTRADAY: max 2 per cell per day, 30 min cooldown after an exit)
+     → entry priced at the LIVE quote; dropped if that is already outside stop..target
+→ 4. POST /api/signals/new (NestJS) → size the trade (see Capital model); 400 if one share cannot fit
+→ save LiveSignal → Create Trade
 → emit NEW_TRADE_ALERT (Socket.io) + Send Telegram Message
 → React: toast + audio + table update + Portfolio sync
 ```
@@ -121,8 +125,11 @@ WS    TRADE_UPDATE                      # CLOSED / PARTIAL / SL_UPDATED
 
 **Capital model (per-cell testing lab).** Each (stock × strategy) cell owns its own ₹10k
 fund (`BASE_CELL_CAPITAL`) that COMPOUNDS with that cell's realized P&L. A trade deploys
-`cellCapital × leverage` of notional (INTRADAY 5×, delivery/swing 1×), sized
-`qty = floor(cellCapital × leverage / entry)`. There is **no funding gate** — every
+`cellCapital × leverage` of notional (INTRADAY 5×, delivery/swing 1×), and is also bounded
+by a per-trade risk cap of `cellCapital × RISK_PER_TRADE_PCT` (2%):
+`qty = min(floor(notional / entry), floor(riskBudget / |entry − stop|))`. If that is 0 (one
+share already breaks a bound) the signal is rejected and the backtest skips it too
+(`position_qty` in the engine, `sizePosition` in the API). There is **no funding gate** — every
 selected-strategy signal is a real mock-money trade (the old FUNDED/SHADOW split and
 `Trade.fundingStatus` were removed). Leverage never changes the per-trade loss (the stop
 does) — only the deployed notional. `GET /api/trades/risk` reports
@@ -130,9 +137,25 @@ does) — only the deployed notional. `GET /api/trades/risk` reports
 (₹10k × open cells); `GET /api/trades/stats?window=<days>` returns `netPnl / investedNow /
 roiPct` plus, per (stock×strategy) cell, `cellCapital / cellRoiPct / expectancy /
 avgRMultiple / profitFactor / maxDrawdown / confidence / reliable`, and a `leaderboard` /
-`bestCell` ranked by fund growth. Constants live in `apps/api/src/common/risk.ts`
-(`BASE_CELL_CAPITAL`, `LEVERAGE_INTRADAY`, `LEVERAGE_DELIVERY`, `MAX_HEAT_PCT`,
-`MIN_TRADES_FOR_CONFIDENCE`).
+`bestCell` ranked by fund growth.
+
+**Shared settings.** `config/trading.json` is the one place the values both runtimes must
+agree on are defined: `BASE_CELL_CAPITAL`, `LEVERAGE_INTRADAY`, `LEVERAGE_DELIVERY`,
+`RISK_PER_TRADE_PCT` (a fraction: 0.02 = 2%) and every transaction-cost rate. The engine reads
+it through `apps/engine/shared_config.py`, the API through
+`apps/api/src/common/shared-config.ts`. An environment variable of the same name overrides a
+value; a missing key stops the service at start-up. Both images copy the file in, so the
+engine image builds from the repo root. Tests on each side assert the same golden cost
+figures. API-only constants (`MAX_HEAT_PCT`, `MIN_TRADES_FOR_CONFIDENCE`) stay in
+`apps/api/src/common/risk.ts`.
+
+**Fill model (backtest and live).** Backtest: entry at the next bar's open, stops and
+targets checked against each bar's high/low, a bar that opens beyond the stop fills at that
+open, costs and 5 bps slippage charged. Live: entry at the live quote when the signal is
+found, stop-outs at the worse of stop and live price, P&L booked after costs. Entry limits
+(`apps/engine/entry_limits.py`) and intraday exit rules (`apps/engine/intraday_exits.py`) are
+single modules imported by both paths. Known remaining difference: live polls every 100
+seconds, so a stop can be noticed late; the backtest books the stop level.
 
 **Scanner UX.** `/scanner` is split into two tabs: **Live Scanner** (connection status +
 active signals) and **Monitored Stocks** (a table of each monitored stock×strategy with its
