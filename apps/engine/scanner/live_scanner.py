@@ -168,6 +168,31 @@ def cell_activity_today(stock_id: int, strategy_name: str, now_ist: datetime):
     return trades_today, last_exit
 
 
+# Newest candle each cell has already been evaluated on: {(symbol, tf, strategy): timestamp}.
+last_evaluated = {}
+# How many just-completed candles to look back over when a cycle ran long.
+MAX_CATCHUP_BARS = 3
+
+
+def pick_signal_row(df: pd.DataFrame, previously_seen, max_catchup: int = MAX_CATCHUP_BARS):
+    """The candle to act on, or None.
+
+    First evaluation of a cell (previously_seen is None): only the newest completed
+    candle — never replay history on start-up. After that: the most recent signal
+    among candles completed since the last evaluation, looking back at most
+    `max_catchup` candles. The entry is still priced at the live quote and dropped
+    if price has already left stop..target, so a slightly older signal is safe.
+    """
+    if df.empty or 'signal' not in df.columns:
+        return None
+    if previously_seen is None:
+        window = df.iloc[[-1]]
+    else:
+        window = df[df.index > previously_seen].tail(max_catchup)
+    hits = window[window['signal'].fillna(0) != 0]
+    return hits.iloc[-1] if not hits.empty else None
+
+
 # Cells whose strategy could not evaluate today: {(symbol, strategy): date warned}.
 cannot_evaluate = {}
 
@@ -216,12 +241,17 @@ def check_and_fire_signal(config, cache, last_fired_times):
             warn_cannot_evaluate(symbol, strategy_name, timeframe, bars)
             return
         df = strategy._apply_bucket_target(df)  # bucket reward:risk override (matches backtest)
-        latest = df.iloc[-1]
-        candle_time = latest.name
-
-        if latest.get('signal', 0) == 0:
+        # Look at every candle completed since this cell was last evaluated, not just
+        # the newest one: a scan cycle can outlast a 5-minute candle, and a signal on
+        # a candle that completed mid-cycle used to be lost (the backtest takes it).
+        seen_key = (symbol, timeframe, strategy_name)
+        previously_seen = last_evaluated.get(seen_key)
+        last_evaluated[seen_key] = df.index[-1]
+        latest = pick_signal_row(df, previously_seen)
+        if latest is None:
             print(f"  [INFO] {symbol} ({strategy_name}): No signal")
             return
+        candle_time = latest.name
             
         # Prevent duplicate signals for the exact same candle. Keyed per STRATEGY:
         # keyed on (symbol, timeframe) alone, one strategy firing on a candle
@@ -262,6 +292,7 @@ def check_and_fire_signal(config, cache, last_fired_times):
         live_price = get_live_price(symbol)
         if not live_price:
             print(f"  [INFO] {symbol} ({strategy_name}): signal seen but no live price — retrying next poll")
+            last_evaluated[seen_key] = previously_seen  # so the next poll sees this candle again
             return
         entry_price = round(float(live_price), 2)
         stop_loss = round(float(latest.get('stop_loss', latest['Close'] * 0.98)), 2)

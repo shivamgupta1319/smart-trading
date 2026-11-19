@@ -54,5 +54,38 @@ def test_scanner_uses_these_rules():
     assert '"entryPrice": round(float(latest[\'Close\']), 2)' not in src
 
 
+# ── Scanner: candles completed between polls ─────────────────────────────────
+
+def _bars(signals):
+    import pandas as pd
+    idx = pd.date_range("2026-11-19 09:15", periods=len(signals), freq="5min")
+    return pd.DataFrame({"Close": 100.0, "signal": signals}, index=idx)
+
+
+def test_first_evaluation_only_looks_at_the_newest_candle():
+    from scanner.live_scanner import pick_signal_row
+    df = _bars([1, 0, 0])                       # an old signal must not replay on start-up
+    assert pick_signal_row(df, None) is None
+    assert pick_signal_row(_bars([0, 0, -1]), None)["signal"] == -1
+
+
+def test_a_signal_on_a_candle_completed_mid_cycle_is_not_lost():
+    from scanner.live_scanner import pick_signal_row
+    df = _bars([0, 0, 1, 0])                    # signal on the 09:25 candle; newest is 09:30
+    seen = df.index[1]                          # last cycle evaluated up to 09:20
+    row = pick_signal_row(df, seen)
+    assert row is not None and row.name == df.index[2]
+    # Already evaluated through the newest candle: nothing new to act on.
+    assert pick_signal_row(df, df.index[-1]) is None
+
+
+def test_catch_up_is_bounded_and_takes_the_most_recent_signal():
+    from scanner.live_scanner import pick_signal_row
+    df = _bars([1, 0, 0, 0, 0, 0])              # signal 5 candles back
+    assert pick_signal_row(df, df.index[0] - (df.index[1] - df.index[0])) is None   # outside the 3-candle window
+    df2 = _bars([0, 1, 0, -1, 0])
+    assert pick_signal_row(df2, df2.index[0])["signal"] == -1                        # newest of the two
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
