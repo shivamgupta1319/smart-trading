@@ -1,128 +1,112 @@
-# Progress Tracker
+# Progress — final product (one app on `main`)
 
-## Phase 0 — Setup & Documentation ✅
-- [x] plan.md analyzed
-- [x] implementation_plan.md created
-- [x] gemini.md created (at workspace root)
-- [x] docs/understanding.md created
-- [x] docs/architecture.md created
-- [x] docs/progress.md (this file)
-- [x] docs/ui-ux-flow.md created
-- [x] docs/edge-cases-and-verification.md created
-- [x] Nx monorepo initialized (`nx init`)
-- [x] NestJS API app generated (`apps/api`)
-- [x] React Frontend app generated (`apps/frontend`)
-- [x] docker-compose.yml created (postgres + api + engine + frontend)
+Started 2026-11-19. This file is the checklist for merging the two paper-trading apps
+(v1 = `roadmap-v1`, v2 = `roadmap-v2`) into one final product. Tick a line when its
+change is merged to `main`. The earlier phase history (Phases 0–8) is in
+[archive/progress-phases-0-8.md](archive/progress-phases-0-8.md).
 
-## Phase 1 — Database ✅
-- [x] Prisma schema (5 models: Stock, HistoricalData, BacktestReport, ActiveConfiguration, LiveSignal)
-- [x] Prisma v7 config (prisma.config.ts with pg adapter)
-- [x] Prisma client generated successfully
-- [ ] Run `prisma migrate dev` against live PostgreSQL (requires DB running)
+## Where we are going
 
-## Phase 2 — Python Engine ✅
-- [x] FastAPI app (main.py) with CORS
-- [x] requirements.txt (fastapi, uvicorn, pandas, pandas-ta, yfinance, sqlalchemy)
-- [x] db/client.py — SQLAlchemy sync engine
-- [x] routers/history.py — POST /api/engine/fetch-history (yfinance + upsert to DB)
-- [x] routers/backtest.py — POST /api/engine/run-backtest (load historical + run + save)
-- [x] strategies/base.py — Abstract strategy + backtest runner (equity curve simulation)
-- [x] Strategy 1: ORB 15m
-- [x] Strategy 2: VWAP + Supertrend (10,3)
-- [x] Strategy 3: 9/15 EMA + RSI
-- [x] Strategy 4: MACD Zero-Line Cross
-- [x] Strategy 5: Inside Bar Breakout
-- [x] Strategy 6: 44 SMA Pullback (Swing)
-- [x] Strategy 7: 200 EMA + MACD Golden Trend (Swing)
-- [x] Strategy 8: Bollinger Band Squeeze (Swing)
-- [x] Strategy 9: RSI Divergence (Swing)
-- [x] Strategy 10: 50/200 Golden Cross (Swing)
-- [x] scanner/live_scanner.py — 60s polling loop with IST market hours
-- [x] strategies/__init__.py — STRATEGY_REGISTRY and STRATEGY_TIMEFRAMES
+- One app, built on the v2 code, with v1's Dhan real-money layer, Telegram digests and
+  landing page brought over.
+- Deployed at `trading.pseo.cloud` from `main`. All other branches are removed at cutover.
+- Starts with a fresh database, then 3–6 months of paper trading before any real money.
+- Strategies keep running in paper. Only the three worst are removed.
 
-## Phase 3 — NestJS Backend ✅
-- [x] prisma/prisma.service.ts (with Prisma v7 pg adapter)
-- [x] prisma/prisma.module.ts
-- [x] stocks/ (CRUD — GET, POST, DELETE)
-- [x] configs/ (Upsert ActiveConfiguration)
-- [x] signals/signals.service.ts (with deduplication)
-- [x] signals/signals.controller.ts (POST /api/signals/new)
-- [x] signals/signals.gateway.ts (@WebSocketGateway — emits NEW_TRADE_ALERT)
-- [x] engine/engine.controller.ts (HTTP proxy to Python)
-- [x] app/app.module.ts (wires all modules)
-- [x] main.ts (CORS + ValidationPipe)
-- [x] **Build: ✅ NestJS compiles successfully**
+## Why (live data, 2026-11-19)
 
-## Phase 4 — React Frontend ✅
-- [x] styles/index.css — Dark terminal theme (Inter + JetBrains Mono)
-- [x] components/Navbar.tsx — With market status dot
-- [x] components/ToastNotification.tsx — Slide-in toast with BUY/SELL styling
-- [x] hooks/useSocket.ts — Socket.io client hook
-- [x] pages/BacktestArena.tsx — Stock management + history fetch + backtest + set active
-- [x] pages/LiveScanner.tsx — WebSocket feed + audio chime + toast + signals table
-- [x] app/app.tsx — React Router with Navbar
-- [x] **Build: ✅ React/Vite builds successfully (315KB JS, 10.37KB CSS)**
+Both apps were checked against their live databases (v1: 4,066 closed paper trades,
+v2: 337). The queries are in `infra/scripts/analysis/` and can be re-run at any time.
 
-- [x] Resolve PostgreSQL port mapping and initialize schema
-- [x] Start PostgreSQL: `docker compose up postgres -d`
-- [x] Run migrations: `prisma db push`
-- [x] Start API + Engine + Frontend (`docker compose up`)
-- [x] Test end-to-end data flow (Database -> Engine -> API -> Frontend)
-- [x] Fetch history, run backtest
-- [x] Set active strategy, start live scanner
-- [x] Verify WebSocket alert flow end-to-end
+| Finding | Evidence |
+|---|---|
+| A good backtest did not mean a good live result | v1: correlation between backtest ROI and live result = −0.06 (53 cells). v2: 58 cells picked for a strong backtest (about 12 backtest trades each) went from 55% wins in backtest to 17% live |
+| Too many combinations tested on too few trades | 1,832 stock × strategy combinations backtested; 110 added to the live roster on 2026-07-27 |
+| Swing trades only buy, and the market fell | Median stock: Aug −1.1%, Sep −5.6%, Oct −1.3%. v2 swing: −₹13,740 on 110 closed trades. Nothing checks the market before buying |
+| v1 does not charge costs | About ₹174 of charges per intraday trade, about ₹6.9 lakh in total, none of it booked |
+| No limit on re-entry | `EMA20_Pullback` traded about 3 times per stock per day: 1,557 trades, −₹6.56 lakh. The rest of v1 made about +₹5.05 lakh before costs |
+| Nothing switches a losing cell off | No automatic deactivation in either app |
+| Paper fills are not real fills | Entry is booked at an old candle's close; stops are booked at exactly the stop price; the backtest enters at the next bar's open |
+| Live results repeat | 22 cells with 20+ trades in each half of the period: correlation 0.84; all 9 positive cells stayed positive |
+| Trading with the market works better | v1 intraday: 0.215R per trade with the market (361 trades) vs 0.049R against it (306 trades) |
 
-## Phase 5 — Enhancements & Optimizations ✅
-- [x] Fix Pandas-TA column name mismatches in Bollinger Bands and Supertrend
-- [x] Optimize Dockerfile build sizes (Frontend < 100MB, API ~800MB, Engine ~700MB)
-- [x] Convert ActiveConfiguration to support multiple live strategies per stock
-- [x] Seed NSE Stocks into Database for auto-complete
-- [x] Update UI flows to remove unnecessary forms and optimize UX
+Positive after costs so far: `MACD_Zero`, `SMC_FVG`, `RVOL_ORB`, `VWAP_MACD_RSI`,
+`Inside_Bar`, `PDH_PDL_Breakout`.
 
-## Phase 6 — Advanced Features ✅
-- [x] Integrate `lightweight-charts` for Interactive Candlestick Charts with Indicators (EMA, BB, Volume)
-- [x] Add `/api/engine/chart-data/{symbol}` endpoint to stream chart history & indicators
-- [x] Auto-position sizing & 2% risk management model implemented in SignalsService
-- [x] Full Portfolio Tracking & Trade Journal implementation (Trades and P&L Tracking)
-- [x] Trade classification by `holdDuration` (`INTRADAY`, `SHORT_SWING`, `MID_SWING`, `LONG_POSITIONAL`)
-- [x] Global Telegram Bot Alert system integration for Signals and Exits
-- [x] Fix TypeScript compilation errors (Strict Property Init & lightweight-charts v5 migration)
+## Phase 0 — Safety and baseline
 
-## Phase 7 — Stabilization & Risk Framework ✅
-- [x] 3-Phase Partial Exit Framework Integration (Breakeven -> 35% at 50% -> 40% at 75%)
-- [x] Quantity restrictions on partial exits (Minimum 3 shares required)
-- [x] Layer 3 Reversal Detection Engine (Pin bar, Engulfing, Volume, RSI divergence after 80% progress)
-- [x] Market Time-Gate Enforcement (9:30 AM Setup Block, 3:00 PM Intraday Block, 3:15 PM Square-off)
-- [x] Zombie Trade Prevention (Cascading partial close to full close on 0 remaining shares)
-- [x] Exact P&L Calculation Fixes (incorporating `realizedPnl` and `remainingQty`)
-- [x] Telegram Notifications for all lifecycles (Trailing SL, Partial Close, Reversal, Trade Closed)
+- [x] Back up both databases on work-pc (`~/backups/smart_trading-v{1,2}-pre-final-merge-20261119.sql.gz`)
+- [x] Save the analysis queries in `infra/scripts/analysis/`
+- [x] New progress tracker (this file); old one archived
+- [ ] `main` fast-forwarded to `roadmap-v2` and pushed
+- [ ] Owner: rotate the Telegram bot token that is committed in `docker-compose.prod.yml` on `roadmap-v1`
 
-## Phase 8 — Trust & correctness audit + auto-select hardening ✅ (2026-07-13)
-> Full report: [agent-reports/2026-07-13-trust-and-correctness-audit.md](agent-reports/2026-07-13-trust-and-correctness-audit.md)
-- [x] Audited docs + live data (174 closed trades) + engine/API code for trust & correctness
-- [x] Pruned chronic losers from live scanning — DMA20_Pullback, Fibonacci_Golden_Zone, Volume_Profile_POC (9 cells, 77→68 active); recorded in `infra/scripts/hygiene-prune-losers.sql`
-- [x] Backtest de-inflation: `BT_CAP_POSITION_VALUE` caps position notional so compounding no longer inflates ROI (2458%→358% on a test cell); NET `avgRMultiple` added to metrics
-- [x] Auto-select hardened: rank by NET avg-R (not ROI/DD); gates tightened (maxDD 40→25%, PF 1.05→1.3, OOS folds 40→60%, walk-forward consistency ON, new min-avg-R gate); drops forming tail bar for determinism
-- [x] Persistent `AUTOSELECT_DENYLIST` so manually-pruned losers are never re-promoted (wired through compose env)
-- [x] Portfolio "Invested Now" now shows deployed **margin**, not leveraged notional
-- [x] Verified via read-only dry-run auto-select (6 quality picks / 31 strategies) + `/api/trades/stats`
-- [ ] **Phase C (open):** backtest↔live exit parity — fix dead live swing trail (daily candles), book live P&L net of costs, reconcile intraday exits. Until done, auto-select undervalues intraday winners.
-- [ ] **FEAT-002 (open):** BREAKEVEN band (scratches booked WIN), `realizedPnl` column gap, per-trade `pnlPercent` uses notional not margin.
+## Phase 1 — Truthful fills, and backtest = live
 
-> ⚠️ **Phases 0–7 above describe the original v1 prototype** and are partly stale (ports 3000/8000/5173,
-> the "3-phase partial exit" framing — the live intraday loop actually does breakeven + candle-trail +
-> reversal + 15:15 square-off; ₹1L/2%-risk model replaced by the per-cell ₹10k compounding fund).
-> For the **current** system see [architecture.md](architecture.md) and [work-pc-deployment.md](work-pc-deployment.md).
+- [ ] Live entry booked at the live price when the signal is found, not an old candle close
+- [ ] Stop and target exits booked at the worse of the level and the live price
+- [ ] Backtest: a stop that price gaps through fills at the open, not at the stop
+- [ ] Backtest and live check exits in the same order (stop first)
+- [ ] Cooldown and maximum trades per day for each cell, in both scanner and backtest
+- [ ] Scanner dedupe key includes the strategy (today two strategies on one stock can block each other)
+- [ ] A trade that cannot be sized inside the risk cap is skipped, not forced to 1 share
+- [ ] A strategy with too little data fails loudly instead of quietly giving no signal
+- [ ] One shared config file for risk, leverage, costs and exit rules, read by engine and API
+- [ ] Parity test: one day of stored candles gives the same trades in scanner and backtest
 
-## What's Running (current — v2 on work-pc)
-- **v2 host ports:** frontend `5174`, api `3001`, engine `8001`, postgres `5471` (v1 holds 3000/8000/5173/5470)
-- **Deploy:** build+push on dev PC (`infra/scripts/build-and-push.sh`), pull+run on work-pc (`infra/scripts/deploy.sh`)
-- **6 services:** db, api, engine, frontend, scanner, scheduler (scanner+scheduler share the engine image)
-- Public: `https://trading-v2.pseo.cloud` (basic-auth) — see [work-pc-deployment.md](work-pc-deployment.md)
+## Phase 2 — Strategy cleanup and fresh backtest
 
-### Historical dev commands (v1 prototype)
-- **NestJS**: `npx nx serve api` (port 3000)
-- **Python Engine**: `uvicorn main:app --reload` in apps/engine (port 8000)
-- **React**: `npx nx serve frontend` (port 5173)
-- **Live Scanner**: `python apps/engine/scanner/live_scanner.py`
-- **All Docker**: `docker-compose up`
+- [ ] Remove `EMA20_Pullback`, `Volume_Profile_POC`, `VWAP_Supertrend`
+- [ ] Fix `Gap_And_Go` (cannot fire live today)
+- [ ] Fix `Fibonacci_Golden_Zone` (does not check trend direction)
+- [ ] Fix `RSI_Divergence` (fires on every bar while true)
+- [ ] Fix `BB_Squeeze` (measures the squeeze on the breakout bar)
+- [ ] Fix `MTF_Alignment` (crashes in backtest)
+- [ ] `Bollinger_Mean_Reversion`, `Channel_Oscillation`: keep the strategy's own target
+- [ ] `docs/strategies.md`: one rule sheet per strategy with its status and reason
+- [ ] Price-jump check on stored history (demerger and split cliffs)
+- [ ] Walk-forward folds get warm-up data
+- [ ] Re-run all backtests on latest data; use only as a first filter (drop clearly broken cells)
+- [ ] Fresh roster on a fixed list of liquid stocks
+
+## Phase 3 — Cell lifecycle and scorecard
+
+- [ ] Cell status: `TESTING` → `PROVEN` → `PAUSED`, with the reason stored
+- [ ] Automatic pause for cells that keep losing; paused cells continue in a test book
+- [ ] Scorecard page: backtest next to live, costs, status, reason for every cell
+
+## Phase 4 — Market condition ("smart switching")
+
+- [ ] Stage A: every trade stamped with the market condition at entry
+- [ ] Stage B: rule table (strategy × condition); Portfolio shows "all trades" and "switch-approved" books
+- [ ] Stage C: weekly/monthly analyst report that proposes rule changes and new strategies
+
+## Phase 5 — Bring over v1's parts
+
+- [ ] Dhan service and its tables (mode stays `off`)
+- [ ] Telegram daily and weekly digests
+- [ ] Landing page at `/`
+- [ ] Dhan fixes: risk-cap settings passed through compose; `off` must not block exits on open positions; token failure alert
+
+## Phase 6 — Cutover
+
+- [ ] Final stack on work-pc from `main`, fresh database, served at `trading.pseo.cloud`
+- [ ] v1 and v2 stacks stopped; `trading-v2.pseo.cloud` retired
+- [ ] Old branch tips tagged `archive/*`, then all branches except `main` deleted
+- [ ] `smart-trading-v2` worktree removed
+- [ ] README rewritten; old docs moved to `docs/archive/`; single `docs/HANDOFF.md`
+
+## Phase 7 — New strategies (each discussed first)
+
+- [ ] Opening-range breakout only in the market's direction
+- [ ] Relative-strength long / relative-weakness short against NIFTY
+- [ ] EMA20 pullback rebuilt (first pullback after a breakout, once a day)
+- [ ] First VWAP reclaim or rejection of the day, with volume
+- [ ] Swing: 52-week-high breakout with volume, only when the market is up
+- [ ] Swing: relative-strength momentum basket
+
+## Not yet verified
+
+- Whether the 2% risk-cap setting is correct on work-pc.
+- What price live daily (1D) entries are really booked at.
+- The market-direction result covers about 940 trades; 1,485 had no 15-minute data.
