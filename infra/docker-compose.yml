@@ -1,22 +1,22 @@
-# smart-trading-v2 — pull-based stack for work-pc (images from Docker Hub).
+# smart-trading — pull-based stack for work-pc (images from Docker Hub).
 # Engine code is baked into the image, so the dev bind-mount is dropped. All config from infra/.env.
 # Whole stack (incl. scanner + scheduler) starts/stops together:
 #   up:  docker compose up -d      down:  docker compose down
-name: smart-trading-v2
+name: smart-trading
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: smart-trading-v2-db
+    container_name: smart-trading-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "${DB_PORT:-5471}:5432"
+      - "${DB_PORT:-5470}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata_final:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -24,12 +24,12 @@ services:
       retries: 5
 
   api:
-    image: shivam13gupta/smart-trading-v2-api:latest
+    image: shivam13gupta/smart-trading-api:latest
     pull_policy: always
-    container_name: smart-trading-v2-api
+    container_name: smart-trading-api
     restart: unless-stopped
     ports:
-      - "${API_PORT:-3001}:3000"
+      - "${API_PORT:-3000}:3000"
     environment:
       DATABASE_URL: ${DATABASE_URL}
       ENGINE_URL: http://engine:8000
@@ -39,7 +39,7 @@ services:
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-true}
       API_KEY: ${API_KEY}
       APP_PIN: ${APP_PIN:-}
-      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5174,https://trading-v2.pseo.cloud}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,https://trading.pseo.cloud}"
       # Book live P&L net of Indian transaction costs (matches the backtest). Set
       # false to revert to gross booking. See apps/api/src/common/costs.ts.
       LIVE_COSTS_ENABLED: ${LIVE_COSTS_ENABLED:-true}
@@ -48,19 +48,19 @@ services:
         condition: service_healthy
 
   engine:
-    image: shivam13gupta/smart-trading-v2-engine:latest
+    image: shivam13gupta/smart-trading-engine:latest
     pull_policy: always
-    container_name: smart-trading-v2-engine
+    container_name: smart-trading-engine
     restart: unless-stopped
     ports:
-      - "${ENGINE_PORT:-8001}:8000"
+      - "${ENGINE_PORT:-8000}:8000"
     environment:
       DATABASE_URL: ${DATABASE_URL}
       NESTJS_SIGNAL_URL: http://api:3000/api/signals/new
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       API_KEY: ${API_KEY}
-      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5174,https://trading-v2.pseo.cloud}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:5173,https://trading.pseo.cloud}"
       # Auto-select persistent denylist (strategies / SYMBOL|STRATEGY cells never re-promoted).
       AUTOSELECT_DENYLIST: ${AUTOSELECT_DENYLIST:-}
       # Swing time-stop DISABLED (0). The 2026-07-15 V1-vs-V2 attribution measured it at
@@ -84,22 +84,24 @@ services:
         condition: service_healthy
 
   frontend:
-    image: shivam13gupta/smart-trading-v2-frontend:latest
+    image: shivam13gupta/smart-trading-frontend:latest
     pull_policy: always
-    container_name: smart-trading-v2-frontend
+    container_name: smart-trading-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-5174}:5173"   # nginx: SPA + proxies /api + /socket.io to api
+      - "${FRONTEND_PORT:-5173}:5173"   # nginx: SPA + proxies /api + /socket.io to api
     depends_on:
       - api
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ${HTPASSWD_FILE:-../../edge/.htpasswd}:/etc/nginx/.htpasswd:ro
+      # Public landing page served at / (see nginx/default.conf).
+      - ./landing:/usr/share/nginx/landing:ro
 
   scanner:
-    image: shivam13gupta/smart-trading-v2-engine:latest
+    image: shivam13gupta/smart-trading-engine:latest
     pull_policy: always
-    container_name: smart-trading-v2-scanner
+    container_name: smart-trading-scanner
     restart: unless-stopped
     command: python scanner/live_scanner.py
     environment:
@@ -124,9 +126,9 @@ services:
         condition: service_started
 
   scheduler:
-    image: shivam13gupta/smart-trading-v2-engine:latest
+    image: shivam13gupta/smart-trading-engine:latest
     pull_policy: always
-    container_name: smart-trading-v2-scheduler
+    container_name: smart-trading-scheduler
     restart: unless-stopped
     command: python scheduler/fetch_scheduler.py
     environment:
@@ -140,4 +142,6 @@ services:
         condition: service_healthy
 
 volumes:
-  postgres_data:
+  # New volume for the merged product (2026-11). The volumes of the two earlier
+  # stacks are not referenced here and stay on the host until removed by hand.
+  pgdata_final:

@@ -2,7 +2,7 @@
 set -euo pipefail
 # ─────────────────────────────────────────────────────────────────────────────
 # RUN ON DEV PC. Build all smart-trading-v2 images from source and push to
-# Docker Hub as shivam13gupta/smart-trading-v2-{api,engine,frontend}. work-pc then
+# Docker Hub as shivam13gupta/smart-trading-{api,engine,frontend}. work-pc then
 # only pulls them (infra/scripts/deploy.sh) — no source/Node/Python needed there.
 #
 # NOTE ON DOCKER ACCOUNTS: the default docker login on this dev PC is a DIFFERENT
@@ -15,9 +15,9 @@ set -euo pipefail
 # so rebuilding/pushing `engine` is all that is needed to update them too.
 # ─────────────────────────────────────────────────────────────────────────────
 
-IMAGE_API="${APP_IMAGE_API:-shivam13gupta/smart-trading-v2-api}"
-IMAGE_ENGINE="${APP_IMAGE_ENGINE:-shivam13gupta/smart-trading-v2-engine}"
-IMAGE_FRONTEND="${APP_IMAGE_FRONTEND:-shivam13gupta/smart-trading-v2-frontend}"
+IMAGE_API="${APP_IMAGE_API:-shivam13gupta/smart-trading-api}"
+IMAGE_ENGINE="${APP_IMAGE_ENGINE:-shivam13gupta/smart-trading-engine}"
+IMAGE_FRONTEND="${APP_IMAGE_FRONTEND:-shivam13gupta/smart-trading-frontend}"
 TAG="${TAG:-latest}"
 PLATFORM="${PLATFORM:-linux/amd64}"                  # work-pc is x86_64
 DOCKER_CFG="${DOCKER_CFG:-$HOME/.docker-account2}"   # logged in as shivam13gupta; keeps default login untouched
