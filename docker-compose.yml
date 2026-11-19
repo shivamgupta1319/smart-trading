@@ -56,8 +56,8 @@ services:
 
   engine:
     build:
-      context: apps/engine
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/engine/Dockerfile
     container_name: smart-trading-v2-engine
     restart: unless-stopped
     ports:
@@ -82,6 +82,7 @@ services:
         condition: service_healthy
     volumes:
       - ./apps/engine:/app
+      - ./config:/app/config:ro
 
   frontend:
     build:
@@ -102,8 +103,8 @@ services:
   # Live scanner — posts signals + Telegram alerts during NSE market hours.
   scanner:
     build:
-      context: apps/engine
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/engine/Dockerfile
     container_name: smart-trading-v2-scanner
     restart: unless-stopped
     command: python scanner/live_scanner.py
@@ -124,13 +125,14 @@ services:
         condition: service_started
     volumes:
       - ./apps/engine:/app
+      - ./config:/app/config:ro
 
   # Historical-data fetch scheduler — runs a daily after-close fetch of all
   # active stocks so the backtest dataset grows.
   scheduler:
     build:
-      context: apps/engine
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/engine/Dockerfile
     container_name: smart-trading-v2-scheduler
     restart: unless-stopped
     command: python scheduler/fetch_scheduler.py
@@ -145,6 +147,7 @@ services:
         condition: service_healthy
     volumes:
       - ./apps/engine:/app
+      - ./config:/app/config:ro
 
 volumes:
   postgres_data:

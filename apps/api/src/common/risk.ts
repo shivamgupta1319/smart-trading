@@ -1,4 +1,5 @@
-/** Shared capital/risk constants (single source of truth). */
+/** Capital/risk constants. Values shared with the engine come from config/trading.json. */
+import { riskPerTradeFraction, shared } from './shared-config';
 
 // Per-cell fund model (strategy-testing lab): every (stock × strategy) cell owns its own
 // ₹10,000 fund that COMPOUNDS with that cell's realized P&L, so each cell's growth is a
@@ -6,14 +7,14 @@
 // cellCapital × leverage worth of notional. There is no shared bankroll and no funding
 // gate — every selected-strategy signal is a real mock-money trade. MUST match the
 // engine's per-cell slot in backtest_config.py (BT slot = ₹10,000, compounding).
-export const BASE_CELL_CAPITAL = Number(process.env.BASE_CELL_CAPITAL || 10000); // ₹10,000 seed per cell
+export const BASE_CELL_CAPITAL = shared('BASE_CELL_CAPITAL'); // ₹10,000 seed per cell
 export const MIN_CELL_CAPITAL = Number(process.env.MIN_CELL_CAPITAL || 500); // floor so a blown-up cell can still size ≥1 share
 
 // Intraday (MIS) gives ~5× buying power; delivery/swing (CNC) uses full cash (1×). Here
 // leverage multiplies the deployed NOTIONAL (cellCapital × leverage), so an intraday cell
 // deploys ~₹50k while a swing cell deploys ~₹10k off the same ₹10k fund.
-export const LEVERAGE_INTRADAY = Number(process.env.LEVERAGE_INTRADAY || 5);
-export const LEVERAGE_DELIVERY = Number(process.env.LEVERAGE_DELIVERY || 1);
+export const LEVERAGE_INTRADAY = shared('LEVERAGE_INTRADAY');
+export const LEVERAGE_DELIVERY = shared('LEVERAGE_DELIVERY');
 
 // Per-trade risk cap (FEAT-005). Notional sizing alone lets a wide-stop trade risk multiples
 // of a tight-stop one on the same fund — the payoff-ratio leak (avg ₹-loss > avg ₹-win) from
@@ -22,7 +23,7 @@ export const LEVERAGE_DELIVERY = Number(process.env.LEVERAGE_DELIVERY || 1);
 //   qty = max(1, min(floor(notionalBudget/entry), floor(riskBudget/riskPerShare)))
 // MUST match the engine's RISK_PER_TRADE_PCT in apps/engine/backtest_config.py, or the
 // backtest stops predicting live (same parity invariant as leverage/costs).
-export const RISK_PER_TRADE_PCT = Number(process.env.RISK_PER_TRADE_PCT || 0.02); // 2% of the cell fund
+export const RISK_PER_TRADE_PCT = riskPerTradeFraction(); // fraction of the cell fund (0.02 = 2%)
 
 /** Rupees a single trade may risk = cell fund × RISK_PER_TRADE_PCT. */
 export const riskBudgetFor = (cellCapital: number): number => cellCapital * RISK_PER_TRADE_PCT;

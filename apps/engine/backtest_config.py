@@ -16,6 +16,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from shared_config import shared, risk_per_trade_fraction
+
 
 def _f(name: str, default: float) -> float:
     try:
@@ -39,17 +41,17 @@ ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.11.19-sizing")
 
 
 # Buying-power multiple by hold bucket. Intraday (MIS) deploys ~5× the cell fund as
-# notional; swing/delivery (CNC) uses the fund 1×. MUST match apps/api/src/common/risk.ts.
-LEVERAGE_INTRADAY = _f("LEVERAGE_INTRADAY", 5.0)
-LEVERAGE_DELIVERY = _f("LEVERAGE_DELIVERY", 1.0)
+# notional; swing/delivery (CNC) uses the fund 1×. Shared with the API: config/trading.json.
+LEVERAGE_INTRADAY = shared("LEVERAGE_INTRADAY")
+LEVERAGE_DELIVERY = shared("LEVERAGE_DELIVERY")
 
 # Per-trade risk cap (FEAT-005). Sizing is notional (fund × leverage / entry), which lets a
 # wide-stop trade risk multiples of a tight-stop one on the same fund — the payoff-ratio leak
 # (avg ₹-loss > avg ₹-win) documented in agent-reports/2026-07-14-avg-loss-gt-avg-win-audit.md.
 # We add a second bound: each trade risks at most `fund × RISK_PER_TRADE_PCT` rupees, i.e.
-# qty = max(1, min(notionalQty, floor(fund × pct / |entry−stop|))). MUST match the value in
-# apps/api/src/common/risk.ts (RISK_PER_TRADE_PCT) or backtest≠live sizing breaks.
-RISK_PER_TRADE_PCT = _f("RISK_PER_TRADE_PCT", 0.02)  # 2% of the cell fund (₹200 on a ₹10k seed)
+# qty = min(notionalQty, floor(fund × pct / |entry−stop|)); 0 → the trade is skipped.
+# Shared with the API (config/trading.json); a fraction, 0.02 = 2% (₹200 on a ₹10k seed).
+RISK_PER_TRADE_PCT = risk_per_trade_fraction()
 
 
 @dataclass(frozen=True)
@@ -109,30 +111,31 @@ class CostProfile:
     dp_charge_per_sell: float  # flat rupee fee per delivery (CNC) sell, incl. GST
 
 
-# Approximate NSE discount-broker schedules (as of ~2025-26). Tunable via env.
+# Approximate NSE discount-broker schedules (as of ~2025-26). Values are shared with
+# the API's costs.ts through config/trading.json; env vars of the same name override.
 INTRADAY_PROFILE = CostProfile(
-    brokerage_pct=_f("BT_INTRADAY_BROKERAGE_PCT", 0.03),
-    brokerage_flat_cap=_f("BT_BROKERAGE_FLAT_CAP", 20.0),
-    stt_buy_pct=_f("BT_INTRADAY_STT_BUY_PCT", 0.0),
-    stt_sell_pct=_f("BT_INTRADAY_STT_SELL_PCT", 0.025),
-    exchange_txn_pct=_f("BT_EXCHANGE_TXN_PCT", 0.00297),
-    sebi_pct=_f("BT_SEBI_PCT", 0.0001),
-    stamp_buy_pct=_f("BT_INTRADAY_STAMP_BUY_PCT", 0.003),
-    gst_pct=_f("BT_GST_PCT", 18.0),
+    brokerage_pct=shared("BT_INTRADAY_BROKERAGE_PCT"),
+    brokerage_flat_cap=shared("BT_BROKERAGE_FLAT_CAP"),
+    stt_buy_pct=shared("BT_INTRADAY_STT_BUY_PCT"),
+    stt_sell_pct=shared("BT_INTRADAY_STT_SELL_PCT"),
+    exchange_txn_pct=shared("BT_EXCHANGE_TXN_PCT"),
+    sebi_pct=shared("BT_SEBI_PCT"),
+    stamp_buy_pct=shared("BT_INTRADAY_STAMP_BUY_PCT"),
+    gst_pct=shared("BT_GST_PCT"),
     dp_charge_per_sell=0.0,  # no delivery leg for intraday (MIS) — no DP charge
 )
 
 DELIVERY_PROFILE = CostProfile(
-    brokerage_pct=_f("BT_DELIVERY_BROKERAGE_PCT", 0.0),  # many brokers: free CNC
-    brokerage_flat_cap=_f("BT_BROKERAGE_FLAT_CAP", 20.0),
-    stt_buy_pct=_f("BT_DELIVERY_STT_BUY_PCT", 0.1),
-    stt_sell_pct=_f("BT_DELIVERY_STT_SELL_PCT", 0.1),
-    exchange_txn_pct=_f("BT_EXCHANGE_TXN_PCT", 0.00297),
-    sebi_pct=_f("BT_SEBI_PCT", 0.0001),
-    stamp_buy_pct=_f("BT_DELIVERY_STAMP_BUY_PCT", 0.015),
-    gst_pct=_f("BT_GST_PCT", 18.0),
+    brokerage_pct=shared("BT_DELIVERY_BROKERAGE_PCT"),  # many brokers: free CNC
+    brokerage_flat_cap=shared("BT_BROKERAGE_FLAT_CAP"),
+    stt_buy_pct=shared("BT_DELIVERY_STT_BUY_PCT"),
+    stt_sell_pct=shared("BT_DELIVERY_STT_SELL_PCT"),
+    exchange_txn_pct=shared("BT_EXCHANGE_TXN_PCT"),
+    sebi_pct=shared("BT_SEBI_PCT"),
+    stamp_buy_pct=shared("BT_DELIVERY_STAMP_BUY_PCT"),
+    gst_pct=shared("BT_GST_PCT"),
     # Dhan: ₹12.50 + 18% GST ≈ ₹14.75 per ISIN per day on every CNC sell (flat, not turnover-based).
-    dp_charge_per_sell=_f("BT_DP_CHARGE_PER_DELIVERY_SELL", 14.75),
+    dp_charge_per_sell=shared("BT_DP_CHARGE_PER_DELIVERY_SELL"),
 )
 
 

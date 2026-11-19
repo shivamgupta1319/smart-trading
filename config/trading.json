@@ -1,0 +1,30 @@
+{
+  "_readme": [
+    "Trading settings shared by the Python engine and the NestJS API.",
+    "This file is the ONLY place the defaults live. Both runtimes read it at start.",
+    "An environment variable with the same name overrides a value (for experiments).",
+    "Percent fields ending in _PCT under 'costs' are percentages (0.03 = 0.03%).",
+    "RISK_PER_TRADE_PCT is a FRACTION of the cell fund (0.02 = 2%), never 2."
+  ],
+  "capital": {
+    "BASE_CELL_CAPITAL": 10000,
+    "LEVERAGE_INTRADAY": 5,
+    "LEVERAGE_DELIVERY": 1,
+    "RISK_PER_TRADE_PCT": 0.02
+  },
+  "costs": {
+    "BT_BROKERAGE_FLAT_CAP": 20,
+    "BT_EXCHANGE_TXN_PCT": 0.00297,
+    "BT_SEBI_PCT": 0.0001,
+    "BT_GST_PCT": 18,
+    "BT_INTRADAY_BROKERAGE_PCT": 0.03,
+    "BT_INTRADAY_STT_BUY_PCT": 0,
+    "BT_INTRADAY_STT_SELL_PCT": 0.025,
+    "BT_INTRADAY_STAMP_BUY_PCT": 0.003,
+    "BT_DELIVERY_BROKERAGE_PCT": 0,
+    "BT_DELIVERY_STT_BUY_PCT": 0.1,
+    "BT_DELIVERY_STT_SELL_PCT": 0.1,
+    "BT_DELIVERY_STAMP_BUY_PCT": 0.015,
+    "BT_DP_CHARGE_PER_DELIVERY_SELL": 14.75
+  }
+}

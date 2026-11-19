@@ -60,7 +60,7 @@ build_push() {
 for t in "${TARGETS[@]}"; do
   case "$t" in
     api)      build_push "$IMAGE_API"      "apps/api/Dockerfile"      "." ;;
-    engine)   build_push "$IMAGE_ENGINE"   "apps/engine/Dockerfile"   "apps/engine" ;;
+    engine)   build_push "$IMAGE_ENGINE"   "apps/engine/Dockerfile"   "." ;;
     frontend) build_push "$IMAGE_FRONTEND" "apps/frontend/Dockerfile" "." ;;
     *) echo "unknown target: $t (expected api|engine|frontend)"; exit 2 ;;
   esac

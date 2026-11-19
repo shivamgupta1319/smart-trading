@@ -9,10 +9,7 @@
  * transaction costs (brokerage/STT/exchange/SEBI/stamp/GST) are subtracted.
  */
 
-const num = (name: string, def: number): number => {
-  const v = Number(process.env[name]);
-  return Number.isFinite(v) ? v : def;
-};
+import { shared } from './shared-config';
 
 interface CostProfile {
   brokeragePct: number; // % of turnover per side
@@ -28,29 +25,29 @@ interface CostProfile {
 
 // MIS-style: STT on sell only, higher intraday stamp. Matches INTRADAY_PROFILE.
 const INTRADAY_PROFILE: CostProfile = {
-  brokeragePct: num('BT_INTRADAY_BROKERAGE_PCT', 0.03),
-  brokerageFlatCap: num('BT_BROKERAGE_FLAT_CAP', 20.0),
-  sttBuyPct: num('BT_INTRADAY_STT_BUY_PCT', 0.0),
-  sttSellPct: num('BT_INTRADAY_STT_SELL_PCT', 0.025),
-  exchangeTxnPct: num('BT_EXCHANGE_TXN_PCT', 0.00297),
-  sebiPct: num('BT_SEBI_PCT', 0.0001),
-  stampBuyPct: num('BT_INTRADAY_STAMP_BUY_PCT', 0.003),
-  gstPct: num('BT_GST_PCT', 18.0),
+  brokeragePct: shared('BT_INTRADAY_BROKERAGE_PCT'),
+  brokerageFlatCap: shared('BT_BROKERAGE_FLAT_CAP'),
+  sttBuyPct: shared('BT_INTRADAY_STT_BUY_PCT'),
+  sttSellPct: shared('BT_INTRADAY_STT_SELL_PCT'),
+  exchangeTxnPct: shared('BT_EXCHANGE_TXN_PCT'),
+  sebiPct: shared('BT_SEBI_PCT'),
+  stampBuyPct: shared('BT_INTRADAY_STAMP_BUY_PCT'),
+  gstPct: shared('BT_GST_PCT'),
   dpChargePerSell: 0.0, // no delivery leg for intraday (MIS) — no DP charge
 };
 
 // CNC-style: STT both sides, brokerage often free, higher stamp. Matches DELIVERY_PROFILE.
 const DELIVERY_PROFILE: CostProfile = {
-  brokeragePct: num('BT_DELIVERY_BROKERAGE_PCT', 0.0),
-  brokerageFlatCap: num('BT_BROKERAGE_FLAT_CAP', 20.0),
-  sttBuyPct: num('BT_DELIVERY_STT_BUY_PCT', 0.1),
-  sttSellPct: num('BT_DELIVERY_STT_SELL_PCT', 0.1),
-  exchangeTxnPct: num('BT_EXCHANGE_TXN_PCT', 0.00297),
-  sebiPct: num('BT_SEBI_PCT', 0.0001),
-  stampBuyPct: num('BT_DELIVERY_STAMP_BUY_PCT', 0.015),
-  gstPct: num('BT_GST_PCT', 18.0),
+  brokeragePct: shared('BT_DELIVERY_BROKERAGE_PCT'),
+  brokerageFlatCap: shared('BT_BROKERAGE_FLAT_CAP'),
+  sttBuyPct: shared('BT_DELIVERY_STT_BUY_PCT'),
+  sttSellPct: shared('BT_DELIVERY_STT_SELL_PCT'),
+  exchangeTxnPct: shared('BT_EXCHANGE_TXN_PCT'),
+  sebiPct: shared('BT_SEBI_PCT'),
+  stampBuyPct: shared('BT_DELIVERY_STAMP_BUY_PCT'),
+  gstPct: shared('BT_GST_PCT'),
   // Dhan: ₹12.50 + 18% GST ≈ ₹14.75 per ISIN per day on every CNC sell (flat, not turnover-based).
-  dpChargePerSell: num('BT_DP_CHARGE_PER_DELIVERY_SELL', 14.75),
+  dpChargePerSell: shared('BT_DP_CHARGE_PER_DELIVERY_SELL'),
 };
 
 /** Master switch to book live P&L net of costs (env LIVE_COSTS_ENABLED, default on). */

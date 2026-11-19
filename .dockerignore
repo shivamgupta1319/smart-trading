@@ -18,3 +18,10 @@ Dockerfile
 **/.env
 **/.env.*
 !**/.env.example
+
+# Python build noise (the engine image now builds from the repo root)
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.venv
+**/venv
