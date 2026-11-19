@@ -36,6 +36,31 @@ it, and its status. Rules shared by every strategy are in [architecture.md](arch
    that won live (KAYNES·RVOL_ORB, ATGL·VWAP_MACD_RSI, OLAELEC·VWAP_MACD_RSI) are also
    positive here.
 
+## Is any of it more than luck?
+
+Testing 28 strategies at once means some will look good by chance. The backtest tool now
+corrects for that (`apps/engine/research_stats.py`); the run of 2026-11-19 with tick-based
+slippage is in `docs/agent-reports/data/2026-11-19-backtest-strategies-luck-corrected.csv`.
+
+| Strategy | Trades | Avg R | Chance of this by luck, corrected for 28 tries | Stricter test (needs above 0.95) |
+|---|---|---|---|---|
+| MTF_Alignment | 796 | +0.27 | under 0.1% | 0.00 |
+| Golden_Cross | 138 | +0.27 | 7.4% | 0.21 |
+| EMA_10_50_Cross | 717 | +0.14 | 7.4% | 0.00 |
+| Every other strategy | | | above 39% | 0.00 to 0.22 |
+
+- The first test (false-discovery control at 10%) passes the three long-term trend
+  strategies. The stricter test (deflated Sharpe, which asks whether the best result beats
+  what the best of 28 lucky tries would show) passes none. The tool only says a strategy
+  "stands out" when both agree, so its verdict is **none**.
+- Read this as: the three long-term trend strategies are the only ones worth watching
+  closely in paper trading, not as proof. Their backtest is also flattered by the stock list
+  (today's liquid stocks) and they lost in live paper trading while the market fell.
+- No intraday strategy comes close: every one has a negative average after costs.
+
+Every strategy tested is added to `docs/agent-reports/data/trials-ledger.jsonl`, so the
+count of tries used by the stricter test can only grow.
+
 ## Intraday (positions closed by 15:15, shorts allowed)
 
 All intraday cells are limited to 2 entries a day with a 30 minute wait after an exit.
@@ -102,10 +127,11 @@ that is Phase 4.
 
 ## Known limits of these numbers
 
-- 16 of the 60 stocks have at least one daily move above 20% in stored history. Three are
-  known data cliffs from demergers (VEDL, TMPV, TRENT); the rest have not been reviewed.
+- All 27 daily moves above 20% in stored history have been reviewed
+  (`config/known_price_actions.json`). Two stocks stay flagged: TRENT (history stitched
+  across its split, to be re-downloaded) and KAYNES (one move on 2026-05-14 not yet confirmed).
 - The intraday history is about 9 months. That is one market period, mostly falling.
-- Slippage is a flat 5 basis points per side. For a cheap stock one price tick is more than
-  that; for an expensive liquid stock it is less. At 2 basis points the intraday average is
-  −0.28R (no cost rule) instead of −0.35R: better, still negative.
+- Slippage is the larger of one ₹0.05 tick and 5 basis points per share and side. That is a
+  cautious guess, not a measurement; real fills will tell. At 2 basis points the intraday
+  average was −0.28R (no cost rule) instead of −0.35R: better, still negative.
 - The 4R target override on the two mean-reversion swing strategies has not been re-measured.

@@ -145,7 +145,7 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 
 ### 3. Honest numbers
 - [x] Slippage per share = the larger of one tick (₹0.05) and 5 basis points, in the engine and the API cost rule
-- [ ] Luck-correction statistics and a trials ledger
+- [x] Luck-correction statistics and a trials ledger (`research_stats.py`, `research_trials.py`; the backtest tool writes a per-strategy table). Result: three long-term trend strategies pass the first test, none passes the stricter one
 - [ ] NIFTY buy-and-hold comparison
 - [ ] Portfolio totals split into main book and test book
 
