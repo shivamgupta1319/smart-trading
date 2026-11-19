@@ -127,6 +127,11 @@ that is Phase 4.
 
 ## Known limits of these numbers
 
+- The intraday figures on this page were produced before the 2026-11-19 replay fix. Until
+  then the backtest also opened trades at 15:00 and 15:15 and closed them at once for a
+  cost, which the live scanner never does. Expect the corrected figures to be slightly
+  less negative. They will be replaced when the full backtest is re-run.
+
 - All 27 daily moves above 20% in stored history have been reviewed
   (`config/known_price_actions.json`). No stock is flagged: KAYNES's fall of
   2026-05-14 was a real move after results, and TRENT's step is its 1-for-2 bonus issue, which

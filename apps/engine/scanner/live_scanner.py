@@ -23,7 +23,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from db.client import engine
 from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
-from entry_limits import entry_allowed, limits_for_bucket
+from entry_limits import entry_allowed, intraday_entry_time_ok, limits_for_bucket
 from live_fills import entry_geometry_ok, stop_exit_price, target_exit_price
 from data_checks import back_adjust
 from market_condition import aligned, breadth_pct, direction_from_moves, move_from_day_open
@@ -314,9 +314,13 @@ def check_and_fire_signal(config, cache, last_fired_times):
         hold_duration = STRATEGY_HOLD_DURATIONS.get(strategy_name, "UNKNOWN")
         
         now_ist = datetime.now(IST)
-        if hold_duration == "INTRADAY" and now_ist.hour >= 15:
-            print(f"  [INFO] {symbol} ({strategy_name}): Skipped INTRADAY signal after 3:00 PM")
-            return
+        if hold_duration == "INTRADAY":
+            # Entry window, and never a candle from an earlier day: after a night the
+            # catch-up window reaches back into yesterday's last candles.
+            ok, why = intraday_entry_time_ok(candle_time, now_ist.replace(tzinfo=None))
+            if not ok:
+                print(f"  [INFO] {symbol} ({strategy_name}): Skipped INTRADAY signal ({why})")
+                return
 
         signal_type = "BUY" if latest['signal'] == 1 else "SELL"
         # Long-only for swing/positional (equity delivery can't hold shorts overnight).

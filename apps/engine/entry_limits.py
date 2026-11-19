@@ -15,7 +15,7 @@ so the two cannot drift. Times are IST-naive datetimes in both callers.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time as dtime, timedelta
 
 from backtest_config import _i
 
@@ -59,4 +59,26 @@ def entry_allowed(
         wait = timedelta(minutes=limits.cooldown_minutes) - (now - last_exit)
         if wait > timedelta(0):
             return False, f"cooldown ({int(wait.total_seconds() // 60) + 1} min left)"
+    return True, ""
+
+
+# INTRADAY entries are only opened inside this window. Before 09:30 the opening moves
+# are unreliable; from 15:00 there is no time left before the 15:15 square-off.
+INTRADAY_ENTRY_FROM = dtime(9, 30)
+INTRADAY_ENTRY_UNTIL = dtime(15, 0)
+
+
+def intraday_entry_time_ok(signal_candle: datetime, now: datetime) -> tuple[bool, str]:
+    """Whether an INTRADAY trade may be opened at `now` on a signal from `signal_candle`.
+
+    Two rules, shared by the backtest and the live scanner:
+      * `now` is inside 09:30-15:00;
+      * the signal candle is from the same trading day. A signal on yesterday's last
+        candles is stale by the next morning and is never acted on.
+    Returns (allowed, reason); reason is empty when allowed.
+    """
+    if not (INTRADAY_ENTRY_FROM <= now.time() < INTRADAY_ENTRY_UNTIL):
+        return False, "outside the 09:30-15:00 entry window"
+    if hasattr(signal_candle, "date") and signal_candle.date() != now.date():
+        return False, "signal is from an earlier day"
     return True, ""
