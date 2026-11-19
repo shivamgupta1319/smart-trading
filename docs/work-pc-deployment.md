@@ -139,7 +139,8 @@ Cells are added or removed in the app after that.
 
 The images that were running before the merge are tagged on work-pc as
 `shivam13gupta/smart-trading-*:pre-merge-v1` and `shivam13gupta/smart-trading-v2-*:pre-merge-v2`,
-the old compose files and settings are in `infra/_archive-before-merge-20261119/`, and the old
+the first stack's old compose file and settings are in `infra/_archive-before-merge-20261119/`
+(the second stack's folder was removed; its settings became this stack's `.env`), and the old
 database volumes (`smart-trading_postgres_data`, `smart-trading-v2_postgres_data`) are still on
 the host. Database dumps from that morning are in `~/backups/`.
 
