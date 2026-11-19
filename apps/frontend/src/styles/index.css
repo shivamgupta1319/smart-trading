@@ -1482,8 +1482,8 @@ tbody td {
   }
 }
 
-/* Navbar: the link row scrolls sideways inside the bar on narrow screens, so the
-   PAGE never does. (A collapsing menu would be better; this stops the overflow.) */
+/* Navbar. From 1200px the links sit in the bar. Below that they fold into a menu
+   that one button opens, so nothing is cut off and the page never scrolls sideways. */
 .navbar {
   max-width: 100vw;
 }
@@ -1492,26 +1492,129 @@ tbody td {
   flex-shrink: 0;
 }
 
-.navbar-links {
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.navbar-links::-webkit-scrollbar {
+.navbar-toggle {
   display: none;
 }
 
+/* In the bar a label stays on one line. The row is sized so that all nine links,
+   the market-condition chip and the market status fit: full size from 1640px,
+   closer together from 1400px, and without the small icons from 1200px. */
 .navbar-links > * {
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
-@media (max-width: 860px) {
+@media (min-width: 1200px) and (max-width: 1639px) {
+  .navbar {
+    gap: 1rem;
+    padding: 0 1.25rem;
+  }
+
+  .navbar-links {
+    gap: 0;
+  }
+
   .navbar-links .nav-link {
-    min-height: 44px;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.82rem;
+  }
+
+  .navbar-links .market-status {
+    margin-left: 0.4rem;
+    padding: 0.3rem 0.6rem;
+  }
+}
+
+@media (min-width: 1200px) and (max-width: 1399px) {
+  .navbar-links .nav-icon {
+    display: none;
+  }
+}
+
+@media (max-width: 1199px) {
+  .navbar-toggle {
     display: inline-flex;
     align-items: center;
-    white-space: nowrap;
+    gap: 0.6rem;
+    margin-left: auto;
+    min-height: 44px;
+    padding: 0 0.9rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .navbar-toggle:focus-visible,
+  .navbar-links .nav-link:focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 2px;
+  }
+
+  /* Three bars; the middle one is the element, the outer two its shadows. */
+  .navbar-toggle-bars {
+    width: 16px;
+    height: 2px;
+    background: currentColor;
+    box-shadow: 0 -5px 0 currentColor, 0 5px 0 currentColor;
+  }
+
+  .navbar-toggle[aria-expanded="true"] {
+    border-color: var(--cyan-dim);
+    color: var(--cyan);
+  }
+
+  .navbar-links {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-left: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
+    padding: 0.75rem 1rem calc(1rem + env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 60px);
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow-card);
+  }
+
+  .navbar-links.open {
+    display: flex;
+  }
+
+  .navbar-links .nav-link {
+    min-height: 48px;
+    padding: 0 0.9rem;
+    font-size: 1rem;
+  }
+
+  .navbar-links .market-status {
+    margin: 0.5rem 0 0;
+    align-self: flex-start;
+    min-height: 36px;
+  }
+
+  .navbar-links > button {
+    align-self: flex-start;
+    min-height: 44px;
+    margin-top: 0.5rem;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  /* Tablets: two columns so the menu is not one long list. */
+  .navbar-links.open {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 1rem;
   }
 }
 

@@ -166,7 +166,7 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] README rewritten; plain-language user guide (`docs/user-guide.md`); documents from the two earlier apps moved to `docs/archive/old-apps/`
 - [x] July rebuild: useful pieces in; the left-out code, tests and decision documents copied to `docs/archive/july-rebuild/`
 - [ ] Replay test (backtest against the scanner on the same candles)
-- [ ] Phone menu
+- [x] Phone menu: below 1200px the links fold into a menu opened by one button; the desktop bar fits from 1200px up
 - [ ] Luck check shown on the Backtesting page (today it is only in the backtest tool's report)
 - [ ] Owner: say yes to deleting `~/workspace/stock-trading` (a full copy of its history is in `~/backups/stock-trading-2026-11-19.bundle`)
 
