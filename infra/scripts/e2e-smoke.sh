@@ -44,6 +44,10 @@ print('main book %d trades %.0f | test book %d trades %.0f | status changes %d |
 print(d['text'])"
 docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "INSERT INTO \"SentDigest\"(period,\"periodKey\") VALUES ('DAILY','2026-01-01')" >/dev/null
 docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "INSERT INTO \"SentDigest\"(period,\"periodKey\") VALUES ('DAILY','2026-01-01')" 2>&1 | grep -q "duplicate key" && echo "second copy of the same digest is refused by the database"
+echo "--- market condition label"
+ID=$(curl -s -X POST localhost:3099/api/signals/new $J -d "{\"stockId\":$SID,\"strategyName\":\"MACD_Zero\",\"signalType\":\"SELL\",\"entryPrice\":100,\"stopLoss\":102,\"target\":96,\"holdDuration\":\"INTRADAY\",\"marketRegime\":\"TRENDING_DOWN\",\"marketDirection\":\"DOWN\",\"marketBreadthPct\":22.5,\"alignedWithMarket\":true}" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id"))')
+docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "SELECT \"regimeAtEntry\", \"marketDirectionAtEntry\", \"breadthAtEntry\", \"alignedWithMarket\" FROM \"Trade\" WHERE \"signalId\" = $ID"
+curl -s -o /dev/null -w "a made-up market direction is refused: HTTP %{http_code}\n" -X POST localhost:3099/api/signals/new $J -d "{\"stockId\":$SID,\"strategyName\":\"Inside_Bar\",\"signalType\":\"BUY\",\"entryPrice\":100,\"stopLoss\":98,\"target\":104,\"holdDuration\":\"INTRADAY\",\"marketDirection\":\"SIDEWAYS\"}"
 echo "--- first trade sizing"
 docker exec st-e2e-db psql -U trader -d smart_trading -tA -c "SELECT quantity, \"capitalUsed\", \"riskAmount\", pnl, \"cellStatusAtEntry\" FROM \"Trade\" ORDER BY id LIMIT 1; SELECT \"cellStatusAtEntry\", COUNT(*) FROM \"Trade\" GROUP BY 1 ORDER BY 1;"
 curl -s -X POST localhost:3099/api/configs/evaluate; echo

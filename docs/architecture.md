@@ -174,6 +174,15 @@ window of new trades averaging above +0.05R. `GET /api/configs/scorecard` return
 the status and reason, the live record, main-book and test-book totals, and the latest
 backtest. `infra/scripts/e2e-smoke.sh` exercises all of this against a throwaway database.
 
+**Market condition.** Every trade records the market's condition when it was opened
+(`apps/engine/market_condition.py`): `regimeAtEntry` (NIFTY on daily bars: trending up,
+trending down, ranging or volatile), `marketDirectionAtEntry` (the median roster stock's move
+from its day open: UP above +0.15%, DOWN below −0.15%, else FLAT), `breadthAtEntry` (share of
+stocks above their open) and `alignedWithMarket` (a buy in UP or a sell in DOWN). The scanner
+reads the direction from the candles each scan already downloads and sends the labels with
+the signal. Nothing is blocked on them yet: they exist so results can be compared by
+condition before any switching rule is trusted.
+
 **Data checks.** `apps/engine/data_checks.py` guards the candles everything else is built on.
 - *When candles are stored* (`routers/history.py::fetch_and_store`): rows that cannot be real
   (missing values, zero or negative prices, a high below the open or close, intraday bars
