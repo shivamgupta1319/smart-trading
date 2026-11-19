@@ -1,6 +1,6 @@
 """
 Smart Trailing SL Simulator v2 — 3-Phase Exit Framework
-Based on research doc: docs/trade_protection.md
+Based on research doc: docs/archive/old-apps/trade_protection.md
 
 Implements the upgraded 3-phase system:
   Phase 1 (0-49%):   Hold full position, original SL active
