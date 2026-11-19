@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { MAX_COST_TO_RISK, costToRisk, roundTripCost } from './costs';
+import { MAX_COST_TO_RISK, costToRisk, roundTripCost, slippagePerShare } from './costs';
 import { BASE_CELL_CAPITAL, LEVERAGE_DELIVERY, LEVERAGE_INTRADAY, RISK_PER_TRADE_PCT } from './risk';
 import { riskPerTradeFraction, shared } from './shared-config';
 
@@ -34,7 +34,11 @@ describe('shared trading config', () => {
     // A Rs 817.50 stock with a Rs 1.20 stop: the costs are 140% of the risk.
     expect(costToRisk(61, 817.5, 1.2, 'INTRADAY')).toBeCloseTo(1.403437675, 8);
     expect(costToRisk(30, 1600, 26, 'INTRADAY')).toBeCloseTo(0.1267748923, 8);
-    expect(costToRisk(38, 78, 5.14, 'SHORT_SWING')).toBeCloseTo(0.1244126597, 8);
+    // Rs 78 and Rs 60.54 shares: one tick is more than 5 basis points, so the tick applies.
+    expect(costToRisk(38, 78, 5.14, 'SHORT_SWING')).toBeCloseTo(0.1286928153, 8);
+    expect(costToRisk(350, 60.54, 0.57, 'INTRADAY')).toBeCloseTo(0.2880315258, 8);
+    expect(slippagePerShare(60)).toBeCloseTo(0.05, 10);
+    expect(slippagePerShare(4000)).toBeCloseTo(2, 10);
   });
 
   it('an environment variable overrides the file', () => {

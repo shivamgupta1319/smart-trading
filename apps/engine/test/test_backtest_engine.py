@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import strategies.base as base_module  # noqa: E402
-from backtest_config import RISK  # noqa: E402
+from backtest_config import RISK, slippage_per_share  # noqa: E402
 from strategies.base import BaseStrategy, stop_fill_price  # noqa: E402
 
 
@@ -88,8 +88,7 @@ def _gross_of_single_trade(rows, sl=95, tp=120):
     return sim["gross_trades"][0]
 
 
-_SLIP = RISK.slippage_bps / 10_000.0
-_ENTRY = 100 * (1 + _SLIP)  # long entry at next-bar open 100, adverse slippage
+_ENTRY = 100 + slippage_per_share(100)  # long entry at next-bar open 100, adverse slippage
 
 
 def test_gap_through_stop_fills_at_the_open_not_the_stop():
@@ -105,7 +104,7 @@ def test_gap_through_stop_fills_at_the_open_not_the_stop():
         (92, 93, 90, 91),      # opens 92, already through 95 -> fills at 92
     ])
     assert touched < 0 and gapped < 0
-    expected = (_ENTRY - 92 * (1 - _SLIP)) / (_ENTRY - 95 * (1 - _SLIP))
+    expected = (_ENTRY - (92 - slippage_per_share(92))) / (_ENTRY - (95 - slippage_per_share(95)))
     assert gapped / touched == pytest.approx(expected, rel=1e-9)
     assert gapped < touched  # the gap costs more than the stop distance
 
@@ -128,6 +127,19 @@ def test_stop_fill_price_long_and_short():
     assert stop_fill_price(105, 99, is_buy=False) == 105
     # A missing open falls back to the stop instead of propagating NaN.
     assert stop_fill_price(95, float("nan"), is_buy=True) == 95
+
+
+def test_slippage_is_at_least_one_tick_per_share():
+    # Rs 60 share: 5 basis points would be Rs 0.03, less than the Rs 0.05 tick.
+    assert slippage_per_share(60.0) == pytest.approx(0.05)
+    assert slippage_per_share(100.0) == pytest.approx(0.05)      # where the two meet
+    assert slippage_per_share(4000.0) == pytest.approx(2.0)      # 5 basis points
+    # The engine uses it on both sides: a Rs 60 long that exits flat at Rs 60 loses 2 ticks a share.
+    df = _make_df([(60, 60.2, 59.8, 60), (60, 60.2, 59.8, 60), (60, 60.2, 59.8, 60)])
+    sim = _FixedSignalStrategy(sl=57, tp=66).simulate(df)        # still open at the end: marked to the last close
+    assert len(sim["gross_trades"]) == 1
+    qty = round(sim["gross_trades"][0] / -0.10)
+    assert qty > 0 and sim["gross_trades"][0] == pytest.approx(-0.10 * qty)
 
 
 def test_invalid_geometry_is_skipped():

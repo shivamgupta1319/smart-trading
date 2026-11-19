@@ -7,7 +7,7 @@ import pandas as pd
 from backtest_config import (
     RISK, CostModel, uses_trailing_exit, trail_mult_for_bucket, SWING_TRAIL_ATR_PERIOD,
     LEVERAGE_INTRADAY, LEVERAGE_DELIVERY, RISK_PER_TRADE_PCT, time_stop_bars_for_bucket,
-    MAX_COST_TO_RISK, cost_to_risk,
+    MAX_COST_TO_RISK, cost_to_risk, slippage_per_share,
 )
 from entry_limits import entry_allowed, limits_for_bucket
 from intraday_exits import (
@@ -188,7 +188,6 @@ class BaseStrategy(ABC):
         ts = df.index
 
         n = len(df)
-        slip = RISK.slippage_bps / 10_000.0
         # Swing/mid/long trail the stop (chandelier); intraday keeps fixed SL/TP.
         _bucket = self._hold_bucket()
         trailing = uses_trailing_exit(_bucket)
@@ -249,7 +248,7 @@ class BaseStrategy(ABC):
                     continue
 
             # Adverse slippage on entry (buy fills higher, short fills lower)
-            entry = entry_raw * (1 + slip) if ttype == 1 else entry_raw * (1 - slip)
+            entry = entry_raw + slippage_per_share(entry_raw) if ttype == 1 else entry_raw - slippage_per_share(entry_raw)
 
             sl = sl_arr[i] if math.isfinite(sl_arr[i]) else entry * (0.98 if ttype == 1 else 1.02)
             tp = tp_arr[i] if math.isfinite(tp_arr[i]) else entry * (1.04 if ttype == 1 else 0.96)
@@ -295,7 +294,7 @@ class BaseStrategy(ABC):
             if _bucket == "INTRADAY":
                 exit_idx, gross, buy_val, sell_val = self._intraday_exit(
                     entry_idx, entry, sl, tp, ttype, qty,
-                    o, h, low, c, vol, ts, n, slip,
+                    o, h, low, c, vol, ts, n,
                 )
             else:
                 # For swing buckets `cur_sl` ratchets up with a chandelier trail
@@ -351,7 +350,7 @@ class BaseStrategy(ABC):
                     exit_price = c[n - 1]  # still open at series end → mark to last close
 
                 # Adverse slippage on exit
-                exit_fill = exit_price * (1 - slip) if ttype == 1 else exit_price * (1 + slip)
+                exit_fill = exit_price - slippage_per_share(exit_price) if ttype == 1 else exit_price + slippage_per_share(exit_price)
 
                 if ttype == 1:
                     gross = (exit_fill - entry) * qty
@@ -404,7 +403,7 @@ class BaseStrategy(ABC):
         }
 
     def _intraday_exit(self, entry_idx, entry, sl0, tp, ttype, qty,
-                       o, h, low, c, vol, ts, n, slip):
+                       o, h, low, c, vol, ts, n):
         """Model the LIVE intraday 3-phase exit bar-by-bar (15m bars), mirroring
         `scanner/live_scanner.auto_close_signals` via the shared `intraday_exits`
         primitives so backtest ⇄ live can't drift.
@@ -516,7 +515,7 @@ class BaseStrategy(ABC):
         exit_val = 0.0
         gross = 0.0
         for lq, lp in legs:
-            fill = lp * (1 - slip) if is_buy else lp * (1 + slip)
+            fill = lp - slippage_per_share(lp) if is_buy else lp + slippage_per_share(lp)
             exit_val += lq * fill
             gross += (fill - entry) * lq if is_buy else (entry - fill) * lq
         if is_buy:

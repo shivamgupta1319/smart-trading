@@ -37,7 +37,7 @@ def _i(name: str, default: int) -> int:
 # whenever the fill/exit model changes so stored reports produced by an older engine
 # are identifiable — they won't reproduce. Current model: C3 (live intraday exits) + F3
 # (swing time-stop).
-ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.11.19-costgate")
+ENGINE_VERSION = os.getenv("BT_ENGINE_VERSION", "2026.11.19-tick")
 
 
 # Buying-power multiple by hold bucket. Intraday (MIS) deploys ~5× the cell fund as
@@ -63,12 +63,26 @@ RISK_PER_TRADE_PCT = risk_per_trade_fraction()
 # and no strategy got worse.
 MAX_COST_TO_RISK = shared("MAX_COST_TO_RISK")
 
+# Smallest price step on NSE cash equities, in rupees (shared with the API).
+TICK_SIZE = shared("TICK_SIZE")
+
+
+def slippage_per_share(price: float) -> float:
+    """Rupees of slippage per share on one side of a trade: the larger of one price tick
+    and the configured basis points of the price.
+
+    A flat 5 basis points understates a cheap stock (one Rs 0.05 tick on a Rs 60 share is
+    8 basis points: you cannot be filled closer than a tick) and is about right for an
+    expensive one. MUST match `slippagePerShare` in apps/api/src/common/costs.ts.
+    """
+    return max(TICK_SIZE, price * RISK.slippage_bps / 10_000.0)
+
 
 def cost_to_risk(qty: int, entry: float, risk_per_share: float, timeframe: str) -> float:
     """Round-trip cost of a position (charges + slippage on both sides) divided by
     the rupees it risks. MUST match `costToRisk` in apps/api/src/common/costs.ts."""
     value = qty * entry
-    friction = CostModel(timeframe).round_trip(value, value) + 2 * (RISK.slippage_bps / 10_000.0) * value
+    friction = CostModel(timeframe).round_trip(value, value) + 2 * qty * slippage_per_share(entry)
     return friction / (qty * risk_per_share)
 
 
