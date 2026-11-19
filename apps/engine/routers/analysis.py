@@ -169,11 +169,26 @@ llm = LLMClient()
 @router.get("/dashboard")
 async def get_dashboard_analysis():
     try:
-        # Fetch Nifty 50 data to represent the Indian market
+        # Nifty 50 stands in for the Indian market. The price history and the headlines
+        # are fetched separately: headlines failing must not lose the whole analysis.
         ticker = yf.Ticker("^NSEI")
-        hist = ticker.history(period="1mo")
-        news = ticker.news
-        
+        try:
+            hist = ticker.history(period="1mo")
+        except Exception as exc:
+            print(f"[analysis] NIFTY history failed: {type(exc).__name__}: {exc}")
+            return {
+                "status": "error",
+                "message": (
+                    "The market data provider (Yahoo Finance) did not answer just now. "
+                    "This is usually temporary. Press Refresh Analysis in a minute."
+                ),
+            }
+        try:
+            news = ticker.news
+        except Exception as exc:
+            print(f"[analysis] NIFTY news failed: {type(exc).__name__}: {exc}")
+            news = []
+
         if hist.empty:
             current_price = "Unknown"
             price_change = "Unknown"

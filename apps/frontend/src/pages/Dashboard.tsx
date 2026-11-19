@@ -64,10 +64,10 @@ export function Dashboard() {
         setMarketAnalysis(res.data.analysis);
         localStorage.setItem('dashboard_market_analysis', res.data.analysis);
       } else {
-        setMarketAnalysis(`> [!WARNING]\n> Failed to fetch market analysis: ${res.data.message}`);
+        setMarketAnalysis(`> [!WARNING]\n> ${res.data.message}`);
       }
     } catch (e: any) {
-      setMarketAnalysis(`> [!WARNING]\n> Failed to fetch market analysis: ${e.message}`);
+      setMarketAnalysis('> [!WARNING]\n> The market analysis could not be loaded. Check your connection, then press Refresh Analysis.');
     } finally {
       setLoadingAnalysis(false);
     }
