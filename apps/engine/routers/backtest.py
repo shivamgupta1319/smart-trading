@@ -4,7 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 from db.client import engine
-from strategies import STRATEGY_REGISTRY
+from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
+import selection_rule
 from reports import save_report as _upsert_report
 
 from data_checks import back_adjust
@@ -157,6 +158,14 @@ def run_strategy_all_stocks(req: RunStrategyAllStocksRequest):
     with engine.connect() as conn:
         stocks = conn.execute(text('SELECT id, symbol FROM "Stock"')).fetchall()
 
+    # Whether each row meets the one live rule (selection_rule.py), and what it misses.
+    bucket = STRATEGY_HOLD_DURATIONS.get(req.strategy)
+    try:
+        lucky = selection_rule.strategies_passing_luck()
+        passes_luck = None if lucky is None else req.strategy in lucky
+    except Exception:
+        passes_luck = None
+
     results = []
     for stock_id, symbol in stocks:
         try:
@@ -166,10 +175,11 @@ def run_strategy_all_stocks(req: RunStrategyAllStocksRequest):
 
             metrics = strategy.run_backtest(df)
             save_report(stock_id, req.strategy, timeframe, metrics)
-            
+
             results.append({
                 "symbol": symbol,
-                "metrics": metrics
+                "metrics": metrics,
+                "selection": selection_rule.verdict(metrics, bucket, passes_luck),
             })
         except Exception:
             pass

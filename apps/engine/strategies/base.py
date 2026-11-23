@@ -122,6 +122,12 @@ class BaseStrategy(ABC):
             sim["r_trades"],
         )
         m["spanYears"] = self._span_years(df)
+        # Average R of the first and the second half of the trades: an edge that shows in
+        # only one half is one lucky stretch (read by selection_rule.py).
+        r = sim["r_trades"]
+        half = len(r) // 2
+        m["rFirstHalf"] = round(sum(r[:half]) / half, 3) if half else None
+        m["rSecondHalf"] = round(sum(r[half:]) / (len(r) - half), 3) if half else None
         return m
 
     @staticmethod

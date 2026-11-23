@@ -15,6 +15,8 @@ interface BacktestStockResult {
     totalCosts?: number;
     profitFactor?: number;
   };
+  /** Whether this backtest meets the one live rule, and what it misses (from the engine). */
+  selection?: { passes: boolean; misses: string[] };
 }
 
 interface WalkForward {
@@ -95,7 +97,11 @@ export function BacktestingStrategy() {
       const r = await axios.post(`${API}/api/engine/run-strategy-all-stocks`, {
         strategy: strategyName,
       });
-      setResults(r.data.results || []);
+      // Rows that meet the live rule first; inside each group, best profit against drawdown first.
+      const ratio = (x: BacktestStockResult) => x.metrics.netProfit / Math.max(x.metrics.maxDrawdown, 1);
+      const rows: BacktestStockResult[] = r.data.results || [];
+      rows.sort((a, b) => Number(b.selection?.passes ?? false) - Number(a.selection?.passes ?? false) || ratio(b) - ratio(a));
+      setResults(rows);
       showMessage("success", `✓ Backtest complete.`);
     } catch (e: any) {
       showMessage("error", e.response?.data?.message || "Backtest failed.");
@@ -105,6 +111,16 @@ export function BacktestingStrategy() {
   };
 
   const handleSetLive = async (symbol: string) => {
+    // Putting a row live that fails the live rule is allowed, but never by accident.
+    const row = results.find((x) => x.symbol === symbol);
+    if (!isLive(symbol) && row?.selection && !row.selection.passes) {
+      const ok = window.confirm(
+        `${symbol} does not meet the live rule for ${strategyName}:\n\n• ` +
+          row.selection.misses.join("\n• ") +
+          "\n\nSet it live anyway?",
+      );
+      if (!ok) return;
+    }
     try {
       const res = await axios.post(`${API}/api/configs/toggle`, { symbol, strategyName, timeframe: strategyTimeframe });
       if (res.data.status === 'added') {
@@ -283,9 +299,15 @@ export function BacktestingStrategy() {
             className="page-title"
             style={{ fontSize: "1.5rem", marginBottom: "1.5rem" }}
           >
-            Results (Sorted by ROI)
+            Results
           </h2>
-          <div className="table-container">
+          <p className="page-subtitle" style={{ marginTop: "-1rem", marginBottom: "1.25rem", maxWidth: "75ch" }}>
+            {results.filter((x) => x.selection?.passes).length} of {results.length} stocks meet the live rule
+            for this strategy; they are listed first. The rule: average per trade above +0.10R, positive in
+            both halves, enough trades, profit factor of 1.5, profit at least twice the worst drawdown and a
+            total return of 10%.
+          </p>
+          <div className="table-wrapper">
             <table className="data-table">
               <thead>
                 <tr>
@@ -295,6 +317,7 @@ export function BacktestingStrategy() {
                   <th style={{ textAlign: "right" }}>Net Profit</th>
                   <th style={{ textAlign: "right" }}>ROI</th>
                   <th style={{ textAlign: "right" }}>Max Drawdown</th>
+                  <th>Live rule</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -343,6 +366,22 @@ export function BacktestingStrategy() {
                     </td>
                     <td style={{ textAlign: "right", color: "var(--danger)" }}>
                       -₹{r.metrics.maxDrawdown.toLocaleString("en-IN")}
+                    </td>
+                    <td style={{ minWidth: "15rem", maxWidth: "24rem", whiteSpace: "normal" }}>
+                      {!r.selection ? (
+                        <span style={{ color: "var(--text-muted)" }}>—</span>
+                      ) : r.selection.passes ? (
+                        <span className="badge sc-status proven">Meets it</span>
+                      ) : (
+                        <>
+                          <span className="badge sc-status testing">Misses {r.selection.misses.length}</span>
+                          <ul style={{ margin: "0.4rem 0 0", paddingLeft: "1.1rem", fontSize: "0.8rem", lineHeight: 1.45, color: "var(--text-secondary)" }}>
+                            {r.selection.misses.map((m) => (
+                              <li key={m}>{m}</li>
+                            ))}
+                          </ul>
+                        </>
+                      )}
                     </td>
                     <td>
                       <div style={{ display: "flex", gap: "0.5rem" }}>
