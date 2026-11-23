@@ -253,7 +253,7 @@ candles (`Stock.tradedValueCr`, `dayRangePct`, `lastClose`), set by `tools/unive
 (`add`, `fetch-daily`, `measure`, `floor`, `intraday`). The scheduler, the luck check,
 auto-select, the backtest tool and the per-strategy results all read the lists from there.
 The scanner fetches intraday candles every pass but keeps a stock's daily candles for 30
-minutes (), so a large swing roster does not slow the checks on open trades.
+minutes (`candles_for_scan`), so a large swing roster does not slow the checks on open trades.
 
 **Strategy map.** `apps/engine/strategy_map.py` answers "where does each strategy work?"
 from the stored backtest of every cell. The daily luck check now stores every cell's

@@ -8,7 +8,7 @@ it, and its status. Rules shared by every strategy are in [architecture.md](arch
 
 Since 2026-11-23 the stocks are the NIFTY 500 above ₹10 crore traded a day (471 stocks) for
 swing, and a measured list of 38 liquid, fast-moving stocks for intraday. The roster is every
-pair whose backtest meets the live rule (): 359 pairs on 187
+pair whose backtest meets the live rule (`apps/engine/selection_rule.py`): 359 pairs on 187
 stocks.
 
 | Strategy | Pairs live | Stocks tested | Profitable on | Verdict |
@@ -32,8 +32,8 @@ stocks.
   +0.86R became +0.53R and MTF_Alignment +0.58R became +0.50R. Ten swing strategies pass
   the first luck test; none passes the stricter one.
 
-The run's figures are in ; the
-list of pairs is . The tables further down this page
+The run's figures are in `docs/agent-reports/data/2026-11-23-luck-check-nifty500.csv`; the
+list of pairs is `infra/scripts/seed-starting-roster.sql`. The tables further down this page
 are from the 61-stock runs of 2026-11-19 and are kept for comparison. A good backtest puts a
 pair on the roster; only its own paper trades keep it there.
 
