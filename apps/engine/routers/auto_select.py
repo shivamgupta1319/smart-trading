@@ -14,6 +14,8 @@ any (stock × strategy) cell already active is skipped. Pass clearExisting=true 
 wipe the table first (the old replace-everything behavior).
 """
 import os
+import threading
+from datetime import datetime, timezone
 
 import numpy as np
 from fastapi import APIRouter
@@ -76,6 +78,10 @@ class AutoSelectRequest(BaseModel):
     # data yet (e.g. just added on the dashboard), incremental top-up for the rest.
     refreshData: bool = True
     dryRun: bool = False                 # compute but don't write
+    # Wait for the result in this request. Off by default: a run takes several
+    # minutes and the public address cuts a request off after 120 seconds, so the
+    # run starts in the background and GET /auto-select/status reports on it.
+    wait: bool = False
 
 
 def _walk_forward(strategy, df) -> dict:
@@ -128,8 +134,54 @@ def _upsert_active(conn, stock_id: int, strategy_name: str, timeframe: str):
     """), {"sid": stock_id, "sn": strategy_name, "tf": timeframe})
 
 
+# One run at a time, kept in memory (the engine is a single process). `_job` is what
+# GET /auto-select/status returns.
+_job_lock = threading.Lock()
+_job: dict = {"status": "idle"}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _progress(stage: str, done: int, total: int) -> None:
+    _job.update({"stage": stage, "done": done, "total": total})
+
+
+def _run_job(req: AutoSelectRequest) -> None:
+    try:
+        result = run_auto_select(req, _progress)
+        _job.update({"status": "done", "finishedAt": _now(), "result": result, "error": None})
+    except Exception as exc:  # the run must never leave the job stuck on "running"
+        _job.update({"status": "failed", "finishedAt": _now(), "error": f"{type(exc).__name__}: {exc}"[:300]})
+    finally:
+        _job_lock.release()
+
+
+@router.get("/auto-select/status")
+def auto_select_status():
+    """Where the current or the last run stands: idle, running (with a stage and a
+    count), done (with the result) or failed (with the reason)."""
+    return dict(_job)
+
+
 @router.post("/auto-select")
 def auto_select(req: AutoSelectRequest):
+    """Start a run. Returns at once with the job; poll GET /auto-select/status.
+    A second call while one is running returns that run instead of starting another."""
+    if not _job_lock.acquire(blocking=False):
+        return dict(_job)
+    _job.clear()
+    _job.update({"status": "running", "startedAt": _now(), "stage": "Starting", "done": 0, "total": 0,
+                 "dryRun": req.dryRun, "result": None, "error": None})
+    if req.wait:
+        _run_job(req)
+        return dict(_job)
+    threading.Thread(target=_run_job, args=(req,), daemon=True, name="auto-select").start()
+    return dict(_job)
+
+
+def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: None) -> dict:
     strategy_names = req.strategies or list(STRATEGY_REGISTRY.keys())
     strategy_names = [s for s in strategy_names if s in STRATEGY_REGISTRY]
     top_n = max(1, min(req.topN, 20))
@@ -147,7 +199,8 @@ def auto_select(req: AutoSelectRequest):
             STRATEGY_TIMEFRAMES.get(s, getattr(STRATEGY_REGISTRY[s], "timeframe", "1D"))
             for s in strategy_names
         })
-        for _sid, symbol in stocks:
+        for n, (_sid, symbol) in enumerate(stocks):
+            progress("Getting the latest prices", n, len(stocks))
             try:
                 fetch_and_store(symbol, timeframes_needed)
                 refreshed += 1
@@ -157,7 +210,8 @@ def auto_select(req: AutoSelectRequest):
     summary = []
     all_picks = []  # (stock_id, strategy, timeframe)
 
-    for sname in strategy_names:
+    for k, sname in enumerate(strategy_names):
+        progress("Testing strategies", k, len(strategy_names))
         # Denylisted strategy — never re-promote (persists manual prunes).
         if sname in DENYLIST:
             summary.append({"strategy": sname, "skipped": "denylisted"})
@@ -262,6 +316,7 @@ def auto_select(req: AutoSelectRequest):
             "rejectedSample": rejections[:8],
         })
 
+    progress("Saving the picks", len(strategy_names), len(strategy_names))
     written = 0
     skipped = 0
     if not req.dryRun:

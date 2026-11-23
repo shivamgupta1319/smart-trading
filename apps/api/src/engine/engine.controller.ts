@@ -74,11 +74,17 @@ export class EngineController {
     @Body()
     body: { strategies?: string[]; topN?: number; clearExisting?: boolean; dryRun?: boolean },
   ) {
-    // Heavy: backtests every (strategy × stock) plus walk-forward + Monte-Carlo
-    // on survivors. Override the 60s default with a long timeout (10 min).
-    const response = await this.http.post(`/api/engine/auto-select`, body, {
-      timeout: 600000,
-    });
+    // Heavy (several minutes), so the engine only STARTS the run here and answers at
+    // once. The public address cuts any request off after 120 seconds; the page polls
+    // auto-select/status instead of waiting.
+    const response = await this.http.post(`/api/engine/auto-select`, body);
+    return response.data;
+  }
+
+  /** Where the current or last auto-select run stands (idle, running, done, failed). */
+  @Get('auto-select/status')
+  async autoSelectStatus() {
+    const response = await this.http.get(`/api/engine/auto-select/status`);
     return response.data;
   }
 
