@@ -150,3 +150,52 @@ def test_benchmark_return_is_first_close_on_or_after_the_date_to_the_latest():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+# --- daily candles are fetched once and reused between passes -----------------------
+
+def test_daily_candles_are_reused_between_passes_and_intraday_never(monkeypatch):
+    import pandas as pd
+    import scanner.live_scanner as ls
+
+    calls = []
+    frame = pd.DataFrame({"Close": [1.0]})
+
+    def fake_fetch(symbol, timeframe):
+        calls.append((symbol, timeframe))
+        return frame
+
+    monkeypatch.setattr(ls, "fetch_live_candles", fake_fetch)
+    monkeypatch.setattr(ls.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(ls, "_daily_candles", {})
+
+    # Pass 1: one download per stock and timeframe, however many strategies ask.
+    one = {}
+    ls.candles_for_scan("RELIANCE", "1D", one)
+    ls.candles_for_scan("RELIANCE", "1D", one)
+    ls.candles_for_scan("IFCI", "15m", one)
+    assert calls == [("RELIANCE", "1D"), ("IFCI", "15m")]
+
+    # Pass 2 (a new per-pass cache): daily comes from the store, intraday is fetched again.
+    two = {}
+    ls.candles_for_scan("RELIANCE", "1D", two)
+    ls.candles_for_scan("IFCI", "15m", two)
+    assert calls == [("RELIANCE", "1D"), ("IFCI", "15m"), ("IFCI", "15m")]
+
+    # Once the stored copy is too old it is fetched again.
+    monkeypatch.setattr(ls, "DAILY_CANDLES_MAX_AGE_SECONDS", 0)
+    ls.candles_for_scan("RELIANCE", "1D", {})
+    assert calls[-1] == ("RELIANCE", "1D") and len(calls) == 4
+
+
+def test_a_failed_daily_download_is_not_kept(monkeypatch):
+    import pandas as pd
+    import scanner.live_scanner as ls
+
+    calls = []
+    monkeypatch.setattr(ls, "fetch_live_candles", lambda s, t: calls.append(s) or pd.DataFrame())
+    monkeypatch.setattr(ls.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(ls, "_daily_candles", {})
+    ls.candles_for_scan("TCS", "1D", {})
+    ls.candles_for_scan("TCS", "1D", {})
+    assert calls == ["TCS", "TCS"]   # tried again on the next pass

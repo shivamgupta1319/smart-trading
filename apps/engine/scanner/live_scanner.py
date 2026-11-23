@@ -83,6 +83,35 @@ POLL_INTERVAL = 100  # seconds
 # be a fixed 1s per cell, so a 400-cell roster spent almost 7 minutes a cycle sleeping
 # and open trades were only checked that often.
 FETCH_PAUSE_SECONDS = 0.5
+# A completed daily candle does not change during the day, so the two years of daily
+# candles a swing pair needs are fetched once and reused for this long. Without it a
+# roster of a few hundred swing pairs spent every pass downloading the same history, and
+# open trades were checked only once per pass.
+DAILY_CANDLES_MAX_AGE_SECONDS = int(os.getenv("DAILY_CANDLES_MAX_AGE_SECONDS", "1800"))
+_daily_candles: dict = {}   # symbol -> (time.monotonic() when fetched, candles)
+
+
+def candles_for_scan(symbol: str, timeframe: str, cache: dict) -> pd.DataFrame:
+    """The candles to evaluate for one stock and timeframe in this pass.
+
+    `cache` holds what this pass already fetched. Daily candles are also kept between
+    passes for DAILY_CANDLES_MAX_AGE_SECONDS; intraday candles are fetched every pass.
+    An empty result is never kept, so a failed download is retried on the next pass.
+    """
+    key = (symbol, timeframe)
+    if key in cache:
+        return cache[key]
+    if timeframe == "1D":
+        kept = _daily_candles.get(symbol)
+        if kept and time.monotonic() - kept[0] < DAILY_CANDLES_MAX_AGE_SECONDS:
+            cache[key] = kept[1]
+            return kept[1]
+    df = fetch_live_candles(symbol, timeframe)
+    time.sleep(FETCH_PAUSE_SECONDS)  # be gentle on the data source, per download
+    cache[key] = df
+    if timeframe == "1D" and not df.empty:
+        _daily_candles[symbol] = (time.monotonic(), df)
+    return df
 
 # ── Smart Trailing SL Configuration ──
 # Phase triggers (50%/75%) and REVERSAL_ZONE_START (80%) now live in
@@ -271,11 +300,7 @@ def check_and_fire_signal(config, cache, last_fired_times):
     strategy = STRATEGY_REGISTRY[strategy_name]
 
     try:
-        cache_key = (symbol, timeframe)
-        if cache_key not in cache:
-            cache[cache_key] = fetch_live_candles(symbol, timeframe)
-            time.sleep(FETCH_PAUSE_SECONDS)  # be gentle on the data source, per download
-        df = cache[cache_key]
+        df = candles_for_scan(symbol, timeframe, cache)
         
         if df.empty or len(df) < 30:
             print(f"  [INFO] {symbol}: insufficient data ({len(df)} bars)")

@@ -69,7 +69,7 @@ def latest() -> dict:
                    br."rSecondHalf", br."profitFactor", br."netProfit", br."maxDrawdown",
                    br."roiPercentage", br."updatedAt"
             FROM "BacktestReport" br JOIN "Stock" s ON s.id = br."stockId"
-            WHERE s."isActive"
+            WHERE s."isActive" AND (br.timeframe = '1D' OR s.intraday)
         """)).fetchall()
         stocks = conn.execute(text('SELECT count(*), count(*) FILTER (WHERE intraday) FROM "Stock" WHERE "isActive"')).fetchone()
     rows = [{"symbol": r[0], "strategy": r[1], "totalTrades": r[2], "avgRMultiple": r[3], "rFirstHalf": r[4],
