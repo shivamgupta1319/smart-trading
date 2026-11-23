@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API } from '../config';
@@ -38,6 +38,8 @@ export function Backtesting() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [autoResult, setAutoResult] = useState<any | null>(null);
   const [autoError, setAutoError] = useState<string | null>(null);
+  const [autoStage, setAutoStage] = useState<string | null>(null);
+  const autoChecked = useRef(false);
 
   useEffect(() => {
     fetchStrategies();
@@ -72,15 +74,67 @@ export function Backtesting() {
     setAutoRunning(true);
     setAutoError(null);
     setAutoResult(null);
+    setAutoStage(null);
     try {
+      // The run takes several minutes, so this only starts it; followAutoSelect polls.
       const res = await axios.post(`${API}/api/engine/auto-select`, { clearExisting: false });
-      setAutoResult(res.data);
+      applyAutoJob(res.data);
     } catch (e: any) {
-      setAutoError(e.response?.data?.message || e.response?.data?.detail || e.message || 'Auto-select failed.');
-    } finally {
+      setAutoError(e.response?.data?.message || e.response?.data?.detail || e.message || 'Auto-select could not be started.');
       setAutoRunning(false);
     }
   };
+
+  /** Show what a job says and report whether it is still running. */
+  const applyAutoJob = (job: any): boolean => {
+    if (job?.status === 'running') {
+      setAutoRunning(true);
+      setAutoStage(job.total > 0 ? `${job.stage}: ${job.done} of ${job.total}` : job.stage || 'Starting');
+      return true;
+    }
+    setAutoRunning(false);
+    setAutoStage(null);
+    if (job?.status === 'done') setAutoResult(job.result);
+    if (job?.status === 'failed') setAutoError(`Auto-select stopped: ${job.error || 'unknown reason'}`);
+    return false;
+  };
+
+  // While a run is in progress, ask the engine how far it is every few seconds. This
+  // also picks a run back up after the page is reloaded.
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let misses = 0;
+    const poll = async (first: boolean) => {
+      try {
+        const res = await axios.get(`${API}/api/engine/auto-select/status`);
+        if (!alive) return;
+        misses = 0;
+        const job = res.data;
+        // On first load only a run in progress is shown; an old finished run is not.
+        const running = first && job?.status !== 'running' ? false : applyAutoJob(job);
+        if (running) timer = setTimeout(() => poll(false), 3000);
+      } catch {
+        if (!alive) return;
+        misses += 1;
+        if (misses < 5) timer = setTimeout(() => poll(false), 5000);
+        else if (!first) {
+          setAutoRunning(false);
+          setAutoError('Lost contact with the server while auto-select was running. Reload the page to see where it stands.');
+        }
+      }
+    };
+    if (autoRunning || !autoChecked.current) {
+      const first = !autoChecked.current;
+      autoChecked.current = true;
+      poll(first);
+    }
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart polling only when a run starts or stops
+  }, [autoRunning]);
 
   return (
     <div className="page animate-fade-in">
@@ -107,8 +161,10 @@ export function Backtesting() {
         <div className="card animate-fade-in-up" style={{ padding: '1.5rem', marginBottom: '2rem', borderTop: '4px solid var(--cyan)' }}>
           <h2 className="card-title" style={{ marginTop: 0 }}>✨ Auto-select (strict, quality-first)</h2>
           {autoRunning && (
-            <p className="page-subtitle" style={{ marginTop: 0 }}>
-              Pulling the latest candles, then backtesting every strategy × stock, then walk-forward + Monte-Carlo on survivors. This can take a few minutes…
+            <p className="page-subtitle" style={{ marginTop: 0 }} role="status">
+              <strong style={{ color: 'var(--text-primary)' }}>{autoStage || 'Starting'}.</strong>{' '}
+              It gets the latest prices, tests every strategy on every stock, then checks the survivors again. This
+              takes several minutes and keeps running if you leave the page.
             </p>
           )}
           {autoError && <div style={{ color: 'var(--red)' }}>⚠️ {autoError}</div>}
