@@ -185,3 +185,10 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Portfolio: profit factor shows "—" until there is a losing trade; flat trades are counted and named
 - [x] Validate: the engine's real reason is shown (it was replaced by "internal server error")
 - [x] Fresh start (owner's decision): all 390 cells and all 10 trades of the first day deleted; the roster is now 100 cells chosen from the backtest on engine `2026.11.19-risk5x` (rule and list in `infra/scripts/seed-starting-roster.sql`): 7 intraday, 93 swing. Paper trading restarts on 2026-11-20 with every cell at ₹10,000
+
+## Owner's changes, 2026-11-23
+
+- [x] Auto-select runs in the background with a status the page follows (it timed out at the public address's 120-second limit while the run carried on unseen)
+- [x] One live rule everywhere (`apps/engine/selection_rule.py`, thresholds in `config/trading.json`): the roster rule gained three checks (profit factor 1.5, profit at least twice the worst drawdown, total return 10%) after the owner found cells live with a small profit and a large drawdown. Auto-select, the per-strategy result rows and the Set Live warning all use it
+- [x] Roster pruned to the cells that meet the three new checks
+

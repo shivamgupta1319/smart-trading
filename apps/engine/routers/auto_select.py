@@ -1,34 +1,31 @@
-"""Auto-select: pick the best (stock × strategy) cells and mark them active.
+"""Auto-select: put every cell whose backtest meets the live rule on the roster.
 
-Strict / quality-first selection. For every strategy we backtest each stock that
-has data, then put survivors through the SAME out-of-sample gauntlet the manual
-"Validate" button uses — walk-forward consistency + a Monte-Carlo distribution —
-before ranking on a risk-adjusted (Calmar-like) score and promoting the top N.
+For every strategy and every stock with data it runs the backtest and asks
+`selection_rule.py`, the one rule that decides whether a backtest is good enough to go
+live. Every cell that passes is written into `ActiveConfiguration` (the table the live
+scanner reads), the same place the Set Live button writes to.
 
-The picks are written straight into `ActiveConfiguration` (the table the live
-scanner reads via get_active_configs), i.e. the same surface as the manual
-`POST /api/configs/toggle` toggle.
+By default it APPENDS: cells already on the roster are left alone. Pass
+clearExisting=true to empty the roster first.
 
-By default we APPEND: existing active configs are kept, new picks are added, and
-any (stock × strategy) cell already active is skipped. Pass clearExisting=true to
-wipe the table first (the old replace-everything behavior).
+A run takes a few minutes, so it runs in the background: POST starts it, GET
+/auto-select/status reports on it.
 """
 import os
 import threading
 from datetime import datetime, timezone
 
-import numpy as np
 from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import text
 
 from db.client import engine
-from strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES
+from strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES, STRATEGY_HOLD_DURATIONS
+import selection_rule
 from routers.backtest import load_historical
 from routers.history import fetch_and_store
 from reports import save_report as _save_report  # shared UPSERT writer (one row per cell)
 
-from walkforward import run_folds, summarise
 
 router = APIRouter()
 
@@ -40,26 +37,8 @@ def _f(name: str, default: float) -> float:
         return default
 
 
-# Gate thresholds (all env-tunable). Tightened 2026-07-13 (audit): the backtest
-# now caps position notional (BT_CAP_POSITION_VALUE) so ROI is no longer inflated
-# by compounding — which means these gates finally bite. Ranking is by NET avg
-# R-multiple (risk-adjusted edge), not raw ROI. Raise/lower via env.
-MIN_TRADES = int(_f("AUTOSELECT_MIN_TRADES", 10))          # min sample size
-MAX_DD_PCT = _f("AUTOSELECT_MAX_DD_PCT", 25.0)             # drawdown cap (% of peak); was 40
-MIN_PROFIT_FACTOR = _f("AUTOSELECT_MIN_PROFIT_FACTOR", 1.3)  # was 1.05 (barely breakeven post-cost)
-MIN_ROI = _f("AUTOSELECT_MIN_ROI", 0.0)                    # in-sample ROI must be >0
-MIN_AVG_R = _f("AUTOSELECT_MIN_AVG_R", 0.05)              # NET avg R-multiple must be positive edge
-# Risk/reward floor: total return must be at least this multiple of max drawdown
-# (a Calmar-like bar). Meaningful now that ROI is de-inflated. Env: AUTOSELECT_MIN_RETURN_DD.
-MIN_RETURN_DD_RATIO = _f("AUTOSELECT_MIN_RETURN_DD", 1.5)
-MIN_PROFITABLE_FOLDS = _f("AUTOSELECT_MIN_PROFITABLE_FOLDS", 60.0)  # % of OOS folds; was 40
-# Require the strict "low variance" consistency flag too (std <= |mean|). ON by
-# default now — an edge that only shows in one fold isn't trustworthy.
-WF_REQUIRE_CONSISTENT = os.getenv("AUTOSELECT_WF_REQUIRE_CONSISTENT", "true").lower() == "true"
-MC_MIN_PROB = _f("AUTOSELECT_MC_MIN_PROB", 55.0)           # % bootstrap paths profitable
-WF_FOLDS = int(_f("AUTOSELECT_WF_FOLDS", 5))
-MC_ITERS = int(_f("AUTOSELECT_MC_ITERS", 1000))
-TOP_N = int(_f("AUTOSELECT_TOP_N", 3))
+# Sample size at which a cell's score counts in full (ranking only; the rule decides).
+MIN_TRADES = int(_f("AUTOSELECT_MIN_TRADES", 10))
 MIN_BARS = int(_f("AUTOSELECT_MIN_BARS", 60))
 # Persistent denylist so manually-pruned losers are NOT re-promoted every run.
 # Comma-separated entries; each matches either a whole strategy ("Fibonacci_Golden_Zone")
@@ -69,7 +48,6 @@ DENYLIST = {e.strip() for e in os.getenv("AUTOSELECT_DENYLIST", "").split(",") i
 
 class AutoSelectRequest(BaseModel):
     strategies: list[str] | None = None  # default: all
-    topN: int = TOP_N
     # Append by default: keep the existing active configs, add only the new
     # picks, and skip any (stock × strategy) cell already active. Set true to
     # wipe ActiveConfiguration first (old "replace" behavior).
@@ -82,37 +60,6 @@ class AutoSelectRequest(BaseModel):
     # minutes and the public address cuts a request off after 120 seconds, so the
     # run starts in the background and GET /auto-select/status reports on it.
     wait: bool = False
-
-
-def _walk_forward(strategy, df) -> dict:
-    """Rolling out-of-sample folds with warm-up — the same code /run-walk-forward uses."""
-    agg = summarise(run_folds(strategy, df, WF_FOLDS))
-    return {
-        "consistent": agg["consistent"],
-        "pctProfitableFolds": agg["pctProfitableFolds"],
-        "meanOosRoi": agg["meanOosRoi"],
-    }
-
-
-def _monte_carlo(strategy, df) -> dict:
-    """Bootstrapped outcome distribution. Mirrors /run-monte-carlo, in-memory."""
-    sim = strategy.simulate(df)
-    trades = np.array(sim["net_trades"], dtype=float)
-    if trades.size < 5:
-        return {"p5Roi": None, "probabilityOfProfit": None, "ok": False}
-    from backtest_config import RISK
-    capital = RISK.slot_capital
-    rng = np.random.default_rng(42)
-    final_rois = np.empty(MC_ITERS)
-    for it in range(MC_ITERS):
-        seq = rng.choice(trades, size=trades.size, replace=True)
-        equity = capital + np.cumsum(seq)
-        final_rois[it] = (equity[-1] - capital) / capital * 100
-    return {
-        "p5Roi": round(float(np.percentile(final_rois, 5)), 2),
-        "probabilityOfProfit": round(float((final_rois > 0).mean() * 100), 2),
-        "ok": True,
-    }
 
 
 def _score(avg_r: float, dd_pct: float, trades: int) -> float:
@@ -184,7 +131,6 @@ def auto_select(req: AutoSelectRequest):
 def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: None) -> dict:
     strategy_names = req.strategies or list(STRATEGY_REGISTRY.keys())
     strategy_names = [s for s in strategy_names if s in STRATEGY_REGISTRY]
-    top_n = max(1, min(req.topN, 20))
 
     with engine.connect() as conn:
         stocks = conn.execute(text('SELECT id, symbol FROM "Stock"')).fetchall()
@@ -209,6 +155,11 @@ def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: 
 
     summary = []
     all_picks = []  # (stock_id, strategy, timeframe)
+    try:
+        lucky = selection_rule.strategies_passing_luck()   # None: no luck check stored yet
+    except Exception:
+        lucky = None
+    rules = selection_rule.selection_rules()
 
     for k, sname in enumerate(strategy_names):
         progress("Testing strategies", k, len(strategy_names))
@@ -218,6 +169,8 @@ def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: 
             continue
         strategy = STRATEGY_REGISTRY[sname]
         timeframe = STRATEGY_TIMEFRAMES.get(sname, getattr(strategy, "timeframe", "1D"))
+        bucket = STRATEGY_HOLD_DURATIONS.get(sname)
+        passes_luck = None if lucky is None else sname in lucky
         candidates, rejections = [], []
 
         for stock_id, symbol in stocks:
@@ -242,43 +195,12 @@ def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: 
                 rejections.append({"symbol": symbol, "gate": "backtest-error", "detail": str(e)[:120]})
                 continue
 
-            # Gate 1 — in-sample quality
-            if m["totalTrades"] < MIN_TRADES:
-                rejections.append({"symbol": symbol, "gate": "trades", "value": m["totalTrades"]})
-                continue
-            if m["roiPercentage"] <= MIN_ROI:
-                rejections.append({"symbol": symbol, "gate": "roi", "value": m["roiPercentage"]})
-                continue
-            if m["profitFactor"] < MIN_PROFIT_FACTOR:
-                rejections.append({"symbol": symbol, "gate": "profitFactor", "value": m["profitFactor"]})
-                continue
-            if m.get("avgRMultiple", 0.0) < MIN_AVG_R:
-                rejections.append({"symbol": symbol, "gate": "avgRMultiple", "value": m.get("avgRMultiple", 0.0)})
-                continue
-            if m["maxDrawdownPct"] > MAX_DD_PCT:
-                rejections.append({"symbol": symbol, "gate": "drawdown", "value": m["maxDrawdownPct"]})
-                continue
-            # Risk/reward: return must meaningfully exceed drawdown (Calmar-like).
-            ret_dd = m["roiPercentage"] / max(m["maxDrawdownPct"], 0.5)
-            if ret_dd < MIN_RETURN_DD_RATIO:
-                rejections.append({"symbol": symbol, "gate": "return/DD", "value": round(ret_dd, 2)})
-                continue
-
-            # Gate 2 — out-of-sample: mean fold ROI must be positive and enough
-            # folds profitable. Optionally also demand the strict low-variance flag.
-            wf = _walk_forward(strategy, df)
-            wf_ok = wf["meanOosRoi"] > 0 and wf["pctProfitableFolds"] >= MIN_PROFITABLE_FOLDS
-            if WF_REQUIRE_CONSISTENT:
-                wf_ok = wf_ok and wf["consistent"]
-            if not wf_ok:
-                rejections.append({"symbol": symbol, "gate": "walk-forward", "value": wf})
-                continue
-
-            # Gate 3 — distribution (Monte-Carlo): majority of bootstrapped paths
-            # must be profitable (worst-case p5 ROI kept for reporting).
-            mc = _monte_carlo(strategy, df)
-            if not mc["ok"] or mc["probabilityOfProfit"] is None or mc["probabilityOfProfit"] < MC_MIN_PROB:
-                rejections.append({"symbol": symbol, "gate": "monte-carlo", "value": mc})
+            # The one live rule (selection_rule.py): the same checks the roster and the
+            # Set Live warning use. It replaced this endpoint's own gates on 2026-11-23,
+            # which let through cells the roster rule refused, and the other way round.
+            missed = selection_rule.misses(m, bucket, passes_luck)
+            if missed:
+                rejections.append({"symbol": symbol, "gate": "live rule", "detail": "; ".join(missed)})
                 continue
 
             candidates.append({
@@ -292,14 +214,13 @@ def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: 
                 "maxDrawdownPct": m["maxDrawdownPct"],
                 "returnDdRatio": round(m["roiPercentage"] / max(m["maxDrawdownPct"], 0.5), 2),
                 "trades": m["totalTrades"],
-                "oosProfitableFolds": wf["pctProfitableFolds"],
-                "mcP5Roi": mc["p5Roi"],
-                "mcProbProfit": mc["probabilityOfProfit"],
                 "_metrics": m,  # full metrics, persisted as a BacktestReport for the pick
             })
 
+        # Every cell that meets the rule is picked: the rule is the filter, not a
+        # "best three per strategy" cut.
         candidates.sort(key=lambda x: x["score"], reverse=True)
-        picks = candidates[:top_n]
+        picks = candidates
         for p in picks:
             all_picks.append((p["stockId"], sname, timeframe, p["_metrics"]))
 
@@ -310,8 +231,7 @@ def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: 
             "passedGates": len(candidates),
             "picked": [{k: p[k] for k in (
                 "symbol", "score", "avgRMultiple", "roiPercentage", "winRate", "profitFactor",
-                "maxDrawdownPct", "returnDdRatio", "trades", "oosProfitableFolds",
-                "mcP5Roi", "mcProbProfit",
+                "maxDrawdownPct", "returnDdRatio", "trades",
             )} for p in picks],
             "rejectedSample": rejections[:8],
         })
@@ -350,25 +270,19 @@ def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: 
         "skipped": skipped,  # picks already active, left untouched
         "dryRun": req.dryRun,
         "clearedExisting": req.clearExisting and not req.dryRun,
-        "gates": {
-            "minTrades": MIN_TRADES,
-            "minRoiPct": MIN_ROI,
-            "minAvgRMultiple": MIN_AVG_R,
-            "minProfitFactor": MIN_PROFIT_FACTOR,
-            "maxDrawdownPct": MAX_DD_PCT,
-            "minReturnDdRatio": MIN_RETURN_DD_RATIO,
-            "minProfitableFoldsPct": MIN_PROFITABLE_FOLDS,
-            "walkForwardRequireConsistent": WF_REQUIRE_CONSISTENT,
-            "monteCarloMinProbProfitPct": MC_MIN_PROB,
-            "rankedBy": "netAvgRMultiple",
-            "denylistSize": len(DENYLIST),
-            "topNPerStrategy": top_n,
+        "rule": {
+            "minAvgR": rules.min_avg_r,
+            "minTradesIntraday": rules.min_trades_intraday,
+            "minTradesSwing": rules.min_trades_swing,
+            "minProfitFactor": rules.min_profit_factor,
+            "minProfitToDrawdown": rules.min_profit_to_drawdown,
+            "minRoiPct": rules.min_roi_pct,
+            "bothHalvesPositive": True,
+            "swingStrategyMustPassLuckTest": lucky is not None,
         },
         "summary": summary,
         "disclaimer": (
-            "Picks passed in-sample quality (positive ROI, profit factor, drawdown "
-            "cap) + positive out-of-sample walk-forward ROI + a majority-profitable "
-            "Monte-Carlo distribution. This stacks the odds but is not a guarantee — "
-            "past performance does not assure future returns."
+            "Every pick meets the live rule on its backtest after costs. That earns a place "
+            "on the roster; only the cell's own paper trades keep it there."
         ),
     }

@@ -71,6 +71,26 @@ trades that average above +0.05R, provided its fund is back above ₹5,000.
 
 Proven takes time. At a few trades a week, a cell needs months to reach 40 trades.
 
+## 4b. What it takes to go live (paper)
+
+One rule decides whether a stock and strategy pair is good enough to start paper trading.
+On its backtest, after costs, it needs all of:
+
+1. an average per trade above +0.10R;
+2. a profit in both halves of its history, so it is not one lucky stretch;
+3. enough trades: 30 for intraday, 10 for swing;
+4. a profit factor of 1.5 or more (total won ÷ total lost);
+5. a profit at least twice its worst drawdown;
+6. a total return of at least 10% of the fund;
+7. for swing: a strategy that passes the luck check.
+
+The same rule is used by Auto-select, by the roster, and by the Set Live button, which
+tells you what a row misses and asks before putting it live anyway. Each strategy's result
+page lists the stocks that meet the rule first.
+
+Passing the rule only earns a place. From then on the pair's own paper trades decide
+(section 4).
+
 ## 5. The screens
 
 **Dashboard.** The stock list with live prices. Click a stock for its chart, its

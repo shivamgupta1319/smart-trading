@@ -7,6 +7,7 @@
     "RISK_PER_TRADE_PCT is a FRACTION (0.02 = 2%), never 2. It is taken of what a trade may deploy: the cell fund times its leverage. So an intraday trade (5x) may risk 2% of 50,000 = 1,000 rupees and a swing trade (1x) 2% of 10,000 = 200.",
     "MAX_COST_TO_RISK: a trade is skipped when its round-trip cost (charges + slippage both ways) is more than this share of the rupees it risks. 0 turns the rule off.",
     "LIFECYCLE_PAUSE_FUND_FLOOR_PCT: a cell is paused when its fund (starting fund plus the result of all its closed trades) has fallen to this share of the starting fund. 0.5 = paused when 5,000 of the 10,000 is left.",
+    "selection: the one rule that decides whether a cell's BACKTEST is good enough to go live (paper). Used by auto-select, by the roster and by the warning on the Set Live button. All of: average per trade above SELECT_MIN_AVG_R; positive in both halves of its history; at least SELECT_MIN_TRADES_INTRADAY or _SWING trades; profit factor at least SELECT_MIN_PROFIT_FACTOR; net profit at least SELECT_MIN_PROFIT_TO_DRAWDOWN times the worst drawdown; total return at least SELECT_MIN_ROI_PCT percent of the fund; and, for swing, the strategy passes the first luck test.",
     "lifecycle: when a cell (one stock with one strategy) is paused, resumed or marked proven. Judged on its closed paper trades after costs, in R (profit or loss divided by the rupees risked).",
     "Slippage per share, each side, is the larger of TICK_SIZE (the smallest price step, in rupees) and BT_SLIPPAGE_BPS basis points of the price. For a cheap stock one tick is more than 5 basis points; for an expensive one it is less."
   ],
@@ -33,6 +34,14 @@
     "BT_DP_CHARGE_PER_DELIVERY_SELL": 14.75,
     "BT_SLIPPAGE_BPS": 5,
     "TICK_SIZE": 0.05
+  },
+  "selection": {
+    "SELECT_MIN_AVG_R": 0.10,
+    "SELECT_MIN_TRADES_INTRADAY": 30,
+    "SELECT_MIN_TRADES_SWING": 10,
+    "SELECT_MIN_PROFIT_FACTOR": 1.5,
+    "SELECT_MIN_PROFIT_TO_DRAWDOWN": 2,
+    "SELECT_MIN_ROI_PCT": 10
   },
   "lifecycle": {
     "LIFECYCLE_WINDOW_TRADES": 20,

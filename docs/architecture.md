@@ -243,6 +243,16 @@ condition before any switching rule is trusted.
   live scanner).
 `python tools/check_data.py` reports on every stock and refreshes the flags.
 
+**The live rule.** `apps/engine/selection_rule.py` is the one rule that decides whether a
+cell's backtest is good enough to go live (paper). On the backtest after costs: average per
+trade above +0.10R; positive in both halves; at least 30 trades (intraday) or 10 (swing);
+profit factor of 1.5; net profit at least twice the worst drawdown; total return of at least
+10% of the fund; and, for swing, a strategy that passes the first luck test. Thresholds are in
+`config/trading.json` under `selection`. Auto-select adds every cell that passes;
+`run-strategy-all-stocks` returns each row's verdict and what it misses; the Set Live button
+asks before putting a failing row live. A passing backtest only earns a place on the roster:
+the cell's own paper trades decide whether it stays.
+
 **Luck check.** `apps/engine/luck_check.py` backtests every strategy on every active stock,
 pools each strategy's trades and works out the chance its result is luck, corrected for the
 number tested, plus a stricter test against every try on record

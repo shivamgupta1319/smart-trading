@@ -64,12 +64,11 @@ export function Backtesting() {
 
   const runAutoSelect = async () => {
     const ok = window.confirm(
-      'Auto-select first pulls the latest candles for your stocks (full history for newly added ones, ' +
-        'incremental top-up for the rest), then backtests every strategy against every stock, runs ' +
-        'walk-forward + Monte-Carlo on survivors, and ADDS the top picks to your active ' +
-        '(stock × strategy) configs. Your existing selections are kept, and any pick already active is ' +
-        'skipped. This can take several minutes. Continue?',
+      'Auto-select gets the latest prices, backtests every strategy on every stock, and ADDS every pair ' +
+        'that meets the live rule to the roster. Pairs already on the roster are left as they are; ' +
+        'nothing is removed. It takes a few minutes and runs in the background. Continue?',
     );
+
     if (!ok) return;
     setAutoRunning(true);
     setAutoError(null);
@@ -159,7 +158,7 @@ export function Backtesting() {
 
       {(autoRunning || autoResult || autoError) && (
         <div className="card animate-fade-in-up" style={{ padding: '1.5rem', marginBottom: '2rem', borderTop: '4px solid var(--cyan)' }}>
-          <h2 className="card-title" style={{ marginTop: 0 }}>✨ Auto-select (strict, quality-first)</h2>
+          <h2 className="card-title" style={{ marginTop: 0 }}>Auto-select: every pair that meets the live rule</h2>
           {autoRunning && (
             <p className="page-subtitle" style={{ marginTop: 0 }} role="status">
               <strong style={{ color: 'var(--text-primary)' }}>{autoStage || 'Starting'}.</strong>{' '}
@@ -180,17 +179,19 @@ export function Backtesting() {
                 {typeof autoResult.skipped === 'number' && autoResult.skipped > 0 && (
                   <> (skipped <strong>{autoResult.skipped}</strong> already active)</>
                 )}
-                . Gates: ≥{autoResult.gates?.minTrades} trades,
-                ROI&gt;{autoResult.gates?.minRoiPct}%, PF≥{autoResult.gates?.minProfitFactor}, DD≤{autoResult.gates?.maxDrawdownPct}%,
-                walk-forward consistent, positive Monte-Carlo p5.
+                . Every pick meets the live rule: average per trade above +{autoResult.rule?.minAvgR}R, positive in
+                both halves, at least {autoResult.rule?.minTradesSwing} trades ({autoResult.rule?.minTradesIntraday}{' '}
+                for intraday), profit factor {autoResult.rule?.minProfitFactor}, profit at least{' '}
+                {autoResult.rule?.minProfitToDrawdown} times the worst drawdown and a total return of{' '}
+                {autoResult.rule?.minRoiPct}%.
               </p>
               <div className="table-container">
                 <table className="data-table">
                   <thead>
                     <tr>
                       <th>Strategy</th>
-                      <th>Picks (top by risk-adj score)</th>
-                      <th style={{ textAlign: 'right' }}>Passed gates</th>
+                      <th>Stocks that meet the rule</th>
+                      <th style={{ textAlign: 'right' }}>Count</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -214,7 +215,7 @@ export function Backtesting() {
               </div>
               {(autoResult.summary || []).every((s: any) => !s.picked?.length) && (
                 <p style={{ color: 'var(--text-secondary)' }}>
-                  No (stock × strategy) cell passed the strict gates. Ensure history is fetched for your stocks, or loosen the gates.
+                  No stock and strategy pair meets the live rule right now.
                 </p>
               )}
             </>
