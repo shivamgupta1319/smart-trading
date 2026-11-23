@@ -276,6 +276,10 @@ ALTER TABLE "Stock" ADD COLUMN IF NOT EXISTS "tradedValueCr" DOUBLE PRECISION;
 ALTER TABLE "Stock" ADD COLUMN IF NOT EXISTS "dayRangePct" DOUBLE PRECISION;
 ALTER TABLE "Stock" ADD COLUMN IF NOT EXISTS "lastClose" DOUBLE PRECISION;
 
+-- BacktestReport: average R of each half of the trades, for the live rule. Safe to run twice.
+ALTER TABLE "BacktestReport" ADD COLUMN IF NOT EXISTS "rFirstHalf" DOUBLE PRECISION;
+ALTER TABLE "BacktestReport" ADD COLUMN IF NOT EXISTS "rSecondHalf" DOUBLE PRECISION;
+
 -- One stored luck check per run (apps/engine/luck_check.py). Safe to run twice.
 CREATE TABLE IF NOT EXISTS "LuckCheckRun" (
     "id" SERIAL NOT NULL,

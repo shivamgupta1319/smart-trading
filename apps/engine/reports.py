@@ -18,9 +18,9 @@ _UPSERT = text("""
     INSERT INTO "BacktestReport"
       ("stockId", "strategyName", "timeframe", "winRate", "totalTrades",
        "maxDrawdown", "netProfit", "roiPercentage", "avgRMultiple", "profitFactor",
-       "maxDrawdownPct", "expectancy", "spanYears", "engineVersion",
+       "maxDrawdownPct", "expectancy", "spanYears", "rFirstHalf", "rSecondHalf", "engineVersion",
        "createdAt", "updatedAt")
-    VALUES (:sid, :sn, :tf, :wr, :tt, :md, :np, :roi, :ar, :pf, :mdp, :ex, :sy, :ev,
+    VALUES (:sid, :sn, :tf, :wr, :tt, :md, :np, :roi, :ar, :pf, :mdp, :ex, :sy, :h1, :h2, :ev,
             NOW(), NOW())
     ON CONFLICT ("stockId", "strategyName", "timeframe") DO UPDATE SET
       "winRate"        = EXCLUDED."winRate",
@@ -33,6 +33,8 @@ _UPSERT = text("""
       "maxDrawdownPct" = EXCLUDED."maxDrawdownPct",
       "expectancy"     = EXCLUDED."expectancy",
       "spanYears"      = EXCLUDED."spanYears",
+      "rFirstHalf"     = EXCLUDED."rFirstHalf",
+      "rSecondHalf"    = EXCLUDED."rSecondHalf",
       "engineVersion"  = EXCLUDED."engineVersion",
       "updatedAt"      = NOW()
 """)
@@ -72,5 +74,7 @@ def save_report(conn, stock_id: int, strategy_name: str, timeframe: str, metrics
         "mdp": _f(metrics, "maxDrawdownPct"),
         "ex": _f(metrics, "expectancy"),
         "sy": _f(metrics, "spanYears"),
+        "h1": _f(metrics, "rFirstHalf"),
+        "h2": _f(metrics, "rSecondHalf"),
         "ev": ENGINE_VERSION,
     })

@@ -122,9 +122,11 @@ def prior_trials(conn, seed_path: Path | None = None) -> dict[tuple[str, str], f
     return trials
 
 
-def collect_r(conn) -> tuple[dict[str, list[float]], dict[str, int], int]:
-    """Every strategy on every active stock: (R of each trade by strategy, cells by strategy,
-    number of stocks). A cell that fails is skipped; one bad cell must not stop the run."""
+def collect_r(conn, reports: list | None = None) -> tuple[dict[str, list[float]], dict[str, int], int]:
+    """Every strategy on every stock it is tested on: (R of each trade by strategy, cells by
+    strategy, number of stocks). A cell that fails is skipped; one bad cell must not stop
+    the run. When `reports` is a list, each cell's metrics are appended to it as
+    (stock id, strategy, timeframe, metrics) so the caller can store them."""
     import universe  # here, not at the top: universe imports nothing from this module
 
     stocks = universe.active_stocks(conn)
@@ -135,12 +137,16 @@ def collect_r(conn) -> tuple[dict[str, list[float]], dict[str, int], int]:
         wanted = universe.timeframes_for(on_intraday_list, sorted(set(STRATEGY_TIMEFRAMES.values())))
         frames = {tf: back_adjust(load_candles(conn, stock_id, tf), symbol) for tf in wanted}
         for name, strategy in STRATEGY_REGISTRY.items():
-            df = frames.get(STRATEGY_TIMEFRAMES.get(name, "1D"), pd.DataFrame())
+            tf = STRATEGY_TIMEFRAMES.get(name, "1D")
+            df = frames.get(tf, pd.DataFrame())
             if df.empty:
                 continue
             try:
-                r_by_strategy.setdefault(name, []).extend(strategy.simulate(df.copy())["r_trades"])
+                sim = strategy.simulate(df.copy())
+                r_by_strategy.setdefault(name, []).extend(sim["r_trades"])
                 cells[name] = cells.get(name, 0) + 1
+                if reports is not None:
+                    reports.append((stock_id, name, tf, strategy.metrics_from(sim, df)))
             except Exception as exc:
                 print(f"  [luck check] {symbol} {name}: {type(exc).__name__}: {exc}"[:200])
     return r_by_strategy, cells, len(stocks)
@@ -164,10 +170,16 @@ def run_and_store() -> dict | None:
     if not _running.acquire(blocking=False):
         return None
     try:
+        reports: list = []
         with engine.connect() as conn:
-            r_by_strategy, cells, n_stocks = collect_r(conn)
+            r_by_strategy, cells, n_stocks = collect_r(conn, reports)
             rows, trials = build_run(r_by_strategy, cells, prior_trials(conn))
         with engine.begin() as conn:
+            # Every cell's backtest is stored too, so the strategy map and the Scorecard
+            # read figures from the same daily run.
+            from reports import save_report
+            for stock_id, name, tf, metrics in reports:
+                save_report(conn, stock_id, name, tf, metrics)
             conn.execute(text(
                 'INSERT INTO "LuckCheckRun" ("engineVersion", stocks, trials, rows) '
                 'VALUES (:v, :s, :t, CAST(:r AS jsonb))'

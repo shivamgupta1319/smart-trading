@@ -115,7 +115,11 @@ class BaseStrategy(ABC):
         trade_from: bar position before which signals are ignored. The earlier bars
         are still fed to the strategy so its indicators are warmed up (walk-forward).
         """
-        sim = self.simulate(df, trade_from=trade_from)
+        return self.metrics_from(self.simulate(df, trade_from=trade_from), df)
+
+    def metrics_from(self, sim: dict, df: pd.DataFrame) -> dict:
+        """The metrics of a finished simulation. Split from run_backtest so a caller that
+        also needs the per-trade list (the luck check) simulates once, not twice."""
         m = self._metrics(
             sim["net_trades"], sim["gross_trades"], sim["total_costs"],
             sim["max_dd"], sim["max_dd_pct"], sim["skipped_invalid"],

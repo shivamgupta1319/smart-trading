@@ -107,6 +107,13 @@ export class EngineController {
     return response.data;
   }
 
+  /** Where each strategy works: across most stocks, on particular stocks, or nowhere. */
+  @Get('strategy-map')
+  async strategyMap() {
+    const response = await this.http.get(`/api/engine/strategy-map`);
+    return response.data;
+  }
+
   /** Recompute the luck check on stored candles. About a minute, so a long timeout. */
   @Post('luck-check/run')
   async runLuckCheck() {
