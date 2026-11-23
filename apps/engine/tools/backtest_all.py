@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backtest_config import ENGINE_VERSION  # noqa: E402
 from data_checks import back_adjust, unexplained_jumps  # noqa: E402
 from db.client import engine  # noqa: E402
+import universe  # noqa: E402
 from luck_check import load_candles as load, strategy_table  # noqa: E402,F401  (strategy_table is imported from here by tests)
 from research_trials import Trial, TrialsLedger  # noqa: E402
 from strategies import STRATEGY_REGISTRY, STRATEGY_TIMEFRAMES, STRATEGY_HOLD_DURATIONS  # noqa: E402
@@ -100,12 +101,13 @@ def main() -> int:
     with engine.connect() as conn:
         stocks = conn.execute(text('SELECT id, symbol FROM "Stock" WHERE "isActive" ORDER BY symbol')).fetchall()
         stocks = [s for s in stocks if not only_y or s[1].upper() in only_y]
+        intraday_list = {sym for _id, sym, on in universe.active_stocks(conn) if on}
         rows = []
         r_by_strategy: dict[str, list[float]] = {}
         cells_by_strategy: dict[str, int] = {}
         for n, (stock_id, symbol) in enumerate(stocks, 1):
             frames: dict[str, pd.DataFrame] = {}
-            for tf in sorted(set(STRATEGY_TIMEFRAMES.values())):
+            for tf in universe.timeframes_for(symbol in intraday_list, sorted(set(STRATEGY_TIMEFRAMES.values()))):
                 frames[tf] = load(conn, stock_id, tf)
             # Only moves nobody has reviewed are flagged; reviewed demergers are scaled out.
             daily = frames.get("1D", pd.DataFrame())
@@ -119,6 +121,8 @@ def main() -> int:
                        "bucket": STRATEGY_HOLD_DURATIONS.get(name), "price_jump": ";".join(jumps), "error": ""}
                 df = frames.get(tf, pd.DataFrame())
                 try:
+                    if tf != "1D" and symbol not in intraday_list:
+                        continue  # intraday strategies are tested on the intraday list only
                     if df.empty:
                         row["error"] = "no stored candles"
                     else:

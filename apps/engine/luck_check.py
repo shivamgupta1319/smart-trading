@@ -125,12 +125,15 @@ def prior_trials(conn, seed_path: Path | None = None) -> dict[tuple[str, str], f
 def collect_r(conn) -> tuple[dict[str, list[float]], dict[str, int], int]:
     """Every strategy on every active stock: (R of each trade by strategy, cells by strategy,
     number of stocks). A cell that fails is skipped; one bad cell must not stop the run."""
-    stocks = conn.execute(text('SELECT id, symbol FROM "Stock" WHERE "isActive" ORDER BY symbol')).fetchall()
+    import universe  # here, not at the top: universe imports nothing from this module
+
+    stocks = universe.active_stocks(conn)
     r_by_strategy: dict[str, list[float]] = {}
     cells: dict[str, int] = {}
-    for stock_id, symbol in stocks:
-        frames = {tf: back_adjust(load_candles(conn, stock_id, tf), symbol)
-                  for tf in sorted(set(STRATEGY_TIMEFRAMES.values()))}
+    for stock_id, symbol, on_intraday_list in stocks:
+        # Daily candles for every stock; intraday candles only for the intraday list.
+        wanted = universe.timeframes_for(on_intraday_list, sorted(set(STRATEGY_TIMEFRAMES.values())))
+        frames = {tf: back_adjust(load_candles(conn, stock_id, tf), symbol) for tf in wanted}
         for name, strategy in STRATEGY_REGISTRY.items():
             df = frames.get(STRATEGY_TIMEFRAMES.get(name, "1D"), pd.DataFrame())
             if df.empty:

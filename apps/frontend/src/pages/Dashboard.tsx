@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
@@ -9,7 +9,13 @@ interface Stock {
   id: number;
   symbol: string;
   isActive: boolean;
+  intraday?: boolean; // on the intraday list
+  sector?: string | null;
 }
+
+// Live prices are fetched only for the cards on screen, and never for more than this many:
+// the price source answers a handful of quotes a second.
+const MAX_PRICED = 80;
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -19,6 +25,11 @@ export function Dashboard() {
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
   const [marketAnalysis, setMarketAnalysis] = useState<string | null>(null);
+  // With the NIFTY 500 loaded there are hundreds of stocks. The dashboard opens on the
+  // ones in use: on the intraday list, or with a pair on the roster.
+  const [view, setView] = useState<'inUse' | 'all'>('inUse');
+  const [query, setQuery] = useState('');
+  const [rosterSymbols, setRosterSymbols] = useState<Set<string>>(new Set());
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
 
   const showMessage = (type: string, text: string) => {
@@ -73,25 +84,51 @@ export function Dashboard() {
     }
   };
 
+  const inUse = useMemo(
+    () => stocks.filter((s) => s.intraday || rosterSymbols.has(s.symbol)),
+    [stocks, rosterSymbols],
+  );
+  const shown = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    const base = view === 'inUse' ? inUse : stocks;
+    return q ? base.filter((s) => s.symbol.includes(q) || (s.sector ?? '').toUpperCase().includes(q)) : base;
+  }, [view, query, inUse, stocks]);
+  const priced = shown.length <= MAX_PRICED;
+  // The 30-second refresh must price whatever is on screen at that moment.
+  const shownRef = useRef<Stock[]>([]);
+  shownRef.current = priced ? shown : [];
+
   useEffect(() => {
     fetchMarketAnalysis();
-    fetchStocks().then(fetchLivePrices);
+    fetchStocks();
+    axios
+      .get(`${API}/api/configs`)
+      .then((r) => setRosterSymbols(new Set((r.data || []).map((c: any) => c.stock?.symbol ?? c.symbol).filter(Boolean))))
+      .catch(() => setRosterSymbols(new Set()));
 
     const intervalId = setInterval(async () => {
-      const currentStocks = await fetchStocks();
-      fetchLivePrices(currentStocks);
+      await fetchStocks();
+      fetchLivePrices(shownRef.current);
     }, 30000);
 
     return () => clearInterval(intervalId);
   }, []);
+
+  // Price the cards on screen whenever the list on screen changes.
+  const shownKey = priced ? shown.map((s) => s.symbol).join(',') : '';
+  useEffect(() => {
+    if (shownKey) fetchLivePrices(shownRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the symbols shown
+  }, [shownKey]);
 
   const handleAddStock = async (symbol: string) => {
     try {
       await axios.post(`${API}/api/stocks`, { symbol });
       setIsModalOpen(false);
       showMessage('success', `✓ ${symbol} added successfully`);
-      const updated = await fetchStocks();
-      fetchLivePrices(updated);
+      await fetchStocks();
+      setView('all');
+      setQuery(symbol.toUpperCase());
     } catch (e: any) {
       showMessage('error', e.response?.data?.message || 'Failed to add stock');
     }
@@ -173,8 +210,48 @@ export function Dashboard() {
         )}
       </div>
 
+      <div className="sc-toolbar">
+        <div className="sc-filters" role="group" aria-label="Which stocks to show">
+          <button className={`sc-chip ${view === 'inUse' ? 'on' : ''}`} aria-pressed={view === 'inUse'} onClick={() => setView('inUse')}>
+            In use <span className="sc-chip-count mono">{inUse.length}</span>
+          </button>
+          <button className={`sc-chip ${view === 'all' ? 'on' : ''}`} aria-pressed={view === 'all'} onClick={() => setView('all')}>
+            All stocks <span className="sc-chip-count mono">{stocks.length}</span>
+          </button>
+        </div>
+        <label className="sc-field">
+          <span className="sc-field-label">Find a stock or sector</span>
+          <input
+            className="form-input"
+            style={{ minHeight: 44, fontSize: '1rem', minWidth: '12rem' }}
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="e.g. TATA or Banking"
+          />
+        </label>
+      </div>
+      <p className="page-subtitle" style={{ marginTop: 0, marginBottom: '1rem' }}>
+        {view === 'inUse'
+          ? 'Stocks on the intraday list or with a pair on the roster.'
+          : 'Every stock being tested. Daily candles for all; intraday candles for the intraday list.'}
+        {!priced && ` Live prices are shown for up to ${MAX_PRICED} stocks at a time: search to narrow the list.`}
+      </p>
+
+      {shown.length === 0 && (
+        <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+            {stocks.length === 0
+              ? 'No stocks yet. Add one to start.'
+              : query
+                ? `No stock matches "${query}" in this view.`
+                : 'No stock is in use yet. Open "All stocks" to see everything being tested.'}
+          </p>
+        </div>
+      )}
+
       <div className="grid-3">
-        {stocks.map(stock => {
+        {shown.map(stock => {
           const priceData = livePrices[stock.symbol];
           const price = priceData ? (typeof priceData === 'object' ? (priceData as any).price : priceData) : priceData;
           return (

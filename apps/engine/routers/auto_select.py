@@ -132,8 +132,11 @@ def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: 
     strategy_names = req.strategies or list(STRATEGY_REGISTRY.keys())
     strategy_names = [s for s in strategy_names if s in STRATEGY_REGISTRY]
 
+    import universe
     with engine.connect() as conn:
-        stocks = conn.execute(text('SELECT id, symbol FROM "Stock"')).fetchall()
+        listed = universe.active_stocks(conn)          # (id, symbol, on the intraday list)
+    stocks = [(sid, symbol) for sid, symbol, _on in listed]
+    intraday_list = {symbol for _sid, symbol, on in listed if on}
 
     # Refresh data first so backtests run on the latest candles. Only the
     # timeframes the selected strategies actually use are pulled. New stocks
@@ -148,7 +151,7 @@ def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: 
         for n, (_sid, symbol) in enumerate(stocks):
             progress("Getting the latest prices", n, len(stocks))
             try:
-                fetch_and_store(symbol, timeframes_needed)
+                fetch_and_store(symbol, universe.timeframes_for(symbol in intraday_list, timeframes_needed))
                 refreshed += 1
             except Exception:
                 continue
@@ -174,6 +177,8 @@ def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: 
         candidates, rejections = [], []
 
         for stock_id, symbol in stocks:
+            if timeframe != "1D" and symbol not in intraday_list:
+                continue  # intraday strategies run on the intraday list only
             if f"{symbol}|{sname}" in DENYLIST:
                 continue  # denylisted cell
             try:
