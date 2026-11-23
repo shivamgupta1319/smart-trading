@@ -7,7 +7,11 @@ all ask this module. The thresholds are in config/trading.json under "selection"
 A cell passes when ALL of these hold, on its backtest after costs:
   1. average per trade above +0.10R;
   2. positive in both halves of its history (not one lucky stretch);
-  3. enough trades: 30 intraday, 10 swing;
+  3. enough trades: 30 intraday, 10 swing, 4 for the long-hold strategies. Those signal
+     about twice per stock in five years (Golden_Cross), so with a minimum of 10 the
+     strategy with the best average could never put a single stock live. Four trades
+     on one stock prove little; it is the strategy's result across all stocks, checked
+     by the luck test, that carries the weight there;
   4. profit factor at least 1.5 (total won / total lost);
   5. net profit at least twice the worst drawdown;
   6. total return at least 10% of the fund;
@@ -31,6 +35,7 @@ class SelectionRules:
     min_avg_r: float
     min_trades_intraday: int
     min_trades_swing: int
+    min_trades_long: int
     min_profit_factor: float
     min_profit_to_drawdown: float
     min_roi_pct: float
@@ -41,6 +46,7 @@ def selection_rules() -> SelectionRules:
         min_avg_r=shared("SELECT_MIN_AVG_R"),
         min_trades_intraday=int(shared("SELECT_MIN_TRADES_INTRADAY")),
         min_trades_swing=int(shared("SELECT_MIN_TRADES_SWING")),
+        min_trades_long=int(shared("SELECT_MIN_TRADES_LONG")),
         min_profit_factor=shared("SELECT_MIN_PROFIT_FACTOR"),
         min_profit_to_drawdown=shared("SELECT_MIN_PROFIT_TO_DRAWDOWN"),
         min_roi_pct=shared("SELECT_MIN_ROI_PCT"),
@@ -61,7 +67,7 @@ def misses(metrics: dict, bucket: str | None, strategy_passes_luck: bool | None 
     out: list[str] = []
 
     trades = int(metrics.get("totalTrades") or 0)
-    need = r.min_trades_intraday if intraday else r.min_trades_swing
+    need = r.min_trades_intraday if intraday else r.min_trades_long if bucket == "LONG_POSITIONAL" else r.min_trades_swing
     if trades < need:
         out.append(f"only {trades} trades (needs {need})")
 

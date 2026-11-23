@@ -263,7 +263,7 @@ stocks tested), works on some stocks, or no stock meets the rule.
 
 **The live rule.** `apps/engine/selection_rule.py` is the one rule that decides whether a
 cell's backtest is good enough to go live (paper). On the backtest after costs: average per
-trade above +0.10R; positive in both halves; at least 30 trades (intraday) or 10 (swing);
+trade above +0.10R; positive in both halves; at least 30 trades (intraday), 10 (swing) or 4 (long-hold strategies);
 profit factor of 1.5; net profit at least twice the worst drawdown; total return of at least
 10% of the fund; and, for swing, a strategy that passes the first luck test. Thresholds are in
 `config/trading.json` under `selection`. Auto-select adds every cell that passes;

@@ -78,7 +78,8 @@ On its backtest, after costs, it needs all of:
 
 1. an average per trade above +0.10R;
 2. a profit in both halves of its history, so it is not one lucky stretch;
-3. enough trades: 30 for intraday, 10 for swing;
+3. enough trades: 30 for intraday, 10 for swing, 4 for the long-hold strategies
+   (Golden_Cross, MTF_Alignment, EMA_10_50_Cross), which signal only a few times per stock;
 4. a profit factor of 1.5 or more (total won ÷ total lost);
 5. a profit at least twice its worst drawdown;
 6. a total return of at least 10% of the fund;

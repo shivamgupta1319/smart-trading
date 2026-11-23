@@ -304,7 +304,7 @@ export function BacktestingStrategy() {
           <p className="page-subtitle" style={{ marginTop: "-1rem", marginBottom: "1.25rem", maxWidth: "75ch" }}>
             {results.filter((x) => x.selection?.passes).length} of {results.length} stocks meet the live rule
             for this strategy; they are listed first. The rule: average per trade above +0.10R, positive in
-            both halves, enough trades, profit factor of 1.5, profit at least twice the worst drawdown and a
+            both halves, enough trades (30 intraday, 10 swing, 4 long-hold), profit factor of 1.5, profit at least twice the worst drawdown and a
             total return of 10%.
           </p>
           <div className="table-wrapper">
