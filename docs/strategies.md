@@ -6,23 +6,36 @@ it, and its status. Rules shared by every strategy are in [architecture.md](arch
 
 ## What is on the roster
 
-Since the evening of 2026-11-19 the roster is 100 cells, picked per cell from the backtest
-(the owner's choice, "strict per cell"). A cell is on it when its backtest average is above
-+0.10R, it is positive in both halves of its history and it has enough trades (30 intraday,
-10 swing). Intraday cells also need a profit factor of 1.3; swing cells must belong to a
-strategy that passes the first luck test.
+Since 2026-11-23 the stocks are the NIFTY 500 above ₹10 crore traded a day (471 stocks) for
+swing, and a measured list of 38 liquid, fast-moving stocks for intraday. The roster is every
+pair whose backtest meets the live rule (`apps/engine/selection_rule.py`): 359 pairs on 187
+stocks.
 
-- **Swing, 93 cells** on 38 stocks: MACD_Stoch_Confluence 17, SMA44_Pullback 17,
-  MTF_Alignment 14, Break_And_Retest 13, EMA_10_50_Cross 13, EMA200_MACD 10,
-  SuperTrend_EMA 7, Bollinger_Mean_Reversion 2. Golden_Cross has the best average but
-  trades about twice per stock in five years, so no single cell reaches 10 trades.
-- **Intraday, 7 cells**: VWAP_MACD_RSI on ADANIENT, ATGL, TMPV and VEDL; RVOL_ORB on 5PAISA;
-  Inside_Bar on COFORGE; CPR_Breakout on IFCI. Seven of 645 intraday cells passing is about
-  what chance alone would give, so these are being watched, not trusted.
+| Strategy | Pairs live | Stocks tested | Profitable on | Verdict |
+|---|---|---|---|---|
+| EMA_10_50_Cross | 82 | 448 | 299 (67%) | Works broadly |
+| MTF_Alignment | 80 | 414 | 293 (71%) | Works broadly |
+| EMA200_MACD | 46 | 429 | 280 (65%) | Works broadly |
+| SuperTrend_EMA | 15 | 431 | 259 (60%) | Works broadly |
+| SMA44_Pullback | 45 | 446 | 260 (58%) | Works on some stocks |
+| MACD_Stoch_Confluence | 43 | 460 | 260 (57%) | Works on some stocks |
+| Break_And_Retest | 31 | 447 | 256 (57%) | Works on some stocks |
+| Bollinger_Mean_Reversion | 11 | 450 | 236 (52%) | Works on some stocks |
+| Golden_Cross | 2 | 368 | 200 (54%) | Works on some stocks |
+| Intraday (RVOL_ORB, Inside_Bar, VWAP_MACD_RSI, CPR_Breakout) | 1 each | 38 | few | Works on some stocks |
 
-The list is `infra/scripts/seed-starting-roster.sql`. The strategies below that are not on
-the roster stay in the code and can be backtested; they are not paper trading. A good
-backtest row puts a cell on the roster; only its own paper trades keep it there.
+- Golden_Cross has the best average (+0.53R over 862 trades) but about two trades per stock
+  in five years, so only two stocks reach even the lower minimum of four trades.
+- Intraday: every strategy still loses on average on the new 38-stock list (−0.04R to
+  −0.17R). The four pairs that pass are about what luck alone would give.
+- The 61-stock list flattered swing. On 471 stocks the averages are lower: Golden_Cross
+  +0.86R became +0.53R and MTF_Alignment +0.58R became +0.50R. Ten swing strategies pass
+  the first luck test; none passes the stricter one.
+
+The run's figures are in `docs/agent-reports/data/2026-11-23-luck-check-nifty500.csv`; the
+list of pairs is `infra/scripts/seed-starting-roster.sql`. The tables further down this page
+are from the 61-stock runs of 2026-11-19 and are kept for comparison. A good backtest puts a
+pair on the roster; only its own paper trades keep it there.
 
 ## How to read the numbers
 

@@ -26,8 +26,8 @@ export function Dashboard() {
 
   const [marketAnalysis, setMarketAnalysis] = useState<string | null>(null);
   // With the NIFTY 500 loaded there are hundreds of stocks. The dashboard opens on the
-  // ones in use: on the intraday list, or with a pair on the roster.
-  const [view, setView] = useState<'inUse' | 'all'>('inUse');
+  // intraday list, the short list whose prices matter during the day.
+  const [view, setView] = useState<'intraday' | 'roster' | 'all'>('intraday');
   const [query, setQuery] = useState('');
   const [rosterSymbols, setRosterSymbols] = useState<Set<string>>(new Set());
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
@@ -84,15 +84,14 @@ export function Dashboard() {
     }
   };
 
-  const inUse = useMemo(
-    () => stocks.filter((s) => s.intraday || rosterSymbols.has(s.symbol)),
-    [stocks, rosterSymbols],
-  );
+  const active = useMemo(() => stocks.filter((s) => s.isActive), [stocks]);
+  const intradayList = useMemo(() => active.filter((s) => s.intraday), [active]);
+  const onRoster = useMemo(() => stocks.filter((s) => rosterSymbols.has(s.symbol)), [stocks, rosterSymbols]);
   const shown = useMemo(() => {
     const q = query.trim().toUpperCase();
-    const base = view === 'inUse' ? inUse : stocks;
+    const base = view === 'intraday' ? intradayList : view === 'roster' ? onRoster : stocks;
     return q ? base.filter((s) => s.symbol.includes(q) || (s.sector ?? '').toUpperCase().includes(q)) : base;
-  }, [view, query, inUse, stocks]);
+  }, [view, query, intradayList, onRoster, stocks]);
   const priced = shown.length <= MAX_PRICED;
   // The 30-second refresh must price whatever is on screen at that moment.
   const shownRef = useRef<Stock[]>([]);
@@ -212,8 +211,11 @@ export function Dashboard() {
 
       <div className="sc-toolbar">
         <div className="sc-filters" role="group" aria-label="Which stocks to show">
-          <button className={`sc-chip ${view === 'inUse' ? 'on' : ''}`} aria-pressed={view === 'inUse'} onClick={() => setView('inUse')}>
-            In use <span className="sc-chip-count mono">{inUse.length}</span>
+          <button className={`sc-chip ${view === 'intraday' ? 'on' : ''}`} aria-pressed={view === 'intraday'} onClick={() => setView('intraday')}>
+            Intraday list <span className="sc-chip-count mono">{intradayList.length}</span>
+          </button>
+          <button className={`sc-chip ${view === 'roster' ? 'on' : ''}`} aria-pressed={view === 'roster'} onClick={() => setView('roster')}>
+            On the roster <span className="sc-chip-count mono">{onRoster.length}</span>
           </button>
           <button className={`sc-chip ${view === 'all' ? 'on' : ''}`} aria-pressed={view === 'all'} onClick={() => setView('all')}>
             All stocks <span className="sc-chip-count mono">{stocks.length}</span>
@@ -232,9 +234,11 @@ export function Dashboard() {
         </label>
       </div>
       <p className="page-subtitle" style={{ marginTop: 0, marginBottom: '1rem' }}>
-        {view === 'inUse'
-          ? 'Stocks on the intraday list or with a pair on the roster.'
-          : 'Every stock being tested. Daily candles for all; intraday candles for the intraday list.'}
+        {view === 'intraday'
+          ? 'The stocks tested and traded intraday: liquid, and the ones that move most in a day.'
+          : view === 'roster'
+            ? 'Stocks with at least one pair paper trading.'
+            : 'Every stock in the list, including those switched off for trading too little.'}
         {!priced && ` Live prices are shown for up to ${MAX_PRICED} stocks at a time: search to narrow the list.`}
       </p>
 
@@ -245,7 +249,7 @@ export function Dashboard() {
               ? 'No stocks yet. Add one to start.'
               : query
                 ? `No stock matches "${query}" in this view.`
-                : 'No stock is in use yet. Open "All stocks" to see everything being tested.'}
+                : 'Nothing in this view yet. Open "All stocks" to see everything being tested.'}
           </p>
         </div>
       )}

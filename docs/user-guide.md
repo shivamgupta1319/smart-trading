@@ -104,8 +104,9 @@ Both lists are chosen from measured figures, not by hand. The more stocks are te
 more pairs look good by luck alone, so a pair still has to pass the live rule and then
 prove itself in paper trading.
 
-The Dashboard opens on the stocks **in use** (on the intraday list, or with a pair on the
-roster). "All stocks" and the search box show the rest.
+The Dashboard opens on the **intraday list**. "On the roster" shows every stock with a pair
+paper trading, and "All stocks" and the search box show the rest. Live prices are shown for
+up to 80 stocks at a time.
 
 ## 5. The screens
 

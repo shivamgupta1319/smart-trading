@@ -192,6 +192,7 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] One live rule everywhere (`apps/engine/selection_rule.py`, thresholds in `config/trading.json`): the roster rule gained three checks (profit factor 1.5, profit at least twice the worst drawdown, total return 10%) after the owner found cells live with a small profit and a large drawdown. Auto-select, the per-strategy result rows and the Set Live warning all use it
 - [x] Roster pruned to the cells that meet the three new checks
 - [x] Stock lists by measurement (`apps/engine/universe.py`, `tools/universe.py`): a swing list (daily candles) and an intraday list (`Stock.intraday`); the Dashboard opens on the stocks in use
-- [ ] NIFTY 500 loaded for swing, with the floor on value traded and the intraday list re-chosen
+- [x] NIFTY 500 loaded for swing (471 stocks above ₹10 crore a day); intraday list re-chosen by measurement (38 stocks); long-hold strategies need 4 trades; roster rebuilt from the rule: 359 pairs on 187 stocks (4 intraday, 355 swing)
+- [x] Scanner reuses daily candles for 30 minutes (a few hundred swing pairs made every pass re-download the same history); Dashboard has three views (intraday list, on the roster, all)
 - [x] "Where each strategy works" on the Backtesting page (`strategy_map.py`): broad, some stocks, or nowhere, with a per-stock lookup; the daily luck check stores every cell's backtest
 
