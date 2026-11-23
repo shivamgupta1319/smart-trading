@@ -253,6 +253,14 @@ candles (`Stock.tradedValueCr`, `dayRangePct`, `lastClose`), set by `tools/unive
 (`add`, `fetch-daily`, `measure`, `floor`, `intraday`). The scheduler, the luck check,
 auto-select, the backtest tool and the per-strategy results all read the lists from there.
 
+**Strategy map.** `apps/engine/strategy_map.py` answers "where does each strategy work?"
+from the stored backtest of every cell. The daily luck check now stores every cell's
+backtest (`BacktestReport`, with the average R of each half), so the map, the Scorecard and
+the luck check read the same run. Per strategy: stocks tested, stocks profitable, the stocks
+that meet the live rule, and a verdict: works broadly (profitable on 60% or more of the
+stocks tested), works on some stocks, or no stock meets the rule.
+`GET /api/engine/strategy-map`; shown on the Backtesting page with a per-stock lookup.
+
 **The live rule.** `apps/engine/selection_rule.py` is the one rule that decides whether a
 cell's backtest is good enough to go live (paper). On the backtest after costs: average per
 trade above +0.10R; positive in both halves; at least 30 trades (intraday) or 10 (swing);

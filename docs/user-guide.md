@@ -132,6 +132,11 @@ result is luck. With many strategies tested together some always look good by ch
 a good row is a reason to watch a strategy, not proof. It refreshes each trading day
 after the close.
 
+Below it, "Where each strategy works" shows, for every strategy, how many stocks it was
+tested on, how many it was profitable on, and which stocks meet the live rule. A strategy
+that is profitable on most stocks has a general edge; one that passes on a few may only
+have been lucky there. Type a stock in the box to see which strategies suit it.
+
 **Builder.** Compose a strategy from indicators and backtest it.
 
 **Settings.** Stocks, strategies and app settings.

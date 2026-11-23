@@ -90,6 +90,10 @@ model BacktestReport {
   // assumed per timeframe — so ROI can be annualised honestly (1D ≈ 5.1y vs 15m/5m
   // ≈ 4.7mo made raw ROI ~13× incomparable across buckets).
   spanYears      Float?
+  // Average R of the first and of the second half of the trades. The live rule
+  // (apps/engine/selection_rule.py) needs both to be positive.
+  rFirstHalf     Float?
+  rSecondHalf    Float?
   // Engine model version that produced these numbers. Bumped when the fill/exit
   // model changes (e.g. C3), so stored reports that won't reproduce are identifiable.
   engineVersion String  @default("unversioned")

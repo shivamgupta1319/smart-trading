@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API } from '../config';
 import { LuckCheck } from '../components/LuckCheck';
+import { StrategyMap } from '../components/StrategyMap';
 
 interface Strategy {
   name: string;
@@ -155,6 +156,8 @@ export function Backtesting() {
       </div>
 
       <LuckCheck />
+
+      <StrategyMap />
 
       {(autoRunning || autoResult || autoError) && (
         <div className="card animate-fade-in-up" style={{ padding: '1.5rem', marginBottom: '2rem', borderTop: '4px solid var(--cyan)' }}>

@@ -2,6 +2,7 @@
 from fastapi import APIRouter, HTTPException
 
 import luck_check
+import strategy_map
 
 router = APIRouter()
 
@@ -10,6 +11,12 @@ router = APIRouter()
 def get_luck_check():
     """The latest stored run, or {"run": null} when none has been computed yet."""
     return {"run": luck_check.latest()}
+
+
+@router.get("/strategy-map")
+def get_strategy_map():
+    """Where each strategy works: broadly, on particular stocks, or nowhere."""
+    return strategy_map.latest()
 
 
 @router.post("/luck-check/run")

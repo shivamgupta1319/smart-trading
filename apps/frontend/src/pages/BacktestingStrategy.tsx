@@ -344,7 +344,7 @@ export function BacktestingStrategy() {
                     <td style={{ textAlign: "right" }}>
                       {r.metrics.totalTrades}
                     </td>
-                    <td style={{ textAlign: "right" }}>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       <span
                         className={
                           r.metrics.netProfit >= 0 ? "positive" : "negative"

@@ -193,5 +193,5 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Roster pruned to the cells that meet the three new checks
 - [x] Stock lists by measurement (`apps/engine/universe.py`, `tools/universe.py`): a swing list (daily candles) and an intraday list (`Stock.intraday`); the Dashboard opens on the stocks in use
 - [ ] NIFTY 500 loaded for swing, with the floor on value traded and the intraday list re-chosen
-- [ ] A page showing which strategies work across most stocks and which only on particular ones
+- [x] "Where each strategy works" on the Backtesting page (`strategy_map.py`): broad, some stocks, or nowhere, with a per-stock lookup; the daily luck check stores every cell's backtest
 
