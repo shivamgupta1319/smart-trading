@@ -243,6 +243,16 @@ condition before any switching rule is trusted.
   live scanner).
 `python tools/check_data.py` reports on every stock and refreshes the flags.
 
+**Stock lists.** `apps/engine/universe.py` defines who is tested for what. Every active
+stock is on the swing list and gets daily candles. Stocks with `Stock.intraday` set are also
+on the intraday list: only they get 5- and 15-minute candles, and only on them are intraday
+strategies tested and traded. Since 2026-11-23 the swing list is the NIFTY 500
+(`config/universe/`) above a floor on the value traded per day; the intraday list is the
+liquid stocks that move the most in a day. Both come from measurements of stored daily
+candles (`Stock.tradedValueCr`, `dayRangePct`, `lastClose`), set by `tools/universe.py`
+(`add`, `fetch-daily`, `measure`, `floor`, `intraday`). The scheduler, the luck check,
+auto-select, the backtest tool and the per-strategy results all read the lists from there.
+
 **The live rule.** `apps/engine/selection_rule.py` is the one rule that decides whether a
 cell's backtest is good enough to go live (paper). On the backtest after costs: average per
 trade above +0.10R; positive in both halves; at least 30 trades (intraday) or 10 (swing);

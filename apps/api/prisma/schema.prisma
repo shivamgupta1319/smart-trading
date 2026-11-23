@@ -32,6 +32,14 @@ model Stock {
   // Dhan's NSE_EQ security id for this stock (from Dhan's scrip master). Needed before any
   // cell on this stock can be switched on for real money.
   dhanSecurityId String?
+  // On the intraday list: 5- and 15-minute candles are fetched and intraday strategies are
+  // tested and may trade here. Every active stock is on the swing list (daily candles).
+  // Chosen by measurement: see apps/engine/universe.py.
+  intraday       Boolean  @default(false)
+  // Measured from the last 60 daily candles by apps/engine/universe.py.
+  tradedValueCr  Float? // median value traded per day, in crore rupees
+  dayRangePct    Float? // median (high - low) / close of a day, in percent
+  lastClose      Float?
   createdAt    DateTime             @default(now())
 
   historicalData      HistoricalData[]

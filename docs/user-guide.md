@@ -91,6 +91,21 @@ page lists the stocks that meet the rule first.
 Passing the rule only earns a place. From then on the pair's own paper trades decide
 (section 4).
 
+## 4c. Which stocks are tested
+
+- **Swing:** the NIFTY 500, minus stocks that trade too little each day for a backtest
+  price to be believable. Daily prices only.
+- **Intraday:** a short list of liquid stocks that move the most in a day, because intraday
+  only pays where the move is large against the costs. Only these get 5- and 15-minute
+  prices.
+
+Both lists are chosen from measured figures, not by hand. The more stocks are tested, the
+more pairs look good by luck alone, so a pair still has to pass the live rule and then
+prove itself in paper trading.
+
+The Dashboard opens on the stocks **in use** (on the intraday list, or with a pair on the
+roster). "All stocks" and the search box show the rest.
+
 ## 5. The screens
 
 **Dashboard.** The stock list with live prices. Click a stock for its chart, its

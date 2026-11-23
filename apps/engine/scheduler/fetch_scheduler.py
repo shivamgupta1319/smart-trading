@@ -39,23 +39,28 @@ CHECK_INTERVAL = 60  # seconds between clock checks
 
 
 def active_stocks():
+    """[(symbol, timeframes to fetch)]: daily candles for every active stock, intraday
+    candles only for the stocks on the intraday list (see universe.py)."""
+    import universe
+
     with engine.connect() as conn:
-        rows = conn.execute(
-            text('SELECT symbol FROM "Stock" WHERE "isActive" = true ORDER BY symbol ASC')
-        ).fetchall()
-    return [r[0] for r in rows]
+        rows = universe.active_stocks(conn)
+    return [(symbol, universe.timeframes_for(on_list, TIMEFRAMES)) for _id, symbol, on_list in rows]
 
 
 def run_fetch(reason: str):
     symbols = active_stocks()
     now = datetime.now(IST)
+    on_list = sum(1 for _s, tfs in symbols if len(tfs) > 1)
     print(f"\n[{now:%Y-%m-%d %H:%M:%S} IST] 📥 Fetch run ({reason}) — "
-          f"{len(symbols)} active stocks, timeframes {TIMEFRAMES}")
+          f"{len(symbols)} active stocks ({on_list} on the intraday list), timeframes {TIMEFRAMES}")
     ok = 0
     total_rows = 0
-    for sym in symbols:
+    for sym, timeframes in symbols:
+        if not timeframes:
+            continue
         try:
-            res = fetch_and_store(sym, TIMEFRAMES)
+            res = fetch_and_store(sym, timeframes)
             if "results" in res:
                 rows = sum(v.get("rows", 0) for v in res["results"].values())
                 total_rows += rows

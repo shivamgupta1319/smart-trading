@@ -155,8 +155,10 @@ def run_strategy_all_stocks(req: RunStrategyAllStocksRequest):
     strategy = STRATEGY_REGISTRY[req.strategy]
     timeframe = req.timeframe or getattr(strategy, 'timeframe', '1D')
 
+    # Active stocks; an intraday strategy only on the intraday list (universe.py).
+    import universe
     with engine.connect() as conn:
-        stocks = conn.execute(text('SELECT id, symbol FROM "Stock"')).fetchall()
+        stocks = universe.stocks_for(conn, req.strategy)
 
     # Whether each row meets the one live rule (selection_rule.py), and what it misses.
     bucket = STRATEGY_HOLD_DURATIONS.get(req.strategy)
