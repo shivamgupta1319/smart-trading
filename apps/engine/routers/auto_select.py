@@ -279,6 +279,7 @@ def run_auto_select(req: AutoSelectRequest, progress=lambda stage, done, total: 
             "minAvgR": rules.min_avg_r,
             "minTradesIntraday": rules.min_trades_intraday,
             "minTradesSwing": rules.min_trades_swing,
+            "minTradesLong": rules.min_trades_long,
             "minProfitFactor": rules.min_profit_factor,
             "minProfitToDrawdown": rules.min_profit_to_drawdown,
             "minRoiPct": rules.min_roi_pct,

@@ -34,7 +34,7 @@ def test_the_cell_that_exposed_the_hole_is_refused():
 
 
 def test_each_check_on_its_own():
-    one = lambda **over: rule.misses(cell(**over), "LONG_POSITIONAL", True)
+    one = lambda **over: rule.misses(cell(**over), "MID_SWING", True)
     assert any("only 9 trades (needs 10)" in m for m in one(totalTrades=9))
     assert any("average per trade +0.10R" in m for m in one(avgRMultiple=0.10))      # must be ABOVE
     assert any("second half" in m for m in one(rSecondHalf=-0.02))
@@ -48,6 +48,14 @@ def test_each_check_on_its_own():
     assert any("it lost money" in m for m in one(netProfit=-50.0, roiPercentage=-0.5))
     # No drawdown at all is not a failure.
     assert one(maxDrawdown=0.0) == []
+
+
+def test_long_hold_strategies_need_four_trades_not_ten():
+    # Golden_Cross signals about twice per stock in five years.
+    assert rule.misses(cell(totalTrades=4), "LONG_POSITIONAL", True) == []
+    assert any("only 3 trades (needs 4)" in m for m in rule.misses(cell(totalTrades=3), "LONG_POSITIONAL", True))
+    assert any("needs 10" in m for m in rule.misses(cell(totalTrades=9), "MID_SWING", True))
+    assert any("needs 10" in m for m in rule.misses(cell(totalTrades=9), "SHORT_SWING", True))
 
 
 def test_intraday_needs_thirty_trades_and_is_not_asked_about_the_luck_test():

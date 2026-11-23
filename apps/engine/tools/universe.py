@@ -9,7 +9,7 @@
         Work out value traded per day and daily range for every active stock and store them.
   python tools/universe.py floor --min-cr 20 [--apply]
         Switch off stocks that trade less than the floor (never one with a cell on the roster).
-  python tools/universe.py intraday --top 30 --min-cr 100 --min-price 50 --max-price 5000 [--apply]
+  python tools/universe.py intraday --top 30 --min-cr 100 --min-price 50 --max-price 5000 [--keep A,B] [--apply]
         Choose the intraday list by measurement. A stock with an intraday cell on the
         roster always stays on it.
 
@@ -137,11 +137,13 @@ def cmd_intraday(args) -> int:
         rows, must = _stored(conn), _roster(conn, intraday_only=True)
         chosen = universe.pick_intraday(rows, args.top, args.min_cr, args.min_price, args.max_price)
         names = {r["symbol"] for r in chosen}
-        final = names | must
+        keep = {k.strip().upper() for k in args.keep.split(",") if k.strip()} & {r["symbol"] for r in rows}
+        final = names | must | keep
         print(f"{'stock':12} {'range %':>8} {'Rs cr/day':>10} {'price':>9}")
         for r in chosen:
             print(f"{r['symbol']:12} {r['day_range_pct']:8.2f} {r['traded_value_cr']:10.0f} {r['last_close']:9.2f}")
         print(f"kept because they have an intraday cell on the roster: {', '.join(sorted(must - names)) or 'none'}")
+        print(f"kept by name (--keep): {', '.join(sorted(keep - names - must)) or 'none'}")
         now_on = {r["symbol"] for r in rows if r["intraday"]}
         print(f"joining the list: {', '.join(sorted(final - now_on)) or 'none'}")
         print(f"leaving the list: {', '.join(sorted(now_on - final)) or 'none'}")
@@ -162,6 +164,7 @@ def main() -> int:
     i = sub.add_parser("intraday")
     i.add_argument("--top", type=int, default=30); i.add_argument("--min-cr", type=float, default=100)
     i.add_argument("--min-price", type=float, default=50); i.add_argument("--max-price", type=float, default=5000)
+    i.add_argument("--keep", default="", help="comma-separated stocks to keep on the list whatever they measure")
     i.add_argument("--apply", action="store_true"); i.set_defaults(fn=cmd_intraday)
     args = ap.parse_args()
     return args.fn(args)

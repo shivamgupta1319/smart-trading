@@ -184,7 +184,7 @@ export function Backtesting() {
                 )}
                 . Every pick meets the live rule: average per trade above +{autoResult.rule?.minAvgR}R, positive in
                 both halves, at least {autoResult.rule?.minTradesSwing} trades ({autoResult.rule?.minTradesIntraday}{' '}
-                for intraday), profit factor {autoResult.rule?.minProfitFactor}, profit at least{' '}
+                for intraday, {autoResult.rule?.minTradesLong} for long-hold strategies), profit factor {autoResult.rule?.minProfitFactor}, profit at least{' '}
                 {autoResult.rule?.minProfitToDrawdown} times the worst drawdown and a total return of{' '}
                 {autoResult.rule?.minRoiPct}%.
               </p>
