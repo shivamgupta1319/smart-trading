@@ -202,4 +202,29 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Exchange holidays: on 24 November 2026 (a holiday) the scanner opened four paper trades at the previous day's prices, because it only knew weekdays. It now asks a maintained exchange calendar and also requires a fresh index candle from today (`market_calendar.py`). The navbar shows "HOLIDAY"
 - [x] Market-condition switching, stage B: rule table from the backtest (`switch_rules.py`, `SwitchRule`), every new trade stamped (`Trade.switchApproved`), switch-approved book on the Portfolio, rule table on the Backtesting page. Nothing is blocked yet
 - [ ] Stage C: a weekly or monthly report on whether the switch-approved book is ahead, and what to change
+- [x] Exchange-holiday trades removed (four trades opened on 24 November at the previous day's prices)
+- [x] New strategies researched before building: Trend_Pullback rejected (all eight variants lose after costs); momentum basket plausible but unproven. Both written up in `docs/strategies.md`
+
+## Parked by the owner (2026-11-24): no new strategies for now
+
+The owner's decision: stop adding strategies until the ones already paper trading have
+proved themselves. There are 28 strategies and 359 pairs on the roster; let the paper
+record decide first.
+
+What to come back to, and when:
+
+- **When:** once pairs start reaching Proven on the Scorecard (40 trades, average above
+  +0.10R, profit factor 1.3, both halves positive), or after about three months of paper
+  trading, whichever comes first. Look at the Scorecard, the switch-approved total on the
+  Portfolio and the Friday Telegram summary before deciding.
+- **Momentum basket:** the design is ready and the research is in `docs/strategies.md`
+  ("Researched, not yet built"). Up to 20 stocks at ₹10,000 each, picked monthly from the 200
+  most traded by their rise over the past 12 months, sold when they leave the top 40, with a
+  NIFTY 200-day filter shown beside it. It needs its own basket engine; the July rebuild's
+  code is in `docs/archive/july-rebuild/`. Its backtest cannot prove it, because the stock
+  list is today's index members.
+- **Not worth revisiting:** quick swing trades with a small target (delivery costs take
+  about 0.09R a trade), and more intraday strategies at ₹10,000 a pair.
+- **Still to build when there is data:** the periodic report on whether the switch-approved
+  book is ahead of the main book (stage C of market-condition switching).
 
