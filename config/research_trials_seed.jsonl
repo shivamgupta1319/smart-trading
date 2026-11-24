@@ -90,3 +90,12 @@
 {"instrument_set": "455 stocks", "n_obs": 9380, "sharpe": -0.1477, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;stop 3.0"}
 {"instrument_set": "455 stocks", "n_obs": 10878, "sharpe": -0.1629, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;hold 3"}
 {"instrument_set": "455 stocks", "n_obs": 9835, "sharpe": -0.0792, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;hold 8"}
+{"instrument_set": "448 stocks (today's NIFTY 500)", "n_obs": 323, "sharpe": 0.2309, "strategy": "Momentum_Basket", "timestamp": "2026-11-24T12:10:00+00:00", "variant": "12-month, top 20, strict"}
+{"instrument_set": "448 stocks (today's NIFTY 500)", "n_obs": 182, "sharpe": 0.2601, "strategy": "Momentum_Basket", "timestamp": "2026-11-24T12:10:00+00:00", "variant": "12-month, top 20, keep while top 40"}
+{"instrument_set": "448 stocks (today's NIFTY 500)", "n_obs": 166, "sharpe": 0.2602, "strategy": "Momentum_Basket", "timestamp": "2026-11-24T12:10:00+00:00", "variant": "+ out when NIFTY under 200-day"}
+{"instrument_set": "448 stocks (today's NIFTY 500)", "n_obs": 338, "sharpe": 0.2463, "strategy": "Momentum_Basket", "timestamp": "2026-11-24T12:10:00+00:00", "variant": "6-month, top 20, keep while top 40"}
+{"instrument_set": "448 stocks (today's NIFTY 500)", "n_obs": 889, "sharpe": 0.2145, "strategy": "Momentum_Basket", "timestamp": "2026-11-24T12:10:00+00:00", "variant": "CONTROL: random 20 from the same list"}
+{"instrument_set": "most traded at the time", "n_obs": 52, "sharpe": 0.3092, "strategy": "Momentum_Basket", "timestamp": "2026-11-24T12:30:00+00:00", "variant": "monthly excess over the list; most traded 200, 12-month, top 20"}
+{"instrument_set": "most traded at the time", "n_obs": 58, "sharpe": 0.1352, "strategy": "Momentum_Basket", "timestamp": "2026-11-24T12:30:00+00:00", "variant": "monthly excess over the list; most traded 200, 6-month, top 20"}
+{"instrument_set": "most traded at the time", "n_obs": 52, "sharpe": 0.1761, "strategy": "Momentum_Basket", "timestamp": "2026-11-24T12:30:00+00:00", "variant": "monthly excess over the list; most traded 100, 12-month, top 20"}
+{"instrument_set": "most traded at the time", "n_obs": 52, "sharpe": 0.2316, "strategy": "Momentum_Basket", "timestamp": "2026-11-24T12:30:00+00:00", "variant": "monthly excess over the list; most traded 300, 12-month, top 20"}
