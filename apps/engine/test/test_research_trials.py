@@ -141,4 +141,7 @@ def test_the_seed_file_of_tries_is_shipped_and_readable():
 
     seed = TrialsLedger(luck_check._seed_path()).read()
     assert len(seed) >= 84, "config/research_trials_seed.jsonl must carry the tries already on record"
-    assert all(t.strategy and t.variant.startswith("engine=") for t in seed)
+    # Every try names its strategy and its variant. A backtest of a registered strategy is
+    # tagged with the engine version; a research run describes its own variant in words.
+    assert all(t.strategy and t.variant for t in seed)
+    assert all(t.variant.startswith("engine=") for t in seed if t.strategy not in ("Momentum_Basket",))

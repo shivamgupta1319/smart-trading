@@ -164,6 +164,71 @@ that is Phase 4.
 | BB_Squeeze | Mid | Close above the upper band coming out of a squeeze | −0.10 | +0.02 / −0.19 | the second app 1 trade | Testing (fixed) |
 | Episodic_Pivot | Mid | Breaks above the range formed after a 5% gap up | −0.26 | −0.46 / −0.17 | the second app 1 trade | Testing |
 
+## Tried and rejected
+
+### Trend_Pullback (2026-11-24): not added
+
+The idea: the swing strategies on the roster all buy strength, so add one that buys a sharp
+dip in an uptrending stock and sells the bounce within days, to earn in flat markets.
+Rule tested on daily candles: close above the 200-day average, 2-day RSI falls below a
+threshold (first day only); stop and target set in multiples of the 14-day ATR; sold after
+a set number of days. 455 stocks, about 5.5 years, after costs.
+
+| Variant | Trades | Average | Wins | First half / second half |
+|---|---|---|---|---|
+| base rsi<10 stop2.0 tgt1.5 hold5 | 10,369 | -0.08R | 51% | -0.03R / -0.12R |
+| rsi<5 | 5,816 | -0.07R | 51% | -0.03R / -0.11R |
+| rsi<15 | 13,643 | -0.09R | 50% | -0.03R / -0.14R |
+| target 1.0 | 10,652 | -0.10R | 58% | -0.06R / -0.13R |
+| target 2.0 | 10,258 | -0.07R | 47% | -0.02R / -0.12R |
+| stop 3.0 | 9,380 | -0.07R | 50% | -0.04R / -0.10R |
+| hold 3 | 10,878 | -0.10R | 46% | -0.06R / -0.13R |
+| hold 8 | 9,835 | -0.06R | 55% | -0.00R / -0.12R |
+
+Every variant loses, is worse in the second half, and is weakest in flat markets (about
+−0.10R), the opposite of what it was for. The reason is costs: buying and selling shares
+for delivery costs about 0.35% of the position with slippage, and against a stop of two
+ATRs that is roughly 0.09R on every trade. A quick trade with a small target cannot carry
+that. Before costs the average is about zero.
+
+What this rules out more widely: any swing idea with a small target and a hold of a few
+days. The eight variants are recorded in the trials ledger, so the luck check counts them.
+
+## Researched, not yet built
+
+### Momentum basket (2026-11-24)
+
+The idea: once a month hold the 20 stocks that rose most over the past year, replacing the
+ones that fall out of the top 40. It trades rarely, so costs are about 1.3% a year.
+
+**The first test was worthless, and why.** On today's NIFTY 500 the basket made 215% to 378%
+in 4.4 years. But simply buying every stock of that list in June 2022 and holding made
+about 299% on average, against 61% for the NIFTY. Today's index members are the stocks that
+grew enough to be in it, so anything tested on that list looks brilliant. Five positions
+(TARIL, CUPID and similar) made about half the basket's profit.
+
+**A fairer test.** Each month the basket may pick only from the stocks that were already
+among the most traded at that time, and it is compared with holding all of those same
+stocks. Monthly, equal weight, before costs, 52 months:
+
+| Picks from | Basket a year | All of those stocks | The 20 weakest | Basket ahead by | Worst fall: basket / all |
+|---|---|---|---|---|---|
+| 200 most traded, 12-month | 39.7% | 23.0% | 16.1% | 1.24% a month (t 2.2) | 34% / 22% |
+| 300 most traded, 12-month | 39.9% | 25.6% | 16.8% | 1.10% a month (t 1.7) | 35% / 22% |
+| 100 most traded, 12-month | 27.8% | 19.8% | 14.2% | 0.72% a month (t 1.3) | 33% / 22% |
+| 200 most traded, 6-month | 22.4% | 15.9% | 13.6% | 0.62% a month (t 1.0) | 32% / 22% |
+
+What it says: the order is the one momentum predicts (strongest above the average above the
+weakest) in every variant, and the 12-month version is ahead in about 60% of months. What it
+does not say: that this is proven. It is 52 months, the edge is about twice as large in the
+first half as in the second, 2025 was behind, the falls are deeper than the list's, and the
+list still leaves out every stock that dropped out of the index, which flatters all three
+columns. Sitting out while the NIFTY is under its 200-day average cut the worst fall to
+about 21% and the return to about 27% a year.
+
+Not tested here: the basket as it would run in the product. That is what paper trading it
+is for.
+
 ## Retired (2026-11)
 
 | Strategy | Why |
