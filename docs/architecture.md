@@ -229,6 +229,18 @@ reads the direction from the candles each scan already downloads and sends the l
 the signal. Nothing is blocked on them yet: they exist so results can be compared by
 condition before any switching rule is trusted.
 
+**Switching by market condition.** `apps/engine/switch_rules.py` builds a rule table from the
+backtest: every backtest trade is sorted by the NIFTY regime of the session before its entry
+(`regime_series` labels past days with the live classifier's rules), and a strategy is marked
+off in a regime where it has at least 50 trades and an average at or below zero. The table
+(`SwitchRule`) is rewritten by the daily luck-check run. When a trade is opened the API
+stamps `Trade.switchApproved` with what the table says for its strategy and regime. Nothing
+is blocked: `GET /api/trades/stats` returns `switchBook` (the main book with and without the
+trades the rules would have skipped) and the Portfolio shows it beside the main book. The
+rules are fitted on the same history they are judged on, so they earn control only if the
+switch-approved book stays ahead in paper trading. `GET /api/engine/switch-rules`; shown on
+the Backtesting page.
+
 **Data checks.** `apps/engine/data_checks.py` guards the candles everything else is built on.
 - *When candles are stored* (`routers/history.py::fetch_and_store`): rows that cannot be real
   (missing values, zero or negative prices, a high below the open or close, intraday bars

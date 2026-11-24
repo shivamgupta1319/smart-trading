@@ -280,6 +280,20 @@ ALTER TABLE "Stock" ADD COLUMN IF NOT EXISTS "lastClose" DOUBLE PRECISION;
 ALTER TABLE "BacktestReport" ADD COLUMN IF NOT EXISTS "rFirstHalf" DOUBLE PRECISION;
 ALTER TABLE "BacktestReport" ADD COLUMN IF NOT EXISTS "rSecondHalf" DOUBLE PRECISION;
 
+-- Market-condition switching (apps/engine/switch_rules.py). Safe to run twice.
+CREATE TABLE IF NOT EXISTS "SwitchRule" (
+    "id" SERIAL NOT NULL,
+    "strategyName" TEXT NOT NULL,
+    "regime" TEXT NOT NULL,
+    "trades" INTEGER NOT NULL,
+    "avgR" DOUBLE PRECISION,
+    "approved" BOOLEAN,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "SwitchRule_pkey" PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "SwitchRule_strategyName_regime_key" ON "SwitchRule"("strategyName", "regime");
+ALTER TABLE "Trade" ADD COLUMN IF NOT EXISTS "switchApproved" BOOLEAN;
+
 -- One stored luck check per run (apps/engine/luck_check.py). Safe to run twice.
 CREATE TABLE IF NOT EXISTS "LuckCheckRun" (
     "id" SERIAL NOT NULL,

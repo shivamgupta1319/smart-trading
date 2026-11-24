@@ -74,7 +74,13 @@ interface PortfolioStats {
   closedTrades: number;
   totalPnl: number;
   netPnl: number;
-  mainBook?: { trades: number; netPnl: number };
+  mainBook?: { trades: number; netPnl: number; avgR?: number | null };
+  // The main book split by what the market-condition rules said when each trade opened.
+  switchBook?: {
+    approved: { trades: number; netPnl: number; avgR: number | null };
+    switchedOff: { trades: number; netPnl: number; avgR: number | null };
+    judged: number;
+  };
   testBook?: { trades: number; netPnl: number };
   firstTradeAt?: string | null;
   investedNow: number;
@@ -625,6 +631,19 @@ export function Portfolio() {
               </span>
               <span className="sc-book-note">
                 {stats.testBook?.trades ?? 0} trades taken while a cell was paused. Kept apart from the main book.
+              </span>
+            </div>
+            <div className="sc-book">
+              <span className="sc-book-name">Switch-approved</span>
+              <span className={`sc-book-pnl mono ${(stats.switchBook?.approved.netPnl ?? 0) > 0 ? 'up' : (stats.switchBook?.approved.netPnl ?? 0) < 0 ? 'down' : 'flat'}`}>
+                {(stats.switchBook?.approved.netPnl ?? 0) < 0 ? '−' : ''}₹{Math.abs(Math.round(stats.switchBook?.approved.netPnl ?? 0)).toLocaleString('en-IN')}
+              </span>
+              <span className="sc-book-note">
+                {!stats.switchBook || stats.switchBook.judged === 0
+                  ? 'The main book without the trades the market-condition rules would have skipped. No closed trade has been judged by the rules yet.'
+                  : stats.switchBook.switchedOff.trades === 0
+                    ? `The rules have judged ${stats.switchBook.judged} closed trades and would have skipped none, so this equals the main book.`
+                    : `The main book without the ${stats.switchBook.switchedOff.trades} trades the market-condition rules would have skipped (those made ${stats.switchBook.switchedOff.netPnl < 0 ? '−' : ''}₹${Math.abs(Math.round(stats.switchBook.switchedOff.netPnl)).toLocaleString('en-IN')}). The rules get control only if this stays ahead.`}
               </span>
             </div>
             <div className="sc-book">

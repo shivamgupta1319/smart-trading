@@ -184,6 +184,10 @@ model Trade {
   marketDirectionAtEntry String?   // the day so far across the roster: UP | DOWN | FLAT
   breadthAtEntry         Float?    // % of roster stocks above their day open
   alignedWithMarket      Boolean?  // BUY in UP / SELL in DOWN = true; the reverse = false; FLAT = null
+  // What the market-condition rule table said when the trade was opened (SwitchRule):
+  // false = its strategy is switched off in that regime; true = on; null = no evidence or
+  // no regime. Nothing is blocked by it: it only decides which book the trade counts in.
+  switchApproved         Boolean?
   createdAt     DateTime  @default(now())
 
   signal        LiveSignal @relation(fields: [signalId], references: [id], onDelete: Cascade)
@@ -202,6 +206,20 @@ model SentDigest {
   sentAt    DateTime @default(now())
 
   @@unique([period, periodKey])
+}
+
+// The market-condition rule table (apps/engine/switch_rules.py): how a strategy's backtest
+// trades did in each NIFTY regime. Rewritten by the engine after each daily run.
+model SwitchRule {
+  id           Int      @id @default(autoincrement())
+  strategyName String
+  regime       String // TRENDING_UP | TRENDING_DOWN | RANGING | VOLATILE
+  trades       Int
+  avgR         Float?
+  approved     Boolean? // false = switched off there; true = on; null = too few trades to say
+  updatedAt    DateTime @default(now())
+
+  @@unique([strategyName, regime])
 }
 
 // One stored luck check (apps/engine/luck_check.py): every strategy on every active stock,

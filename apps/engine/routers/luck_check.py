@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 
 import luck_check
 import strategy_map
+import switch_rules
 
 router = APIRouter()
 
@@ -17,6 +18,12 @@ def get_luck_check():
 def get_strategy_map():
     """Where each strategy works: broadly, on particular stocks, or nowhere."""
     return strategy_map.latest()
+
+
+@router.get("/switch-rules")
+def get_switch_rules():
+    """The market-condition rule table: how each strategy did in each NIFTY regime."""
+    return switch_rules.latest()
 
 
 @router.post("/luck-check/run")
