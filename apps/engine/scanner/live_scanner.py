@@ -26,6 +26,7 @@ from strategies import STRATEGY_REGISTRY, STRATEGY_HOLD_DURATIONS
 from entry_limits import candle_length, entry_allowed, intraday_entry_time_ok, limits_for_bucket
 from live_fills import entry_geometry_ok, stop_exit_price, target_exit_price
 from data_checks import back_adjust
+from market_calendar import is_trading_day, session_is_live
 from market_condition import aligned, breadth_pct, direction_from_moves, move_from_day_open
 # Shared intraday-exit primitives — same source of truth the backtest models.
 from intraday_exits import (
@@ -126,9 +127,39 @@ trailing_state_cache = {}
 
 
 def is_market_open() -> bool:
-    now = datetime.now(IST).time()
-    weekday = datetime.now(IST).weekday()
-    return weekday < 5 and MARKET_OPEN <= now <= MARKET_CLOSE
+    """Inside the session hours of a day the exchange is trading (holidays included: see
+    market_calendar.py). Whether prices are actually moving is `market_is_live`."""
+    now = datetime.now(IST)
+    return is_trading_day(now.date()) and MARKET_OPEN <= now.time() <= MARKET_CLOSE
+
+
+# The second check: is the index actually trading right now? Asked at most once every
+# LIVE_CHECK_SECONDS; a "yes" is trusted for that long, a "no" is asked again next pass.
+LIVE_CHECK_SECONDS = 600
+_live_state = {"checked": 0.0, "live": False}
+
+
+def newest_index_candle() -> datetime | None:
+    """Time (IST, naive) of the NIFTY's newest 5-minute candle, or None."""
+    try:
+        df = yf.download("^NSEI", period="1d", interval="5m", progress=False, auto_adjust=True)
+        if df.empty:
+            return None
+        return _ist_naive(df).index[-1].to_pydatetime()
+    except Exception as e:
+        print(f"  [WARN] could not read the index to confirm the market is trading: {e}")
+        return None
+
+
+def market_is_live() -> bool:
+    """Whether the market is trading right now, from the index's newest candle. A stopped
+    feed, a special closure or a holiday the calendar does not know all read as "no"."""
+    if _live_state["live"] and time.monotonic() - _live_state["checked"] < LIVE_CHECK_SECONDS:
+        return True
+    now = datetime.now(IST).replace(tzinfo=None)
+    _live_state["live"] = session_is_live(newest_index_candle(), now)
+    _live_state["checked"] = time.monotonic()
+    return _live_state["live"]
 
 
 def get_active_configs():
@@ -712,6 +743,13 @@ def main():
         if not is_market_open():
             print("  Market is CLOSED. Sleeping 60s...")
             time.sleep(60)
+            continue
+        # A trading day by the calendar, but is anything trading? Without this an unknown
+        # holiday opens paper trades at yesterday's closing prices.
+        if not market_is_live():
+            print("  The index has no fresh candle today: the market is not trading "
+                  "(holiday, closure or a stopped price feed). Nothing opened or closed. Sleeping 120s...")
+            time.sleep(120)
             continue
 
         configs = get_active_configs()

@@ -121,6 +121,13 @@ export class EngineController {
     return response.data;
   }
 
+  /** Whether the exchange is in session now, holidays included. */
+  @Get('market-status')
+  async marketStatus() {
+    const response = await this.http.get(`/api/engine/market-status`);
+    return response.data;
+  }
+
   /** What simply holding NIFTY 50 returned since a date (for the Portfolio comparison). */
   @Get('benchmark')
   async benchmark(@Query('since') since?: string) {
