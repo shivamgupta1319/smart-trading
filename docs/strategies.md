@@ -164,6 +164,36 @@ that is Phase 4.
 | BB_Squeeze | Mid | Close above the upper band coming out of a squeeze | −0.10 | +0.02 / −0.19 | the second app 1 trade | Testing (fixed) |
 | Episodic_Pivot | Mid | Breaks above the range formed after a 5% gap up | −0.26 | −0.46 / −0.17 | the second app 1 trade | Testing |
 
+## Tried and rejected
+
+### Trend_Pullback (2026-11-24): not added
+
+The idea: the swing strategies on the roster all buy strength, so add one that buys a sharp
+dip in an uptrending stock and sells the bounce within days, to earn in flat markets.
+Rule tested on daily candles: close above the 200-day average, 2-day RSI falls below a
+threshold (first day only); stop and target set in multiples of the 14-day ATR; sold after
+a set number of days. 455 stocks, about 5.5 years, after costs.
+
+| Variant | Trades | Average | Wins | First half / second half |
+|---|---|---|---|---|
+| base rsi<10 stop2.0 tgt1.5 hold5 | 10,369 | -0.08R | 51% | -0.03R / -0.12R |
+| rsi<5 | 5,816 | -0.07R | 51% | -0.03R / -0.11R |
+| rsi<15 | 13,643 | -0.09R | 50% | -0.03R / -0.14R |
+| target 1.0 | 10,652 | -0.10R | 58% | -0.06R / -0.13R |
+| target 2.0 | 10,258 | -0.07R | 47% | -0.02R / -0.12R |
+| stop 3.0 | 9,380 | -0.07R | 50% | -0.04R / -0.10R |
+| hold 3 | 10,878 | -0.10R | 46% | -0.06R / -0.13R |
+| hold 8 | 9,835 | -0.06R | 55% | -0.00R / -0.12R |
+
+Every variant loses, is worse in the second half, and is weakest in flat markets (about
+−0.10R), the opposite of what it was for. The reason is costs: buying and selling shares
+for delivery costs about 0.35% of the position with slippage, and against a stop of two
+ATRs that is roughly 0.09R on every trade. A quick trade with a small target cannot carry
+that. Before costs the average is about zero.
+
+What this rules out more widely: any swing idea with a small target and a hold of a few
+days. The eight variants are recorded in the trials ledger, so the luck check counts them.
+
 ## Retired (2026-11)
 
 | Strategy | Why |

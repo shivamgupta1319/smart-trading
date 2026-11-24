@@ -82,3 +82,11 @@
 {"instrument_set": "61 stocks", "n_obs": 2317, "sharpe": -0.2964, "strategy": "BB_Mean_Reversion_Intraday", "timestamp": "2026-11-19T10:58:16+00:00", "variant": "engine=2026.11.19-parity2"}
 {"instrument_set": "61 stocks", "n_obs": 448, "sharpe": -0.2325, "strategy": "MACD_Zero", "timestamp": "2026-11-19T10:58:16+00:00", "variant": "engine=2026.11.19-parity2"}
 {"instrument_set": "61 stocks", "n_obs": 62, "sharpe": -0.1509, "strategy": "Episodic_Pivot", "timestamp": "2026-11-19T10:58:16+00:00", "variant": "engine=2026.11.19-parity2"}
+{"instrument_set": "455 stocks", "n_obs": 10369, "sharpe": -0.1157, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;base rsi<10 stop2.0 tgt1.5 hold5"}
+{"instrument_set": "455 stocks", "n_obs": 5816, "sharpe": -0.1045, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;rsi<5"}
+{"instrument_set": "455 stocks", "n_obs": 13643, "sharpe": -0.1328, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;rsi<15"}
+{"instrument_set": "455 stocks", "n_obs": 10652, "sharpe": -0.1604, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;target 1.0"}
+{"instrument_set": "455 stocks", "n_obs": 10258, "sharpe": -0.0957, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;target 2.0"}
+{"instrument_set": "455 stocks", "n_obs": 9380, "sharpe": -0.1477, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;stop 3.0"}
+{"instrument_set": "455 stocks", "n_obs": 10878, "sharpe": -0.1629, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;hold 3"}
+{"instrument_set": "455 stocks", "n_obs": 9835, "sharpe": -0.0792, "strategy": "Trend_Pullback", "timestamp": "2026-11-24T11:20:00+00:00", "variant": "engine=2026.11.19-risk5x;hold 8"}
