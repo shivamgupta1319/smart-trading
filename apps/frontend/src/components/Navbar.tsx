@@ -274,7 +274,24 @@ function isMarketOpen() {
 }
 
 export function Navbar() {
-  const open = isMarketOpen();
+  // The clock gives a first answer; the engine corrects it for exchange holidays.
+  const [status, setStatus] = useState<{ open: boolean; reason: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      axios
+        .get(`${API}/api/engine/market-status`)
+        .then((r) => alive && setStatus(r.data))
+        .catch(() => alive && setStatus(null));
+    load();
+    const id = setInterval(load, 5 * 60 * 1000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+  const open = status ? status.open : isMarketOpen();
+  const closedLabel = status?.reason === 'exchange holiday' ? 'HOLIDAY' : 'MARKET CLOSED';
   // Below the desktop width the links fold into a menu opened by one button.
   const [menuOpen, setMenuOpen] = useState(false);
   const { pathname } = useLocation();
@@ -378,7 +395,7 @@ export function Navbar() {
         <RegimeChip />
         <div className="market-status">
           <span className={`market-dot ${open ? "open" : ""}`}></span>
-          <span>{open ? "MARKET OPEN" : "MARKET CLOSED"}</span>
+          <span>{open ? "MARKET OPEN" : closedLabel}</span>
         </div>
       </div>
     </nav>

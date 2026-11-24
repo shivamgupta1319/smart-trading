@@ -243,6 +243,14 @@ condition before any switching rule is trusted.
   live scanner).
 `python tools/check_data.py` reports on every stock and refreshes the flags.
 
+**Trading days.** `apps/engine/market_calendar.py` decides whether the exchange is trading.
+`is_trading_day` asks a maintained exchange calendar (the `exchange_calendars` package,
+calendar XBOM, which keeps NSE's equity holidays and hours); `session_is_live` requires the
+NIFTY's newest 5-minute candle to be from today and under 30 minutes old. The scanner opens
+and manages trades only when both say yes. The second check covers a holiday the calendar
+does not know yet (it knows about a year ahead) and a stopped price feed.
+`GET /api/engine/market-status` feeds the navbar chip.
+
 **Stock lists.** `apps/engine/universe.py` defines who is tested for what. Every active
 stock is on the swing list and gets daily candles. Stocks with `Stock.intraday` set are also
 on the intraday list: only they get 5- and 15-minute candles, and only on them are intraday

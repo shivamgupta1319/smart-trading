@@ -196,3 +196,9 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 - [x] Scanner reuses daily candles for 30 minutes (a few hundred swing pairs made every pass re-download the same history); Dashboard has three views (intraday list, on the roster, all)
 - [x] "Where each strategy works" on the Backtesting page (`strategy_map.py`): broad, some stocks, or nowhere, with a per-stock lookup; the daily luck check stores every cell's backtest
 
+## 2026-11-24
+
+- [x] Dashboard header and AI card fit a phone; the three Dashboard views checked in a browser
+- [x] Exchange holidays: on 24 November 2026 (a holiday) the scanner opened four paper trades at the previous day's prices, because it only knew weekdays. It now asks a maintained exchange calendar and also requires a fresh index candle from today (`market_calendar.py`). The navbar shows "HOLIDAY"
+- [ ] Market-condition switching: rule table from the backtest, each trade stamped, switch-approved book beside all trades (in progress)
+

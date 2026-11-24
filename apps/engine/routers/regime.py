@@ -92,6 +92,21 @@ def _load_yf(symbol: str, is_index: bool) -> pd.DataFrame:
     return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
 
+@router.get("/market-status")
+def market_status():
+    """Whether the exchange is in session now, holidays included (for the navbar chip)."""
+    from datetime import datetime, time as dtime
+    import pytz
+    from market_calendar import is_trading_day
+
+    now = datetime.now(pytz.timezone("Asia/Kolkata"))
+    trading_day = is_trading_day(now.date())
+    in_hours = dtime(9, 15) <= now.time() <= dtime(15, 30)
+    reason = "open" if trading_day and in_hours else "outside market hours" if trading_day else (
+        "weekend" if now.weekday() >= 5 else "exchange holiday")
+    return {"open": trading_day and in_hours, "tradingDay": trading_day, "reason": reason, "date": now.date().isoformat()}
+
+
 @router.get("/regime")
 def market_regime():
     """Overall NIFTY-50 market regime."""
