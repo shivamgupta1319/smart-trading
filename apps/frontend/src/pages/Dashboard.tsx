@@ -164,23 +164,24 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <div>
+      <div className="page-header" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div style={{ minWidth: 0 }}>
           <h1 className="page-title">Trading <span>Dashboard</span></h1>
           <p className="page-subtitle">Monitor live prices and manage your portfolio</p>
         </div>
         <button 
           onClick={() => setIsModalOpen(true)}
           className="btn btn-primary"
+          style={{ minHeight: 44 }}
         >
           <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
           <span>Add Stock</span>
         </button>
       </div>
 
-      <div className="card" style={{ marginBottom: '2rem', padding: '2rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      <div className="card" style={{ marginBottom: '2rem', padding: 'clamp(1rem, 4vw, 2rem)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
             <h2 className="card-title" style={{ margin: 0, fontSize: '1.2rem', color: 'var(--cyan)' }}>AI Market Intelligence</h2>
             <span className="badge badge-active" style={{ fontSize: '0.7rem' }}>Nifty 50</span>
           </div>
@@ -188,6 +189,7 @@ export function Dashboard() {
             onClick={() => fetchMarketAnalysis(true)} 
             disabled={loadingAnalysis}
             className="btn btn-secondary btn-sm"
+            style={{ minHeight: 44 }}
           >
             {loadingAnalysis ? 'Refreshing...' : 'Refresh Analysis'}
           </button>
