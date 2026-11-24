@@ -200,5 +200,6 @@ router (`apps/engine/ai_client.py`); the direct OpenRouter and Gemini calls are 
 
 - [x] Dashboard header and AI card fit a phone; the three Dashboard views checked in a browser
 - [x] Exchange holidays: on 24 November 2026 (a holiday) the scanner opened four paper trades at the previous day's prices, because it only knew weekdays. It now asks a maintained exchange calendar and also requires a fresh index candle from today (`market_calendar.py`). The navbar shows "HOLIDAY"
-- [ ] Market-condition switching: rule table from the backtest, each trade stamped, switch-approved book beside all trades (in progress)
+- [x] Market-condition switching, stage B: rule table from the backtest (`switch_rules.py`, `SwitchRule`), every new trade stamped (`Trade.switchApproved`), switch-approved book on the Portfolio, rule table on the Backtesting page. Nothing is blocked yet
+- [ ] Stage C: a weekly or monthly report on whether the switch-approved book is ahead, and what to change
 

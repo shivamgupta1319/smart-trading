@@ -202,8 +202,11 @@ flatters them. None passes the strictest luck test yet. See [strategies.md](stra
 
 ## 11. What the app does not do yet
 
-- It does not switch strategies by market condition. Every trade records the market
-  condition at entry so this can be judged later; no trade is blocked by it today.
+- It does not yet let market conditions block a trade. It works out, from the backtest,
+  which strategies lose in which kind of market (Backtesting page, "Which market suits each
+  strategy"), marks every new trade with what those rules say, and shows a
+  "Switch-approved" total on the Portfolio beside the main book. The rules take control only
+  if that total stays ahead.
 - It does not trade swing signals with real money.
 - It checks open trades about every 100 seconds, so a stop can be noticed after the
   price has moved past it. The loss is then booked at the worse price.

@@ -4,6 +4,7 @@ import axios from 'axios';
 import { API } from '../config';
 import { LuckCheck } from '../components/LuckCheck';
 import { StrategyMap } from '../components/StrategyMap';
+import { SwitchRules } from '../components/SwitchRules';
 
 interface Strategy {
   name: string;
@@ -158,6 +159,8 @@ export function Backtesting() {
       <LuckCheck />
 
       <StrategyMap />
+
+      <SwitchRules />
 
       {(autoRunning || autoResult || autoError) && (
         <div className="card animate-fade-in-up" style={{ padding: '1.5rem', marginBottom: '2rem', borderTop: '4px solid var(--cyan)' }}>

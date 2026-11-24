@@ -68,6 +68,12 @@ export class TradesService {
     const notionalOf = (t: { remainingQty: number | null; quantity: number; entryPrice: unknown }) =>
       (t.remainingQty ?? t.quantity) * toNum(t.entryPrice as never);
 
+    /** Average R of a set of trades (those with a recorded risk), or null when there is none. */
+    const avgROf = (ts: { pnl: unknown; riskAmount: unknown }[]): number | null => {
+      const rs = ts.filter((t) => riskOf(t) > 0).map((t) => pnlOf(t) / riskOf(t));
+      return rs.length ? round2(rs.reduce((a, b) => a + b, 0) / rs.length) : null;
+    };
+
     // ---- Portfolio metrics (all closed) ---------------------------------------
     const totalPnl = closedTrades.reduce((sum, t) => sum + pnlOf(t), 0);
     const wins = closedTrades.filter((t) => t.outcome === 'WIN');
@@ -245,7 +251,21 @@ export class TradesService {
       equityCurve,
       holdDurationStats,
       windowDays: windowDays || null,
-      mainBook: { trades: closedTrades.length, netPnl: round2(totalPnl) },
+      mainBook: { trades: closedTrades.length, netPnl: round2(totalPnl), avgR: avgROf(closedTrades) },
+      // The same main-book trades, split by what the market-condition rule table said when
+      // each was opened. "approved" is what the book would be with the switch in control
+      // (trades it had no evidence on count as approved); "switchedOff" is what it would
+      // have skipped. The switch earns control only if approved beats the whole main book.
+      switchBook: (() => {
+        const off = closedTrades.filter((t) => t.switchApproved === false);
+        const on = closedTrades.filter((t) => t.switchApproved !== false);
+        const sum = (ts: typeof closedTrades) => round2(ts.reduce((s, t) => s + pnlOf(t), 0));
+        return {
+          approved: { trades: on.length, netPnl: sum(on), avgR: avgROf(on) },
+          switchedOff: { trades: off.length, netPnl: sum(off), avgR: avgROf(off) },
+          judged: closedTrades.filter((t) => t.switchApproved !== null && t.switchApproved !== undefined).length,
+        };
+      })(),
       testBook: {
         trades: testBookTrades.length,
         netPnl: round2(testBookTrades.reduce((sum, t) => sum + pnlOf(t), 0)),

@@ -122,11 +122,13 @@ def prior_trials(conn, seed_path: Path | None = None) -> dict[tuple[str, str], f
     return trials
 
 
-def collect_r(conn, reports: list | None = None) -> tuple[dict[str, list[float]], dict[str, int], int]:
+def collect_r(conn, reports: list | None = None, dated: dict | None = None) -> tuple[dict[str, list[float]], dict[str, int], int]:
     """Every strategy on every stock it is tested on: (R of each trade by strategy, cells by
     strategy, number of stocks). A cell that fails is skipped; one bad cell must not stop
     the run. When `reports` is a list, each cell's metrics are appended to it as
-    (stock id, strategy, timeframe, metrics) so the caller can store them."""
+    (stock id, strategy, timeframe, metrics) so the caller can store them. When `dated` is a
+    dict, each strategy's trades are added to it as (entry timestamp, R), for the
+    market-condition rule table (switch_rules.py)."""
     import universe  # here, not at the top: universe imports nothing from this module
 
     stocks = universe.active_stocks(conn)
@@ -147,6 +149,9 @@ def collect_r(conn, reports: list | None = None) -> tuple[dict[str, list[float]]
                 cells[name] = cells.get(name, 0) + 1
                 if reports is not None:
                     reports.append((stock_id, name, tf, strategy.metrics_from(sim, df)))
+                if dated is not None:
+                    dated.setdefault(name, []).extend(
+                        (t["entry_ts"], r) for t, r in zip(sim["trade_log"], sim["r_trades"]))
             except Exception as exc:
                 print(f"  [luck check] {symbol} {name}: {type(exc).__name__}: {exc}"[:200])
     return r_by_strategy, cells, len(stocks)
@@ -171,8 +176,9 @@ def run_and_store() -> dict | None:
         return None
     try:
         reports: list = []
+        dated: dict = {}
         with engine.connect() as conn:
-            r_by_strategy, cells, n_stocks = collect_r(conn, reports)
+            r_by_strategy, cells, n_stocks = collect_r(conn, reports, dated)
             rows, trials = build_run(r_by_strategy, cells, prior_trials(conn))
         with engine.begin() as conn:
             # Every cell's backtest is stored too, so the strategy map and the Scorecard
@@ -180,6 +186,13 @@ def run_and_store() -> dict | None:
             from reports import save_report
             for stock_id, name, tf, metrics in reports:
                 save_report(conn, stock_id, name, tf, metrics)
+            # The market-condition rule table, from the same trades. It needs NIFTY's
+            # history from the price source; if that fails the old table is kept.
+            try:
+                import switch_rules
+                switch_rules.store(conn, switch_rules.build_rules(dated, switch_rules.regime_series(switch_rules.nifty_history())))
+            except Exception as exc:
+                print(f"  [luck check] market-condition rules not refreshed: {type(exc).__name__}: {exc}"[:200])
             conn.execute(text(
                 'INSERT INTO "LuckCheckRun" ("engineVersion", stocks, trials, rows) '
                 'VALUES (:v, :s, :t, CAST(:r AS jsonb))'

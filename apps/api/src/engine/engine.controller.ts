@@ -107,6 +107,13 @@ export class EngineController {
     return response.data;
   }
 
+  /** The market-condition rule table: which strategy is switched on in which regime. */
+  @Get('switch-rules')
+  async switchRules() {
+    const response = await this.http.get(`/api/engine/switch-rules`);
+    return response.data;
+  }
+
   /** Where each strategy works: across most stocks, on particular stocks, or nowhere. */
   @Get('strategy-map')
   async strategyMap() {

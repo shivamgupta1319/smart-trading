@@ -149,6 +149,15 @@ export class SignalsService {
           select: { status: true },
         });
 
+        // What the market-condition rule table says for this strategy in today's regime.
+        // It decides which book the trade is counted in; it never blocks the trade.
+        const switchRule = dto.marketRegime
+          ? await tx.switchRule.findUnique({
+              where: { strategyName_regime: { strategyName: dto.strategyName, regime: dto.marketRegime } },
+              select: { approved: true },
+            })
+          : null;
+
         const sig = await tx.liveSignal.create({
           data: {
             stockId: dto.stockId,
@@ -187,6 +196,7 @@ export class SignalsService {
             marketDirectionAtEntry: dto.marketDirection ?? null,
             breadthAtEntry: dto.marketBreadthPct ?? null,
             alignedWithMarket: dto.alignedWithMarket ?? null,
+            switchApproved: switchRule?.approved ?? null,
           },
         });
         return sig;
